@@ -80,6 +80,28 @@ class RM65Env:
         self._kp: np.ndarray | None = None
         self._kd: np.ndarray | None = None
         self._use_feedforward: bool = False  # 前馈补偿（仅位置模式生效）
+        # 雅可比缓存（set_arm_state 后首次 get_ee_* 时惰性计算）
+        self._jacp_cache: np.ndarray | None = None
+        self._jacr_cache: np.ndarray | None = None
+
+    def _ensure_jacobians(self) -> None:
+        """惰性计算并缓存球拍中心雅可比矩阵。
+
+        在 set_arm_state/reset 清除缓存后，首次调用 get_ee_jacp/jacr/vel/angular_vel 时触发。
+        后续同状态下的调用直接返回缓存，避免重复 mj_jacSite。
+        """
+        if self._jacp_cache is not None:
+            return
+        jacp = np.zeros((3, self.model.nv))
+        jacr = np.zeros((3, self.model.nv))
+        mujoco.mj_jacSite(self.model, self.data, jacp, jacr, self.racket_center_id)
+        self._jacp_cache = jacp[:, :self.NQ].copy()
+        self._jacr_cache = jacr[:, :self.NQ].copy()
+
+    def _invalidate_jacobian_cache(self) -> None:
+        """清除雅可比缓存（状态变化后调用）。"""
+        self._jacp_cache = None
+        self._jacr_cache = None
 
     def observe(self) -> tuple[np.ndarray, np.ndarray]:
         """推进观测处理管线：MuJoCo → preprocessor → KF → 缓存。
@@ -118,6 +140,7 @@ class RM65Env:
         if self._estimator is not None:
             self._estimator.reset()
         self._cached_ball_state = None
+        self._invalidate_jacobian_cache()
         return self.get_arm_state()
 
     def get_arm_state(self) -> np.ndarray:
@@ -139,6 +162,7 @@ class RM65Env:
         self.data.qpos[self.NQ: self.NQ + self.LEFT_ARM_NQ] = self.init_q_left
         self.data.qvel[self.NQ: self.NQ + self.LEFT_ARM_NQ] = 0.0
         mujoco.mj_forward(self.model, self.data)
+        self._invalidate_jacobian_cache()
 
     def update_kinematics(self) -> None:
         """轻量运动学刷新。"""
@@ -191,6 +215,7 @@ class RM65Env:
 
         mujoco.mj_step(self.model, self.data)
         self._cached_ball_state = None  # 球物理状态已变，缓存作废
+        self._invalidate_jacobian_cache()
         self._handle_ball_bounce()
         return self.get_arm_state()
 
@@ -246,12 +271,9 @@ class RM65Env:
 
     def get_ee_vel(self) -> np.ndarray:
         """获取球拍中心线速度，形状 (3,)。"""
-        jacp = np.zeros((3, self.model.nv))
-        jacr = np.zeros((3, self.model.nv))
-        mujoco.mj_jacSite(
-            self.model, self.data, jacp, jacr, self.racket_center_id
-        )
-        return (jacp[:, : self.NQ] @ self.data.qvel[: self.NQ]).copy()
+        self._ensure_jacobians()
+        assert self._jacp_cache is not None
+        return (self._jacp_cache @ self.data.qvel[: self.NQ]).copy()
 
     def get_racket_face_speed(self) -> float:
         """获取球拍面中心线速度标量 [m/s]。
@@ -267,33 +289,24 @@ class RM65Env:
 
     def get_ee_angular_vel(self) -> np.ndarray:
         """获取球拍中心角速度，形状 (3,)。"""
-        jacp = np.zeros((3, self.model.nv))
-        jacr = np.zeros((3, self.model.nv))
-        mujoco.mj_jacSite(
-            self.model, self.data, jacp, jacr, self.racket_center_id
-        )
-        return (jacr[:, : self.NQ] @ self.data.qvel[: self.NQ]).copy()
+        self._ensure_jacobians()
+        assert self._jacr_cache is not None
+        return (self._jacr_cache @ self.data.qvel[: self.NQ]).copy()
 
     def get_ee_jacp(self) -> np.ndarray:
         """获取球拍中心位置雅可比矩阵，形状 (3, 6)。"""
-        jacp = np.zeros((3, self.model.nv))
-        jacr = np.zeros((3, self.model.nv))
-        mujoco.mj_jacSite(
-            self.model, self.data, jacp, jacr, self.racket_center_id
-        )
-        return jacp[:, : self.NQ].copy()
+        self._ensure_jacobians()
+        assert self._jacp_cache is not None
+        return self._jacp_cache.copy()
 
     def get_ee_jacr(self) -> np.ndarray:
         """获取球拍中心旋转雅可比矩阵，形状 (3, 6)。
 
         返回 J_ω 满足 ω = J_ω @ q̇。
         """
-        jacp = np.zeros((3, self.model.nv))
-        jacr = np.zeros((3, self.model.nv))
-        mujoco.mj_jacSite(
-            self.model, self.data, jacp, jacr, self.racket_center_id
-        )
-        return jacr[:, : self.NQ].copy()
+        self._ensure_jacobians()
+        assert self._jacr_cache is not None
+        return self._jacr_cache.copy()
 
     def get_body_pos_by_id(self, body_id: int) -> np.ndarray:
         """获取指定刚体帧原点的世界坐标位置。
