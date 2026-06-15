@@ -21,7 +21,8 @@ bool single(
     bool use_feedforward,
     const double* torque_max,
     int ball_geom_start,
-    bool disable_collision)
+    bool disable_collision,
+    const StepCheckParams* check_params)
 {
     mjModel* m = to_model(model_ptr);
     mjData* d = to_data(data_ptr);
@@ -47,7 +48,17 @@ bool single(
     const double* Ks   = Ks_a.data();
     const double* ks   = ks_a.data();
 
+    // qdot history ring buffer for check_step (detail 3)
+    double qdot_hist[8][6];
+    int hist_count = 0;
+
     std::memcpy(X_new, X_nom, kNX * sizeof(double));
+
+    // Pre-seed qdot history with initial state
+    if (check_params) {
+        std::memcpy(qdot_hist[0], X_new + kNQ, 6 * sizeof(double));
+        hist_count = 1;
+    }
 
     for (int k = 0; k < N; ++k) {
         double dx[12];
@@ -73,7 +84,34 @@ bool single(
 
         for (int i = 0; i < kNX; ++i) {
             if (!std::isfinite(X_new[(k + 1) * kNX + i])) {
-                // Collision restore on early exit
+                if (disable_collision && ball_geom_start > 0) {
+                    std::memcpy(m->geom_contype, contype_save.data(),
+                                ball_geom_start * sizeof(int));
+                    std::memcpy(m->geom_conaffinity, conaffinity_save.data(),
+                                ball_geom_start * sizeof(int));
+                }
+                return false;
+            }
+        }
+
+        // check_step (if limits enabled)
+        if (check_params) {
+            // Push new qdot to ring buffer
+            if (hist_count >= check_params->qdd_window + 1) {
+                for (int i = 0; i < hist_count - 1; ++i)
+                    std::memcpy(qdot_hist[i], qdot_hist[i+1], 6*sizeof(double));
+                hist_count--;
+            }
+            std::memcpy(qdot_hist[hist_count],
+                       X_new + (k+1)*kNX + kNQ, 6*sizeof(double));
+            hist_count++;
+
+            StepCheckResult res = check_step(
+                X_new + k * kNX, X_new + (k+1) * kNX,
+                U_new + k * kNU,
+                &qdot_hist[0][0], hist_count,
+                *check_params);
+            if (!res.feasible) {
                 if (disable_collision && ball_geom_start > 0) {
                     std::memcpy(m->geom_contype, contype_save.data(),
                                 ball_geom_start * sizeof(int));
@@ -132,7 +170,7 @@ py::tuple linesearch(
                          model_ptr, data_ptr,
                          init_q_left, ctrl_lo, ctrl_hi, alpha,
                          actuator_mode, kp, kd, use_feedforward, torque_max,
-                         0, false);  // ball_geom_start=0, disable_collision=false (B1 placeholder)
+                         0, false, nullptr);  // no collision ctrl, no limits in linesearch
         if (!ok) continue;
 
         double cost_new;

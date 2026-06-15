@@ -208,3 +208,190 @@ class TestForwardPassEquivalence:
                                    err_msg="forward_pass X 不一致")
         np.testing.assert_allclose(U_cpp, U_py, atol=1e-10,
                                    err_msg="forward_pass U 不一致")
+
+
+# ============================================================================
+# Phase C: check_step 约束检查
+# ============================================================================
+
+try:
+    from src.cpp.iLQR_Core import check_step as cpp_check_step_raw
+    _CHECK_CPP_AVAILABLE = True
+except (ImportError, AttributeError):
+    _CHECK_CPP_AVAILABLE = False
+
+
+def _make_check_params(
+    q_lo=-3.0*np.ones(6), q_hi=3.0*np.ones(6),
+    qd_max=3.0*np.ones(6),
+    u_lo=-60.0*np.ones(6), u_hi=60.0*np.ones(6),
+    qdd_max=10.0*np.ones(6),
+    margin=1.5, fp_q_tol=0.0,
+    actuator_mode=0, qdd_window=5,
+    dt=0.005, qdd_hard_reject=False,
+) -> dict:
+    """构造 check_step 参数字典。"""
+    return {
+        "q_lo": np.asarray(q_lo, dtype=np.float64),
+        "q_hi": np.asarray(q_hi, dtype=np.float64),
+        "qd_max": np.asarray(qd_max, dtype=np.float64),
+        "u_lo": np.asarray(u_lo, dtype=np.float64),
+        "u_hi": np.asarray(u_hi, dtype=np.float64),
+        "qdd_max": np.asarray(qdd_max, dtype=np.float64),
+        "margin": margin, "fp_q_tol": fp_q_tol,
+        "actuator_mode": actuator_mode,
+        "qdd_window": qdd_window, "dt": dt,
+        "qdd_hard_reject": qdd_hard_reject,
+    }
+
+
+@pytest.mark.skipif(not _CHECK_CPP_AVAILABLE, reason="C++ check_step 未编译")
+class TestCheckStep:
+    """C1-C4: C++ check_step 约束检查。"""
+
+    def test_feasible_step(self) -> None:
+        """C1[tracer]: 满足所有约束的步返回 feasible=True。"""
+        x_prev = np.zeros(12)
+        x_next = np.zeros(12)
+        u = np.zeros(6)
+        qdot_hist = np.zeros((6, 6))
+        params = _make_check_params()
+        feasible, reason = cpp_check_step_raw(
+            x_prev, x_next, u, qdot_hist.flatten(), 1, params)
+        assert feasible, f"应可行但被拒: {reason}"
+
+    def test_q_violation(self) -> None:
+        """C2: q 超界拒绝。"""
+        x_next = np.zeros(12)
+        x_next[0] = 10.0  # 远超 q_hi=3.0
+        params = _make_check_params()
+        feasible, reason = cpp_check_step_raw(
+            np.zeros(12), x_next, np.zeros(6),
+            np.zeros(6), 0, params)
+        assert not feasible
+        assert "q" in reason.lower()
+
+    def test_qdot_braking_decel_passes(self) -> None:
+        """C3: qdot 超限但减速时通过（制动方向）。"""
+        x_prev = np.zeros(12); x_prev[6] = 6.0
+        x_next = np.zeros(12); x_next[6] = 5.0  # 减速但超限 (>3.0*1.5=4.5)
+        params = _make_check_params()
+        feasible, _ = cpp_check_step_raw(
+            x_prev, x_next, np.zeros(6),
+            np.zeros(6), 0, params)
+        assert feasible, "制动中应允许超限"
+
+    def test_qdot_accelerating_fails(self) -> None:
+        """C3: qdot 超限且加速时拒绝。"""
+        x_prev = np.zeros(12); x_prev[6] = 4.0
+        x_next = np.zeros(12); x_next[6] = 5.0  # 加速且超限
+        params = _make_check_params()
+        feasible, reason = cpp_check_step_raw(
+            x_prev, x_next, np.zeros(6),
+            np.zeros(6), 0, params)
+        assert not feasible
+        assert "qdot" in reason.lower()
+
+    def test_u_torque_mode_rejected(self) -> None:
+        """C4: 力矩模式 u 超界拒绝。"""
+        u = np.array([100.0, 0, 0, 0, 0, 0])
+        params = _make_check_params(actuator_mode=0)
+        feasible, reason = cpp_check_step_raw(
+            np.zeros(12), np.zeros(12), u,
+            np.zeros(6), 0, params)
+        assert not feasible
+        assert "u" in reason.lower()
+
+    def test_u_position_mode_skipped(self) -> None:
+        """C4: 位置模式跳过 u 检查。"""
+        u = np.array([100.0, 0, 0, 0, 0, 0])
+        params = _make_check_params(actuator_mode=1)
+        feasible, _ = cpp_check_step_raw(
+            np.zeros(12), np.zeros(12), u,
+            np.zeros(6), 0, params)
+        assert feasible, "位置模式应跳过 u 检查"
+
+    def test_qddot_hard_reject(self) -> None:
+        """C4: qddot 滑窗超限 + hard_reject 时拒绝。"""
+        # 构造历史使 qddot 很大：qdot 从 0 跳到 10 in 1 step
+        qdot_hist = np.array([
+            [0, 0, 0, 0, 0, 0],
+            [10, 0, 0, 0, 0, 0],
+        ])  # hist_len=2
+        params = _make_check_params(qdd_max=10.0, qdd_hard_reject=True)
+        # x_next 的 qdot 也需要匹配历史最后一项
+        x_next = np.zeros(12); x_next[6] = 10.0
+        x_prev = np.zeros(12); x_prev[6] = 0.0
+        feasible, reason = cpp_check_step_raw(
+            x_prev, x_next, np.zeros(6),
+            qdot_hist.flatten(), 2, params)
+        assert not feasible
+
+
+# ============================================================================
+# Phase D: forward_pass + limits 集成
+# ============================================================================
+
+@pytest.mark.skipif(not _FP_CPP_AVAILABLE, reason="C++ forward_pass 未更新")
+class TestForwardPassWithLimits:
+    """D1-D2: C++ forward_pass + limits 检查集成。"""
+
+    def test_forward_pass_feasible_limits(self) -> None:
+        """D1: 有 limits + 可行轨迹，结果与无 limits 一致。"""
+        env = _make_env()
+        X, U, Ks, ks = _make_simple_trajectory(env, N=20)
+        ctrl_lo = env.model.actuator_ctrlrange[:6, 0].copy()
+        ctrl_hi = env.model.actuator_ctrlrange[:6, 1].copy()
+        torque_max = env._torque_ctrlrange[:, 1].copy()
+        ball_geom_start = env.model.body("ball").geomadr[0]
+        Ks_flat = np.array(Ks).reshape(20, 72)
+
+        # 无 limits
+        X_nolim = np.zeros_like(X)
+        U_nolim = np.zeros_like(U)
+        ok1 = cpp_fp_single_raw(
+            X_nolim, U_nolim, X, U, Ks_flat, np.array(ks).reshape(20,6),
+            env.model._address, env.data._address, env.init_q_left,
+            ctrl_lo, ctrl_hi, 0.5, 0, None, None, False, None,
+            ball_geom_start, True)
+
+        # 有 limits（宽松到不会触发）
+        params = _make_check_params(
+            q_lo=-3*np.ones(6), q_hi=3*np.ones(6),
+            qd_max=100*np.ones(6),
+            qdd_max=1000*np.ones(6),
+        )
+        X_lim = np.zeros_like(X)
+        U_lim = np.zeros_like(U)
+        ok2 = cpp_fp_single_raw(
+            X_lim, U_lim, X, U, Ks_flat, np.array(ks).reshape(20,6),
+            env.model._address, env.data._address, env.init_q_left,
+            ctrl_lo, ctrl_hi, 0.5, 0, None, None, False, None,
+            ball_geom_start, True, params)
+
+        assert ok1 and ok2
+        np.testing.assert_allclose(X_lim, X_nolim, atol=1e-10)
+
+    def test_forward_pass_infeasible_rejects(self) -> None:
+        """D2: qdot 极低限制导致拒绝。"""
+        env = _make_env()
+        X, U, Ks, ks = _make_simple_trajectory(env, N=20)
+        ctrl_lo = env.model.actuator_ctrlrange[:6, 0].copy()
+        ctrl_hi = env.model.actuator_ctrlrange[:6, 1].copy()
+        torque_max = env._torque_ctrlrange[:, 1].copy()
+        ball_geom_start = env.model.body("ball").geomadr[0]
+        Ks_flat = np.array(Ks).reshape(20, 72)
+
+        # 极严格速度限制
+        params = _make_check_params(qd_max=0.01*np.ones(6))
+        X_new = np.zeros_like(X)
+        U_new = np.zeros_like(U)
+        contype_before = env.model.geom_contype.copy()
+        ok = cpp_fp_single_raw(
+            X_new, U_new, X, U, Ks_flat, np.array(ks).reshape(20,6),
+            env.model._address, env.data._address, env.init_q_left,
+            ctrl_lo, ctrl_hi, 0.5, 0, None, None, False, None,
+            ball_geom_start, True, params)
+        assert not ok, "极严格限制应被拒绝"
+        # 碰撞设置恢复
+        np.testing.assert_array_equal(env.model.geom_contype, contype_before)

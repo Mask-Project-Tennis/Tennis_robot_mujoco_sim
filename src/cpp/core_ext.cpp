@@ -1,6 +1,7 @@
 // pybind11 bindings for C++ accelerated iLQR hot-path
 
 #include "types.h"
+#include "cost_params.h"
 #include "linearize.cpp"
 #include "forward_pass.cpp"
 
@@ -94,7 +95,8 @@ PYBIND11_MODULE(iLQR_Core, m) {
            bool use_feedforward,
            py::object torque_max_obj,
            int ball_geom_start,
-           bool disable_collision)
+           bool disable_collision,
+           py::object check_params_obj)
         {
             const double* kp_ptr = nullptr;
             const double* kd_ptr = nullptr;
@@ -104,6 +106,36 @@ PYBIND11_MODULE(iLQR_Core, m) {
             if (!torque_max_obj.is_none())
                 torque_max_ptr = py::array_t<double>(torque_max_obj).data();
 
+            // Construct StepCheckParams if provided
+            StepCheckParams params;
+            const StepCheckParams* params_ptr = nullptr;
+            // Local scope to keep numpy array refs alive while pointers are used
+            py::object q_lo_arr, q_hi_arr, qd_max_arr, u_lo_arr, u_hi_arr, qdd_max_arr;
+            if (!check_params_obj.is_none()) {
+                py::dict cp = check_params_obj;
+                q_lo_arr = cp["q_lo"]; q_hi_arr = cp["q_hi"];
+                qd_max_arr = cp["qd_max"]; u_lo_arr = cp["u_lo"];
+                u_hi_arr = cp["u_hi"]; qdd_max_arr = cp["qdd_max"];
+
+                params.q_lo = q_lo_arr.is_none() ? nullptr :
+                              py::array_t<double>(q_lo_arr).data();
+                params.q_hi = q_hi_arr.is_none() ? nullptr :
+                              py::array_t<double>(q_hi_arr).data();
+                params.qd_max = py::array_t<double>(qd_max_arr).data();
+                params.u_lo = u_lo_arr.is_none() ? nullptr :
+                              py::array_t<double>(u_lo_arr).data();
+                params.u_hi = u_hi_arr.is_none() ? nullptr :
+                              py::array_t<double>(u_hi_arr).data();
+                params.qdd_max = py::array_t<double>(qdd_max_arr).data();
+                params.margin = py::float_(cp["margin"]);
+                params.fp_q_tol = py::float_(cp["fp_q_tol"]);
+                params.actuator_mode = py::int_(cp["actuator_mode"]);
+                params.qdd_window = py::int_(cp["qdd_window"]);
+                params.dt = py::float_(cp["dt"]);
+                params.qdd_hard_reject = py::bool_(cp["qdd_hard_reject"]);
+                params_ptr = &params;
+            }
+
             return fwd::single(
                 X_new, U_new, X_nom, U_nom, Ks, ks,
                 model_ptr, data_ptr,
@@ -111,7 +143,8 @@ PYBIND11_MODULE(iLQR_Core, m) {
                 ctrl_lo_a.data(), ctrl_hi_a.data(),
                 alpha,
                 actuator_mode, kp_ptr, kd_ptr, use_feedforward, torque_max_ptr,
-                ball_geom_start, disable_collision);
+                ball_geom_start, disable_collision,
+                params_ptr);
         },
         py::arg("X_new"), py::arg("U_new"),
         py::arg("X_nom"), py::arg("U_nom"),
@@ -126,7 +159,8 @@ PYBIND11_MODULE(iLQR_Core, m) {
         py::arg("torque_max") = py::none(),
         py::arg("ball_geom_start") = 0,
         py::arg("disable_collision") = false,
-        "Single forward pass (MPC mode, fixed alpha). Returns True if valid");
+        py::arg("check_params") = py::none(),
+        "Single forward pass (MPC mode). Returns True if valid");
 
     m.def("forward_pass_linesearch",
         [](py::array_t<double> X_nom, py::array_t<double> U_nom,
@@ -214,4 +248,41 @@ PYBIND11_MODULE(iLQR_Core, m) {
         py::arg("use_feedforward") = false,
         py::arg("torque_max") = py::none(),
         "Single sim step. x=(q,qdot) (12,), u=(6,) -> x_next (12,)");
+
+    // check_step: constraint checking for single transition
+    m.def("check_step",
+        [](py::array_t<double> x_prev_a, py::array_t<double> x_next_a,
+           py::array_t<double> u_a,
+           py::array_t<double> qdot_hist_a,
+           int hist_len,
+           py::dict params)
+        {
+            StepCheckParams p;
+            p.q_lo = params["q_lo"].is_none() ? nullptr :
+                     py::array_t<double>(params["q_lo"]).data();
+            p.q_hi = params["q_hi"].is_none() ? nullptr :
+                     py::array_t<double>(params["q_hi"]).data();
+            p.qd_max = py::array_t<double>(params["qd_max"]).data();
+            p.u_lo = params["u_lo"].is_none() ? nullptr :
+                      py::array_t<double>(params["u_lo"]).data();
+            p.u_hi = params["u_hi"].is_none() ? nullptr :
+                      py::array_t<double>(params["u_hi"]).data();
+            p.qdd_max = py::array_t<double>(params["qdd_max"]).data();
+            p.margin = py::float_(params["margin"]);
+            p.fp_q_tol = py::float_(params["fp_q_tol"]);
+            p.actuator_mode = py::int_(params["actuator_mode"]);
+            p.qdd_window = py::int_(params["qdd_window"]);
+            p.dt = py::float_(params["dt"]);
+            p.qdd_hard_reject = py::bool_(params["qdd_hard_reject"]);
+
+            StepCheckResult res = check_step(
+                x_prev_a.data(), x_next_a.data(), u_a.data(),
+                qdot_hist_a.data(), hist_len, p);
+
+            return py::make_tuple(res.feasible, std::string(res.reason));
+        },
+        py::arg("x_prev"), py::arg("x_next"), py::arg("u"),
+        py::arg("qdot_hist"), py::arg("hist_len"),
+        py::arg("params"),
+        "Check step feasibility. Returns (feasible: bool, reason: str)");
 }
