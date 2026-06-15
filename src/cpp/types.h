@@ -37,26 +37,5 @@ inline void set_arm_forward(mjModel* m, mjData* d,
     mj_forward(m, d);
 }
 
-// Single simulation step with control clipping and left arm PD
-inline void sim_step(mjModel* m, mjData* d,
-                     const double* q, const double* qdot, const double* u,
-                     const double* init_q_left,
-                     const double* ctrl_lo, const double* ctrl_hi,
-                     double* q_out, double* qdot_out) {
-    std::memcpy(d->qpos, q, kNQ * sizeof(double));
-    std::memcpy(d->qvel, qdot, kNQ * sizeof(double));
-    std::memcpy(d->qpos + kNQ, init_q_left, kNQ * sizeof(double));
-    std::memset(d->qvel + kNQ, 0, kNQ * sizeof(double));
-    // Right arm control with clipping
-    for (int i = 0; i < kNU; ++i)
-        d->ctrl[i] = clip(u[i], ctrl_lo[i], ctrl_hi[i]);
-    // Left arm PD hold (match Python env.step behavior)
-    for (int i = 0; i < kNU; ++i) {
-        double err_q = init_q_left[i] - d->qpos[kNQ + i];
-        double err_qd = -d->qvel[kNQ + i];
-        d->ctrl[kNQ + i] = clip(200.0 * err_q - 20.0 * err_qd, ctrl_lo[i], ctrl_hi[i]);
-    }
-    mj_step(m, d);
-    std::memcpy(q_out, d->qpos, kNQ * sizeof(double));
-    std::memcpy(qdot_out, d->qvel, kNQ * sizeof(double));
-}
+// sim_step moved to mujoco_utils.h (with actuator mode + FF + qfrc support)
+#include "mujoco_utils.h"

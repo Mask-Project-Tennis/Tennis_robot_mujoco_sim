@@ -6,6 +6,8 @@ namespace fwd {
 
 /// Single forward pass (MPC mode, fixed alpha=0.5)
 /// Returns true if trajectory is valid (all finite)
+/// NOTE: This is a minimal update for A1. Full rewrite (with collision disable,
+/// actuator mode, limits) comes in B1.
 bool single(
     py::array_t<double> X_new_a, py::array_t<double> U_new_a,
     py::array_t<double> X_nom_a, py::array_t<double> U_nom_a,
@@ -13,10 +15,28 @@ bool single(
     uintptr_t model_ptr, uintptr_t data_ptr,
     const double* init_q_left,
     const double* ctrl_lo, const double* ctrl_hi,
-    double alpha)
+    double alpha,
+    int actuator_mode,
+    const double* kp, const double* kd,
+    bool use_feedforward,
+    const double* torque_max,
+    int ball_geom_start,
+    bool disable_collision)
 {
     mjModel* m = to_model(model_ptr);
     mjData* d = to_data(data_ptr);
+
+    // Collision save + disable (detail 2)
+    std::vector<int> contype_save;
+    std::vector<int> conaffinity_save;
+    if (disable_collision && ball_geom_start > 0) {
+        contype_save.assign(m->geom_contype, m->geom_contype + ball_geom_start);
+        conaffinity_save.assign(m->geom_conaffinity, m->geom_conaffinity + ball_geom_start);
+        for (int i = 0; i < ball_geom_start; ++i) {
+            m->geom_contype[i] = 0;
+            m->geom_conaffinity[i] = 0;
+        }
+    }
 
     int N = static_cast<int>(U_nom_a.shape(0));
 
@@ -48,12 +68,29 @@ bool single(
                  X_new + k * kNX, X_new + k * kNX + kNQ,
                  U_new + k * kNU,
                  init_q_left, ctrl_lo, ctrl_hi,
+                 actuator_mode, kp, kd, use_feedforward, torque_max,
                  X_new + (k + 1) * kNX, X_new + (k + 1) * kNX + kNQ);
 
         for (int i = 0; i < kNX; ++i) {
-            if (!std::isfinite(X_new[(k + 1) * kNX + i]))
+            if (!std::isfinite(X_new[(k + 1) * kNX + i])) {
+                // Collision restore on early exit
+                if (disable_collision && ball_geom_start > 0) {
+                    std::memcpy(m->geom_contype, contype_save.data(),
+                                ball_geom_start * sizeof(int));
+                    std::memcpy(m->geom_conaffinity, conaffinity_save.data(),
+                                ball_geom_start * sizeof(int));
+                }
                 return false;
+            }
         }
+    }
+
+    // Collision restore
+    if (disable_collision && ball_geom_start > 0) {
+        std::memcpy(m->geom_contype, contype_save.data(),
+                    ball_geom_start * sizeof(int));
+        std::memcpy(m->geom_conaffinity, conaffinity_save.data(),
+                    ball_geom_start * sizeof(int));
     }
     return true;
 }
@@ -67,7 +104,11 @@ py::tuple linesearch(
     uintptr_t model_ptr, uintptr_t data_ptr,
     const double* init_q_left,
     const double* ctrl_lo, const double* ctrl_hi,
-    py::object cost_fn)
+    py::object cost_fn,
+    int actuator_mode,
+    const double* kp, const double* kd,
+    bool use_feedforward,
+    const double* torque_max)
 {
     int N = static_cast<int>(U_nom_a.shape(0));
     int n_alpha = static_cast<int>(alpha_list_a.size());
@@ -89,7 +130,9 @@ py::tuple linesearch(
         bool ok = single(X_tmp, U_tmp, X_nom_a, U_nom_a,
                          Ks_a, ks_a,
                          model_ptr, data_ptr,
-                         init_q_left, ctrl_lo, ctrl_hi, alpha);
+                         init_q_left, ctrl_lo, ctrl_hi, alpha,
+                         actuator_mode, kp, kd, use_feedforward, torque_max,
+                         0, false);  // ball_geom_start=0, disable_collision=false (B1 placeholder)
         if (!ok) continue;
 
         double cost_new;

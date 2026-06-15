@@ -88,14 +88,30 @@ PYBIND11_MODULE(iLQR_Core, m) {
            uintptr_t model_ptr, uintptr_t data_ptr,
            py::array_t<double> init_q_left_a,
            py::array_t<double> ctrl_lo_a, py::array_t<double> ctrl_hi_a,
-           double alpha)
+           double alpha,
+           int actuator_mode,
+           py::object kp_obj, py::object kd_obj,
+           bool use_feedforward,
+           py::object torque_max_obj,
+           int ball_geom_start,
+           bool disable_collision)
         {
+            const double* kp_ptr = nullptr;
+            const double* kd_ptr = nullptr;
+            const double* torque_max_ptr = nullptr;
+            if (!kp_obj.is_none()) kp_ptr = py::array_t<double>(kp_obj).data();
+            if (!kd_obj.is_none()) kd_ptr = py::array_t<double>(kd_obj).data();
+            if (!torque_max_obj.is_none())
+                torque_max_ptr = py::array_t<double>(torque_max_obj).data();
+
             return fwd::single(
                 X_new, U_new, X_nom, U_nom, Ks, ks,
                 model_ptr, data_ptr,
                 init_q_left_a.data(),
                 ctrl_lo_a.data(), ctrl_hi_a.data(),
-                alpha);
+                alpha,
+                actuator_mode, kp_ptr, kd_ptr, use_feedforward, torque_max_ptr,
+                ball_geom_start, disable_collision);
         },
         py::arg("X_new"), py::arg("U_new"),
         py::arg("X_nom"), py::arg("U_nom"),
@@ -104,6 +120,12 @@ PYBIND11_MODULE(iLQR_Core, m) {
         py::arg("init_q_left"),
         py::arg("ctrl_lo"), py::arg("ctrl_hi"),
         py::arg("alpha") = 0.5,
+        py::arg("actuator_mode") = 0,
+        py::arg("kp") = py::none(), py::arg("kd") = py::none(),
+        py::arg("use_feedforward") = false,
+        py::arg("torque_max") = py::none(),
+        py::arg("ball_geom_start") = 0,
+        py::arg("disable_collision") = false,
         "Single forward pass (MPC mode, fixed alpha). Returns True if valid");
 
     m.def("forward_pass_linesearch",
@@ -114,15 +136,28 @@ PYBIND11_MODULE(iLQR_Core, m) {
            uintptr_t model_ptr, uintptr_t data_ptr,
            py::array_t<double> init_q_left_a,
            py::array_t<double> ctrl_lo_a, py::array_t<double> ctrl_hi_a,
-           py::object cost_fn)
+           py::object cost_fn,
+           int actuator_mode,
+           py::object kp_obj, py::object kd_obj,
+           bool use_feedforward,
+           py::object torque_max_obj)
         {
+            const double* kp_ptr = nullptr;
+            const double* kd_ptr = nullptr;
+            const double* torque_max_ptr = nullptr;
+            if (!kp_obj.is_none()) kp_ptr = py::array_t<double>(kp_obj).data();
+            if (!kd_obj.is_none()) kd_ptr = py::array_t<double>(kd_obj).data();
+            if (!torque_max_obj.is_none())
+                torque_max_ptr = py::array_t<double>(torque_max_obj).data();
+
             return fwd::linesearch(
                 X_nom, U_nom, Ks, ks,
                 alpha_list, cost_old,
                 model_ptr, data_ptr,
                 init_q_left_a.data(),
                 ctrl_lo_a.data(), ctrl_hi_a.data(),
-                cost_fn);
+                cost_fn,
+                actuator_mode, kp_ptr, kd_ptr, use_feedforward, torque_max_ptr);
         },
         py::arg("X_nom"), py::arg("U_nom"),
         py::arg("Ks"), py::arg("ks"),
@@ -132,5 +167,51 @@ PYBIND11_MODULE(iLQR_Core, m) {
         py::arg("init_q_left"),
         py::arg("ctrl_lo"), py::arg("ctrl_hi"),
         py::arg("cost_fn"),
+        py::arg("actuator_mode") = 0,
+        py::arg("kp") = py::none(), py::arg("kd") = py::none(),
+        py::arg("use_feedforward") = false,
+        py::arg("torque_max") = py::none(),
         "Forward pass with linesearch. Returns (accepted, X_out, U_out, cost_out)");
+
+    // sim_step: single physics step (for direct testing)
+    m.def("sim_step",
+        [](py::array_t<double> x_a, py::array_t<double> u_a,
+           uintptr_t model_ptr, uintptr_t data_ptr,
+           py::array_t<double> init_q_left_a,
+           py::array_t<double> ctrl_lo_a, py::array_t<double> ctrl_hi_a,
+           int actuator_mode,
+           py::object kp_obj, py::object kd_obj,
+           bool use_feedforward,
+           py::object torque_max_obj)
+        {
+            const double* kp_ptr = nullptr;
+            const double* kd_ptr = nullptr;
+            const double* torque_max_ptr = nullptr;
+            if (!kp_obj.is_none()) kp_ptr = py::array_t<double>(kp_obj).data();
+            if (!kd_obj.is_none()) kd_ptr = py::array_t<double>(kd_obj).data();
+            if (!torque_max_obj.is_none())
+                torque_max_ptr = py::array_t<double>(torque_max_obj).data();
+
+            const double* x = x_a.data();
+            const double* u = u_a.data();
+            double x_next[12];
+            sim_step(
+                to_model(model_ptr), to_data(data_ptr),
+                x, x + kNQ, u,
+                init_q_left_a.data(),
+                ctrl_lo_a.data(), ctrl_hi_a.data(),
+                actuator_mode, kp_ptr, kd_ptr, use_feedforward, torque_max_ptr,
+                x_next, x_next + kNQ);
+
+            return py::array_t<double>(kNX, x_next);
+        },
+        py::arg("x"), py::arg("u"),
+        py::arg("model_ptr"), py::arg("data_ptr"),
+        py::arg("init_q_left"),
+        py::arg("ctrl_lo"), py::arg("ctrl_hi"),
+        py::arg("actuator_mode") = 0,
+        py::arg("kp") = py::none(), py::arg("kd") = py::none(),
+        py::arg("use_feedforward") = false,
+        py::arg("torque_max") = py::none(),
+        "Single sim step. x=(q,qdot) (12,), u=(6,) -> x_next (12,)");
 }

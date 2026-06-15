@@ -92,6 +92,7 @@ else:
             self.alpha_list = [float(a) for a in config["alpha_list"]]
             self.lin_eps = float(config["lin_eps"])
             self.use_analytical = use_analytical
+            self._ball_geom_start: int | None = None
 
         def _linearize(self, env, X, U):
             """线性化：C++ 解析 > Python 解析 > Python 有限差分。"""
@@ -215,11 +216,49 @@ else:
 
             return Ks, ks
 
+        def _get_ball_geom_start(self, env) -> int:
+            """获取球 body 的 geom 起始索引（惰性缓存）。"""
+            if self._ball_geom_start is None:
+                self._ball_geom_start = env.model.body("ball").geomadr[0]
+            return self._ball_geom_start
+
         def _forward_pass_single(self, env, cost_fn, X, U, Ks, ks, alpha=0.5,
                                  limits=None):
-            """前向传递：Python（C++版缺 collision disable，结果不一致）。"""
+            """前向传递：limits=None 时使用 C++（含碰撞禁用），否则用 Python。"""
+            if limits is None:
+                return self._forward_pass_cpp(env, X, U, Ks, ks, alpha)
             return forward_pass_single(env, cost_fn, X, U, Ks, ks, alpha,
-                                       limits=limits)
+                                        limits=limits)
+
+        def _forward_pass_cpp(self, env, X, U, Ks, ks, alpha):
+            """C++ 前向传递（含 collision disable + actuator mode）。"""
+            N = len(U)
+            X_new = np.zeros_like(X)
+            U_new = np.zeros_like(U)
+
+            actuator_mode = getattr(env, 'actuator_mode', 0)
+            kp = getattr(env, 'kp', None)
+            kd = getattr(env, 'kd', None)
+            use_ff = getattr(env, 'use_feedforward', False)
+            torque_max = env._torque_ctrlrange[:, 1]
+            ctrl_lo = env.model.actuator_ctrlrange[:env.NU, 0]
+            ctrl_hi = env.model.actuator_ctrlrange[:env.NU, 1]
+            ball_geom_start = self._get_ball_geom_start(env)
+
+            Ks_flat = np.asarray(Ks).reshape(N, 72) if not isinstance(Ks, np.ndarray) else Ks
+            ks_arr = np.asarray(ks).reshape(N, 6) if not isinstance(ks, np.ndarray) else ks
+
+            ok = cpp_forward_pass_single(
+                X_new, U_new, X, U, Ks_flat, ks_arr,
+                _get_model_ptr(env.model), _get_model_ptr(env.data),
+                env.init_q_left,
+                ctrl_lo, ctrl_hi, alpha,
+                actuator_mode, kp, kd, use_ff, torque_max,
+                ball_geom_start, True,
+            )
+            if ok:
+                return X_new, U_new, 0.0, ""
+            return None, None, float("inf"), "C++ forward_pass NaN"
 
         def _forward_pass_linesearch(
             self, env, cost_fn, X, U, Ks, ks, cost_old,
