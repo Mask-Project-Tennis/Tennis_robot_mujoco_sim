@@ -22,7 +22,8 @@ bool single(
     const double* torque_max,
     int ball_geom_start,
     bool disable_collision,
-    const StepCheckParams* check_params)
+    const StepCheckParams* check_params,
+    char* reason_out)
 {
     mjModel* m = to_model(model_ptr);
     mjData* d = to_data(data_ptr);
@@ -49,13 +50,17 @@ bool single(
     const double* ks   = ks_a.data();
 
     // qdot history ring buffer for check_step (detail 3)
-    double qdot_hist[8][6];
+    // Buffer capacity must be >= qdd_window + 1 (pre-seed 1 + sliding window)
+    constexpr int kMaxQddBuffer = 32;
+    double qdot_hist[kMaxQddBuffer][6];
     int hist_count = 0;
 
     std::memcpy(X_new, X_nom, kNX * sizeof(double));
 
     // Pre-seed qdot history with initial state
     if (check_params) {
+        assert(check_params->qdd_window + 1 <= kMaxQddBuffer
+               && "qdd_window exceeds qdot_hist buffer capacity");
         std::memcpy(qdot_hist[0], X_new + kNQ, 6 * sizeof(double));
         hist_count = 1;
     }
@@ -84,6 +89,8 @@ bool single(
 
         for (int i = 0; i < kNX; ++i) {
             if (!std::isfinite(X_new[(k + 1) * kNX + i])) {
+                if (reason_out)
+                    std::snprintf(reason_out, 128, "NaN in state at k=%d", k);
                 if (disable_collision && ball_geom_start > 0) {
                     std::memcpy(m->geom_contype, contype_save.data(),
                                 ball_geom_start * sizeof(int));
@@ -112,6 +119,8 @@ bool single(
                 &qdot_hist[0][0], hist_count,
                 *check_params);
             if (!res.feasible) {
+                if (reason_out)
+                    std::snprintf(reason_out, 128, "%s", res.reason);
                 if (disable_collision && ball_geom_start > 0) {
                     std::memcpy(m->geom_contype, contype_save.data(),
                                 ball_geom_start * sizeof(int));
@@ -170,7 +179,7 @@ py::tuple linesearch(
                          model_ptr, data_ptr,
                          init_q_left, ctrl_lo, ctrl_hi, alpha,
                          actuator_mode, kp, kd, use_feedforward, torque_max,
-                         0, false, nullptr);  // no collision ctrl, no limits in linesearch
+                         0, false, nullptr, nullptr);  // no collision, no limits, no reason in linesearch
         if (!ok) continue;
 
         double cost_new;

@@ -179,7 +179,7 @@ def _call_cpp_forward_pass(env, X, U, Ks, ks, alpha=0.5):
     ctrl_hi = env.model.actuator_ctrlrange[:env.NU, 1].copy()
     ball_geom_start = env.model.body("ball").geomadr[0]
 
-    ok = cpp_fp_single_raw(
+    ok, reason = cpp_fp_single_raw(
         X_new, U_new, X, U, Ks_flat, ks_arr,
         env.model._address, env.data._address,
         env.init_q_left,
@@ -187,7 +187,7 @@ def _call_cpp_forward_pass(env, X, U, Ks, ks, alpha=0.5):
         actuator_mode, kp, kd, use_ff, torque_max,
         ball_geom_start, True,  # disable_collision=True
     )
-    return X_new, U_new, ok
+    return X_new, U_new, ok, reason
 
 
 @pytest.mark.skipif(not _FP_CPP_AVAILABLE, reason="C++ forward_pass 未更新")
@@ -202,7 +202,7 @@ class TestForwardPassEquivalence:
         X_py, U_py, _, _ = py_forward_pass_single(
             env, None, X.copy(), U.copy(), Ks, ks, alpha=0.5)
         # C++
-        X_cpp, U_cpp, ok = _call_cpp_forward_pass(env, X, U, Ks, ks, alpha=0.5)
+        X_cpp, U_cpp, ok, _ = _call_cpp_forward_pass(env, X, U, Ks, ks, alpha=0.5)
         assert ok, "C++ forward_pass 应成功"
         np.testing.assert_allclose(X_cpp, X_py, atol=1e-10,
                                    err_msg="forward_pass X 不一致")
@@ -349,7 +349,7 @@ class TestForwardPassWithLimits:
         # 无 limits
         X_nolim = np.zeros_like(X)
         U_nolim = np.zeros_like(U)
-        ok1 = cpp_fp_single_raw(
+        ok1, _ = cpp_fp_single_raw(
             X_nolim, U_nolim, X, U, Ks_flat, np.array(ks).reshape(20,6),
             env.model._address, env.data._address, env.init_q_left,
             ctrl_lo, ctrl_hi, 0.5, 0, None, None, False, None,
@@ -363,7 +363,7 @@ class TestForwardPassWithLimits:
         )
         X_lim = np.zeros_like(X)
         U_lim = np.zeros_like(U)
-        ok2 = cpp_fp_single_raw(
+        ok2, _ = cpp_fp_single_raw(
             X_lim, U_lim, X, U, Ks_flat, np.array(ks).reshape(20,6),
             env.model._address, env.data._address, env.init_q_left,
             ctrl_lo, ctrl_hi, 0.5, 0, None, None, False, None,
@@ -387,11 +387,15 @@ class TestForwardPassWithLimits:
         X_new = np.zeros_like(X)
         U_new = np.zeros_like(U)
         contype_before = env.model.geom_contype.copy()
-        ok = cpp_fp_single_raw(
+        ok, reason = cpp_fp_single_raw(
             X_new, U_new, X, U, Ks_flat, np.array(ks).reshape(20,6),
             env.model._address, env.data._address, env.init_q_left,
             ctrl_lo, ctrl_hi, 0.5, 0, None, None, False, None,
             ball_geom_start, True, params)
         assert not ok, "极严格限制应被拒绝"
+        # reason 应含具体约束信息（非空通用消息）
+        assert len(reason) > 0, "reason 不应为空"
+        assert any(kw in reason.lower() for kw in ["qdot", "q ", "q_", "qddot", "u "]), \
+            f"reason 应含约束类型，实际: '{reason}'"
         # 碰撞设置恢复
         np.testing.assert_array_equal(env.model.geom_contype, contype_before)

@@ -274,7 +274,7 @@ else:
             Ks_flat = np.asarray(Ks).reshape(N, 72) if not isinstance(Ks, np.ndarray) else Ks
             ks_arr = np.asarray(ks).reshape(N, 6) if not isinstance(ks, np.ndarray) else ks
 
-            ok = cpp_forward_pass_single(
+            ok, reason = cpp_forward_pass_single(
                 X_new, U_new, X, U, Ks_flat, ks_arr,
                 _get_model_ptr(env.model), _get_model_ptr(env.data),
                 env.init_q_left,
@@ -285,7 +285,7 @@ else:
             )
             if ok:
                 return X_new, U_new, 0.0, ""
-            return None, None, float("inf"), "C++ forward_pass rejected"
+            return None, None, float("inf"), reason
 
         def _forward_pass_linesearch(
             self, env, cost_fn, X, U, Ks, ks, cost_old,

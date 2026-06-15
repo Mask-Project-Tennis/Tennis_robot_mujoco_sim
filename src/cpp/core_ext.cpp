@@ -136,7 +136,8 @@ PYBIND11_MODULE(iLQR_Core, m) {
                 params_ptr = &params;
             }
 
-            return fwd::single(
+            char reason[128] = "";
+            bool ok = fwd::single(
                 X_new, U_new, X_nom, U_nom, Ks, ks,
                 model_ptr, data_ptr,
                 init_q_left_a.data(),
@@ -144,7 +145,8 @@ PYBIND11_MODULE(iLQR_Core, m) {
                 alpha,
                 actuator_mode, kp_ptr, kd_ptr, use_feedforward, torque_max_ptr,
                 ball_geom_start, disable_collision,
-                params_ptr);
+                params_ptr, reason);
+            return py::make_tuple(ok, std::string(reason));
         },
         py::arg("X_new"), py::arg("U_new"),
         py::arg("X_nom"), py::arg("U_nom"),
