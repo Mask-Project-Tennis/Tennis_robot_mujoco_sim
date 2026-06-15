@@ -222,16 +222,42 @@ else:
                 self._ball_geom_start = env.model.body("ball").geomadr[0]
             return self._ball_geom_start
 
+        def _build_check_params(self, limits, dt, actuator_mode) -> dict:
+            """从 RobotLimits 构造 C++ check_step 参数字典。"""
+            return {
+                "q_lo": limits.q_lower, "q_hi": limits.q_upper,
+                "qd_max": limits.qdot_max,
+                "u_lo": limits.u_min, "u_hi": limits.u_max,
+                "qdd_max": limits.qddot_max,
+                "margin": limits.forward_pass_margin,
+                "fp_q_tol": limits.forward_pass_q_tol_rad,
+                "actuator_mode": actuator_mode,
+                "qdd_window": limits.qddot_window_size,
+                "dt": dt,
+                "qdd_hard_reject": limits.qddot_hard_reject,
+            }
+
         def _forward_pass_single(self, env, cost_fn, X, U, Ks, ks, alpha=0.5,
                                  limits=None):
-            """前向传递：limits=None 时使用 C++（含碰撞禁用），否则用 Python。"""
+            """前向传递：优先 C++（含碰撞禁用），limits 用 alpha 回退。"""
             if limits is None:
                 return self._forward_pass_cpp(env, X, U, Ks, ks, alpha)
-            return forward_pass_single(env, cost_fn, X, U, Ks, ks, alpha,
-                                        limits=limits)
+            # limits 模式：C++ + alpha 回退
+            actuator_mode = getattr(env, 'actuator_mode', 0)
+            check_params = self._build_check_params(limits, env.dt, actuator_mode)
+            alphas_to_try = [alpha]
+            for a in limits.alpha_fallback:
+                if a not in alphas_to_try:
+                    alphas_to_try.append(a)
+            for alpha_try in alphas_to_try:
+                result = self._forward_pass_cpp(env, X, U, Ks, ks, alpha_try,
+                                                check_params)
+                if result[0] is not None:
+                    return result
+            return None, None, float("inf"), "all alphas rejected by limits"
 
-        def _forward_pass_cpp(self, env, X, U, Ks, ks, alpha):
-            """C++ 前向传递（含 collision disable + actuator mode）。"""
+        def _forward_pass_cpp(self, env, X, U, Ks, ks, alpha, check_params=None):
+            """C++ 前向传递（含 collision disable + actuator mode + optional limits）。"""
             N = len(U)
             X_new = np.zeros_like(X)
             U_new = np.zeros_like(U)
@@ -255,10 +281,11 @@ else:
                 ctrl_lo, ctrl_hi, alpha,
                 actuator_mode, kp, kd, use_ff, torque_max,
                 ball_geom_start, True,
+                check_params if check_params is not None else None,
             )
             if ok:
                 return X_new, U_new, 0.0, ""
-            return None, None, float("inf"), "C++ forward_pass NaN"
+            return None, None, float("inf"), "C++ forward_pass rejected"
 
         def _forward_pass_linesearch(
             self, env, cost_fn, X, U, Ks, ks, cost_old,
