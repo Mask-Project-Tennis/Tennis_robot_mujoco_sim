@@ -79,7 +79,7 @@ mujoco_sim/
 ├── AGENTS.md                          # 本文件 — 项目规范与 Agent 指令
 ├── setup.py                           # C++ 扩展构建脚本（pybind11）
 ├── requirements.txt                   # Python 依赖
-├── skills/                            # Skill 定义（7 个，详见下方 Skills 表）
+├── skills/                            # Skill 定义（8 个，详见下方 Skills 表）
 │   ├── framework_design.md            # 代码框架设计
 │   ├── file_management.md             # 文件管理规范
 │   ├── sim_run.md                     # 仿真运行流程
@@ -115,8 +115,11 @@ mujoco_sim/
 │   │   ├── __init__.py
 │   │   ├── solver_cpp.py              # Python 封装，桥接 C++ 和 Python
 │   │   ├── core_ext.cpp               # pybind11 模块入口
+│   │   ├── types.h                    # 常量 + 指针转换 + set_arm_forward
+│   │   ├── mujoco_utils.h             # sim_step（含位置模式+FF+qfrc 管理）
+│   │   ├── cost_params.h              # StepCheckParams + check_step 约束检查
 │   │   ├── linearize.cpp              # 解析动力学线性化（批量）
-│   │   └── forward_pass.cpp           # 前向传递（单步 + 线搜索）
+│   │   └── forward_pass.cpp           # 前向传递（含碰撞禁用+limits+check_step）
 │   ├── sim/                           # MuJoCo 仿真封装
 │   │   ├── __init__.py
 │   │   ├── env.py                     # MujocoEnv 基类
@@ -178,8 +181,10 @@ mujoco_sim/
 │   ├── test_noise.py
 │   ├── test_ball_estimator.py              # BallEstimator 单元+集成测试（16 tests）
 │   ├── test_estimator_pipeline.py          # 感知 pipeline 端到端测试（7 tests）
-│   └── test_actuator_modes.py              # 双模式执行器测试（31 tests）
-├── experiment_data/                  # 实验数据（按 exp1~exp8 组织）
+│   ├── test_actuator_modes.py              # 双模式执行器测试（46 tests）
+│   ├── test_jacobian_cache.py              # 雅可比缓存回归测试（8 tests）
+│   └── test_cpp_forward_pass.py            # C++ 前向传递等效性测试（14 tests）
+├── experiment_data/                  # 实验数据（按 exp1~exp12 组织）
 │   └── README.md                     # 数据存储规范
 ├── paper/                            # 论文 LaTeX 工程
 │   ├── main.tex
@@ -187,14 +192,26 @@ mujoco_sim/
 │   ├── sections/                     # 英文各节 .tex
 │   ├── sections_zh/                  # 中文草稿 .md
 │   └── figures/                      # 图表
-├── docs/                             # 历史文档
+├── docs/                             # 项目文档
+│   ├── README.md                     # 文档索引与阅读推荐
+│   ├── experiments/                  # 实验设计与报告
+│   │   ├── README.md                 # 实验索引（exp1~exp12）
+│   │   ├── design/                   # 实验设计文档（目的/假设/参数）
+│   │   └── reports/                  # 实验报告（日期前缀，结果/分析）
+│   ├── architecture_and_algorithm.md # 系统架构与算法详解
+│   ├── cpp_acceleration.md           # C++ 加速模块构建指南
+│   ├── rm65_evaluate_usage.md        # 评估脚本使用说明
+│   ├── rm65_mpc_ilqr_core.md         # MPC+iLQR 核心机制
+│   ├── rm65_mpc_ilqr_pipeline.md     # MPC+iLQR Pipeline
+│   ├── rm65_tennis_report.md         # 项目技术总览
+│   └── rm65_mpc_fast_group_report.md # 组会汇报材料
 ├── results/                          # 输出目录（日志、轨迹、视频）
 └── requirements.txt
 ```
 
 ## Skills 参考
 
-项目包含 7 个 Skill，位于 `skills/` 目录。Agent 在对应场景下应加载相应 Skill：
+项目包含 8 个 Skill，位于 `skills/` 目录。Agent 在对应场景下应加载相应 Skill：
 
 | Skill | 文件 | 用途 | 触发条件 |
 |-------|------|------|---------|
@@ -209,8 +226,10 @@ mujoco_sim/
 
 ### 实验数据目录
 - 所有实验数据存放在 `experiment_data/` 目录
-- 按 `exp1~exp8` 编号组织，每组含 `config.yaml` + `results.csv` + `raw/`
-- 详见 `experiment_data/README.md`
+- 按 `exp1~exp12` 编号组织，每组含 `config.yaml` + `results.csv` + `raw/`
+- 实验设计文档: `docs/experiments/design/expN_*.md`
+- 实验报告: `docs/experiments/reports/YYYY-MM-DD_expN_*.md`
+- 详见 `experiment_data/README.md` 和 `docs/experiments/README.md`
 
 ## 核心算法说明
 
@@ -344,7 +363,7 @@ mujoco_sim/
 ## 批量实验架构
 
 新增实验采用**主 Agent 创建脚本 + experiment-runner subagent 启动**的分工模式。
-脚本模板参考见 `.opencode/skills/experiment-design/SKILL.md` § 脚本模板参考。
+脚本模板参考见 `skills/experiment_design.md` § 新建实验工作流。
 
 ### 三层架构
 
@@ -360,12 +379,12 @@ mujoco_sim/
 | 实验类型 | 包装参考 | 运行参考 | 提取参考 |
 |---------|---------|---------|---------|
 | 豁免约束 + 离线 | `_run_exp1_v3_exempt.py` | `run_exp1_v3_batch.py` | `extract_exp1_v3_results.py` |
-| 严格约束 + 离线 | `_run_exp1_exempt.py`（改 margin→1.0） | `run_exp2_v2_batch.py` | `extract_exp2_v2_results.py` |
-| 实时脚本（有 `__RESULT__`） | 不需要 | `run_exp1_batch.py` | `extract_exp2_results.py` |
+| 严格约束 + 离线 | `_run_exp2_v3_strict.py` | `run_exp2_v3_batch.py` | `extract_exp2_v3_results.py` |
+| V11 + 实时（有 `__RESULT__`） | 不需要 | `run_exp11_batch.py` | `extract_exp11_results.py` |
 
 ### 新建实验流程
 
-1. **主 Agent 建目录 + 脚本**：创建 `experiment_data/expN_<name>/raw/` + `config.yaml`，编写包装/运行器/提取脚本（参考 `.opencode/skills/experiment-design/SKILL.md` § 脚本模板参考）
+1. **主 Agent 建目录 + 脚本**：创建 `experiment_data/expN_<name>/raw/` + `config.yaml`，编写设计文档 `docs/experiments/design/expN_<name>.md`，编写包装/运行器/提取脚本（参考 `skills/experiment_design.md` § 新建实验工作流）
 2. **主 Agent dispatch subagent**：传入 `experiment_id`、`data_dir`、`raw_dir`、`batch_script`、`extract_script`、`workers` 6 个参数
 3. **subagent 启动 tmux**：执行 4 个 bash 命令（预检→mkdir→断点检查→tmux），立即返回确认信息
 4. **主 Agent 后续检查**：`test -f <DATA_DIR>/_.COMPLETE && echo DONE || echo RUNNING`
@@ -374,7 +393,7 @@ mujoco_sim/
 
 | 坑 | 现象 | 原因 | 解决 |
 |----|------|------|------|
-| UTF-16LE 日志 | regex 匹配不到中文 | PowerShell `Tee-Object` 默认编码 | 用 Python `subprocess` + `encoding="utf-8"` |
+| UTF-16LE 日志 | regex 匹配不到中文 | 旧 PowerShell `Tee-Object` 编码 | 已迁移到 Python `subprocess` + `encoding="utf-8"`（V11 batch 脚本） |
 | 离线脚本无 `__RESULT__` | 提取脚本报 KeyError | 离线脚本只输出 step log | 用离线专用提取脚本（解析 `球拍击球!` 行） |
 | monkey-patch 不生效 | 约束未改变 | import 顺序错误 | patch 必须在 `import main_mod` **之前** |
 | 并行跑崩 | MuJoCo segfault | 多进程共享 GL context | 确保 `--no-plot` 关掉所有渲染 |
