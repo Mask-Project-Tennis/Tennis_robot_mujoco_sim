@@ -6,9 +6,10 @@
 
 ## 实验设计索引
 
-实验设计文档（目的/假设/参数矩阵）存放在 `docs/experiments/`：
+实验设计文档（目的/假设/参数矩阵）存放在 `docs/experiments/design/`：
 - 索引: `docs/experiments/README.md`
-- 每组实验: `docs/experiments/expN_<name>.md`
+- 设计文档: `docs/experiments/design/expN_<name>.md`
+- 实验报告: `docs/experiments/reports/YYYY-MM-DD_expN_<name>.md`
 - 可执行参数: `experiment_data/expN/config.yaml`
 - 结果数据: `experiment_data/expN/results.csv`
 

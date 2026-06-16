@@ -12,7 +12,7 @@ Agent 负责数据聚合和关键数字提取，人类负责结论叙述。
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
 | `EXPERIMENT_DATA_DIR` | `experiment_data` | 实验数据根目录 |
-| `EXPERIMENT_DOCS_DIR` | `docs/experiments` | 实验记录文档目录 |
+| `EXPERIMENT_DOCS_DIR` | `docs/experiments/reports` | 实验记录文档目录 |
 
 合作者可通过 `cp .env.example .env` 后修改路径，适配本地目录结构。
 

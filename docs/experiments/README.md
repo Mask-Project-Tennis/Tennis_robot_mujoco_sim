@@ -3,35 +3,47 @@
 > 所有实验的可执行参数存放在 `experiment_data/expN/config.yaml`，本文档仅记录设计意图。
 > 实验结果存放在 `experiment_data/expN/results.csv`。
 
+## 目录结构
+
+```
+docs/experiments/
+├── README.md                ← 本文件（索引）
+├── design/                  ← 实验设计文档（"做什么"：目的/假设/参数）
+│   ├── _template.md
+│   ├── exp1_algorithm_capability.md
+│   └── ...
+└── reports/                 ← 实验报告（"结果如何"：分析/结论/统计）
+    ├── 2026-06-02_exp2_strict_joint.md
+    └── ...
+```
+
 ## 实验矩阵
 
-| 编号 | 名称 | 目的 | 状态 |
-|------|------|------|------|
-| exp1 | [算法能力上限](exp1_algorithm_capability.md) | 速度豁免模式下测试 iLQR+Tube 击打上限 | ✅ 已完成 |
-| exp2 | [严格关节约束](exp2_strict_joint.md) | RM-65B 真实关节约束下可行球速范围 | ✅ 已完成 |
-| exp3 | [TCP+关节双约束](exp3_tcp_joint_dual.md) | TCP 线速度硬限制对性能影响 | ✅ 已完成 |
-| exp4 | [Tube 鲁棒性](exp4_tube_robustness.md) | 时间/空间扰动下 Tube 鲁棒性 | ✅ 已完成 |
-| exp5 | [实时性能](exp5_realtime_performance.md) | MPC 重规划实时可行性 | ✅ 已完成 |
-| exp6 | [消融实验](exp6_ablation.md) | 各组件独立贡献 | ✅ 已完成 |
-| exp7 | [噪声×Tube 消融](exp7_noise_tube_ablation.md) | 观测噪声下 Tube 补偿作用 | ✅ 已完成 |
-| exp8 | [KF 恢复实验](exp8_estimator_recovery.md) | 卡尔曼滤波噪声恢复率 | ✅ 已完成 |
-| exp9 | [观测频率鲁棒性](exp9_obs_freq_robustness.md) | 低频摄像机观测退化与恢复 | ✅ 已完成 |
-| exp10 | [PD 增益扫描](exp10_pd_scan.md) | 位置模式 Kp/Kd 最优搜索 | ✅ 已完成 |
-| exp11 | [回归测试](exp11_regression.md) | 力矩 vs 位置模式全面对比 | ✅ 已完成 |
-| exp12 | [前馈补偿评估](exp12_feedforward.md) | 前馈补偿（重力+科氏力）消融 | ✅ 已完成 |
+| 编号 | 名称 | 设计 | 报告 | 状态 |
+|------|------|------|------|------|
+| exp1 | 算法能力上限 | [design](design/exp1_algorithm_capability.md) | [2026-06-03](reports/2026-06-03_exp1_algorithm_capability.md) | ✅ |
+| exp2 | 严格关节约束 | [design](design/exp2_strict_joint.md) | [2026-06-04](reports/2026-06-04_exp2_v3_strict_joint.md) | ✅ |
+| exp3 | TCP+关节双约束 | [design](design/exp3_tcp_joint_dual.md) | — | ✅ |
+| exp4 | Tube 鲁棒性 | [design](design/exp4_tube_robustness.md) | — | ✅ |
+| exp5 | 实时性能 | [design](design/exp5_realtime_performance.md) | — | ✅ |
+| exp6 | 消融实验 | [design](design/exp6_ablation.md) | — | ✅ |
+| exp7 | 噪声×Tube 消融 | [design](design/exp7_noise_tube_ablation.md) | [2026-06-09](reports/2026-06-09_exp7_noise_tube_ablation_v4.md) | ✅ |
+| exp8 | KF 恢复实验 | [design](design/exp8_estimator_recovery.md) | [2026-06-10](reports/2026-06-10_exp8_estimator_recovery_v2.md) | ✅ |
+| exp9 | 观测频率鲁棒性 | [design](design/exp9_obs_freq_robustness.md) | [2026-06-10](reports/2026-06-10_exp9_obs_freq_robustness.md) | ✅ |
+| exp10 | PD 增益扫描 | [design](design/exp10_pd_scan.md) | [2026-06-13](reports/2026-06-13_exp10_pd_finetune.md) | ✅ |
+| exp11 | 回归测试 | [design](design/exp11_regression.md) | [2026-06-13](reports/2026-06-13_exp11_regression.md) | ✅ |
+| exp12 | 前馈补偿评估 | [design](design/exp12_feedforward.md) | [2026-06-14](reports/2026-06-14_exp12_feedforward.md) | ✅ |
 
-## 设计文档格式
+## 文档类型说明
 
-每组实验的设计文档（`docs/experiments/expN_<name>.md`）包含：
-- **目的**：一句话说明实验回答什么问题
-- **假设**：核心因果关系假设
-- **参数矩阵**：变量 × 取值，固定参数引用 `config.yaml`
-- **脚本**：包装/批量/提取脚本路径
-- **对照分析**：对比组设计
-- **状态**：已执行/待执行 + 结果路径
+- **设计文档**（`design/expN_*.md`）：实验前编写，包含目的、假设、参数矩阵、脚本路径、对照分析
+- **实验报告**（`reports/YYYY-MM-DD_expN_*.md`）：实验后生成，包含结果统计、Agent 数据观察、人工分析决策
+- **可执行配置**（`experiment_data/expN/config.yaml`）：实际运行参数
+- **结果数据**（`experiment_data/expN/results.csv`）：CSV 汇总表
 
 ## 与 Skill 的关系
 
 - **Skill**（`skills/experiment_design.md`）：描述"如何做实验"（流程、模板、规范）
-- **本文档**：描述"做什么实验"（设计、参数、假设）
+- **设计文档**（`docs/experiments/design/`）：描述"做什么实验"（设计、参数、假设）
+- **实验报告**（`docs/experiments/reports/`）：描述"实验结果如何"（分析、结论）
 - **数据目录**（`experiment_data/`）：存放"实验结果"（CSV、日志、NPZ）
