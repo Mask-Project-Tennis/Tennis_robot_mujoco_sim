@@ -24,7 +24,7 @@
 - **语言**: Python 3.11+ (conda 环境 `mujoco_tennis`)
 - **仿真**: MuJoCo 3.9+（mujoco Python 包）— 跨平台 Windows/Ubuntu
 - **数值计算**: NumPy, SciPy
-- **C++ 加速**: pybind11 — `src/cpp/` 下的 iLQR 核心循环（linearize_analytical_batch, forward_pass）
+- **C++ 加速**: pybind11 — `src/cpp/` 下的 iLQR 核心循环（linearize_analytical_batch, forward_pass, backward_pass），累计 1.50× 加速
 - **可视化**: MuJoCo 内置查看器 + matplotlib（轨迹绘图）
 - **包管理**: conda + pip + requirements.txt
 - **构建**: `setup.py build_ext --inplace` 编译 C++ 扩展
@@ -114,13 +114,14 @@ mujoco_sim/
 │   │       └── hitting.py             # 击打场景专用代价
 │   ├── cpp/                           # C++ 加速模块（pybind11）
 │   │   ├── __init__.py
-│   │   ├── solver_cpp.py              # Python 封装，桥接 C++ 和 Python
-│   │   ├── core_ext.cpp               # pybind11 模块入口
+│   │   ├── solver_cpp.py              # Python 封装，桥接 C++ 和 Python（含 _backward_pass_numpy 参考实现）
+│   │   ├── core_ext.cpp               # pybind11 模块入口（Unity Build: linearize + forward_pass + backward_pass）
 │   │   ├── types.h                    # 常量 + 指针转换 + set_arm_forward
 │   │   ├── mujoco_utils.h             # sim_step（含位置模式+FF+qfrc 管理）
 │   │   ├── cost_params.h              # StepCheckParams + check_step 约束检查
 │   │   ├── linearize.cpp              # 解析动力学线性化（批量）
-│   │   └── forward_pass.cpp           # 前向传递（含碰撞禁用+limits+check_step）
+│   │   ├── forward_pass.cpp           # 前向传递（含碰撞禁用+limits+check_step）
+│   │   └── backward_pass.cpp          # 后向传递（纯代数 Riccati，栈上小矩阵高斯消元）
 │   ├── sim/                           # MuJoCo 仿真封装
 │   │   ├── __init__.py
 │   │   ├── env.py                     # MujocoEnv 基类
@@ -133,7 +134,7 @@ mujoco_sim/
 │   │   ├── __init__.py
 │   │   ├── ball.py                    # 网球抛物线轨迹预测
 │   │   └── hitting.py                 # 击打点计算 & 球拍-球接触判断
-│   ├── real/                          # 真实部署模块
+│   ├── real/                          # 真实部署模块（未实施，已设计见 plans/real_robot_framework.md）
 │   │   ├── __init__.py
 │   │   ├── config.py                  # RealRobotConfig（底座位姿、控制频率、安全参数）
 │   │   ├── robot_interface.py         # ROS 2 机器人接口（JointState 读 / 位置指令写）
@@ -184,7 +185,8 @@ mujoco_sim/
 │   ├── test_estimator_pipeline.py          # 感知 pipeline 端到端测试（7 tests）
 │   ├── test_actuator_modes.py              # 双模式执行器测试（46 tests）
 │   ├── test_jacobian_cache.py              # 雅可比缓存回归测试（8 tests）
-│   └── test_cpp_forward_pass.py            # C++ 前向传递等效性测试（14 tests）
+│   ├── test_cpp_forward_pass.py            # C++ 前向传递等效性测试（14 tests）
+│   └── test_cpp_backward_pass.py           # C++ 后向传递等效性测试（4 tests）
 ├── experiment_data/                  # 实验数据（按 exp1~exp12 组织）
 │   └── README.md                     # 数据存储规范
 ├── paper/                            # 论文 LaTeX 工程
