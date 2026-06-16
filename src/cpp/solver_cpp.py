@@ -223,24 +223,22 @@ else:
 
         def _backward_pass(self, As, Bs, l_xs, l_us, l_xxs, l_uxs, l_uus,
                            l_x_N, l_xx_N, mu):
-            """后向传递：C++ 加速 > numpy 回退。
+            """后向传递：C++ 加速。
 
             C++ 路径报告奇异（ok=False）时返回 None，触发外层正则化。
+            numpy 回退路径：模块级 ``_backward_pass_numpy``（测试 monkeypatch 使用）。
             """
             N = len(As)
-            if _CPP_AVAILABLE:
-                ok, Ks_arr, ks_arr = cpp_backward_pass(
-                    np.stack(As), np.stack(Bs),
-                    np.stack(l_xs), np.stack(l_us),
-                    np.stack(l_xxs), np.stack(l_uxs), np.stack(l_uus),
-                    l_x_N, l_xx_N, mu,
-                )
-                if ok:
-                    return [Ks_arr[k] for k in range(N)], \
-                           [ks_arr[k] for k in range(N)]
-                return None
-            return _backward_pass_numpy(
-                As, Bs, l_xs, l_us, l_xxs, l_uxs, l_uus, l_x_N, l_xx_N, mu)
+            ok, Ks_arr, ks_arr = cpp_backward_pass(
+                np.stack(As), np.stack(Bs),
+                np.stack(l_xs), np.stack(l_us),
+                np.stack(l_xxs), np.stack(l_uxs), np.stack(l_uus),
+                l_x_N, l_xx_N, mu,
+            )
+            if ok:
+                return [Ks_arr[k] for k in range(N)], \
+                       [ks_arr[k] for k in range(N)]
+            return None
 
         def _get_ball_geom_start(self, env) -> int:
             """获取球 body 的 geom 起始索引（惰性缓存）。"""
