@@ -4,6 +4,7 @@
 #include "cost_params.h"
 #include "linearize.cpp"
 #include "forward_pass.cpp"
+#include "backward_pass.cpp"
 
 // Batch analytical linearization (public API)
 void linearize_analytical_batch(
@@ -81,6 +82,34 @@ PYBIND11_MODULE(iLQR_Core, m) {
         py::arg("use_feedforward") = false,
         "Batch analytical linearization along trajectory. "
         "Output: A_all(N,12,12), B_all(N,12,6), x_next_all(N,12)");
+
+    m.def("backward_pass",
+        [](py::array_t<double> A_all, py::array_t<double> B_all,
+           py::array_t<double> l_x, py::array_t<double> l_u,
+           py::array_t<double> l_xx, py::array_t<double> l_ux,
+           py::array_t<double> l_uu,
+           py::array_t<double> l_x_N, py::array_t<double> l_xx_N,
+           double mu)
+        {
+            int N = static_cast<int>(A_all.shape(0));
+            py::array_t<double> Ks_out({N, 6, 12});
+            py::array_t<double> ks_out({N, 6});
+            bool ok = backward_pass_ns::run(
+                N,
+                A_all.data(), B_all.data(),
+                l_x.data(), l_u.data(),
+                l_xx.data(), l_ux.data(), l_uu.data(),
+                l_x_N.data(), l_xx_N.data(),
+                mu,
+                Ks_out.mutable_data(), ks_out.mutable_data());
+            return py::make_tuple(ok, Ks_out, ks_out);
+        },
+        py::arg("A_all"), py::arg("B_all"),
+        py::arg("l_x"), py::arg("l_u"),
+        py::arg("l_xx"), py::arg("l_ux"), py::arg("l_uu"),
+        py::arg("l_x_N"), py::arg("l_xx_N"), py::arg("mu"),
+        "Riccati backward pass (pure algebra). "
+        "Returns (ok: bool, Ks (N,6,12), ks (N,6)). ok=False if Q_uu_reg singular.");
 
     m.def("forward_pass_single",
         [](py::array_t<double> X_new, py::array_t<double> U_new,

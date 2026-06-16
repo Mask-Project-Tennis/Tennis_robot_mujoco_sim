@@ -41,12 +41,60 @@ try:
         linearize_analytical_batch,
         forward_pass_single as cpp_forward_pass_single,
         forward_pass_linesearch as cpp_forward_pass_linesearch,
+        backward_pass as cpp_backward_pass,
     )
     _CPP_AVAILABLE = True
     logger.info("iLQR C++ 加速模块已加载")
 except (ImportError, ModuleNotFoundError):
     _CPP_AVAILABLE = False
     logger.info("C++ 加速模块未找到，使用纯 Python iLQR")
+
+
+def _backward_pass_numpy(
+    As, Bs, l_xs, l_us, l_xxs, l_uxs, l_uus, l_x_N, l_xx_N, mu
+):
+    """纯 numpy Riccati 后向传递（C++ 回退参考实现）。
+
+    Args:
+        As: (N,) list of (12,12) 动力学雅可比。
+        Bs: (N,) list of (12,6) 控制雅可比。
+        l_xs/l_us/l_xxs/l_uxs/l_uus: 运行代价导数列表。
+        l_x_N: (12,) 终端代价一阶导数。
+        l_xx_N: (12,12) 终端代价二阶导数。
+        mu: 正则化参数。
+
+    Returns:
+        (Ks, ks) 增益列表，或 None（Q_uu_reg 奇异）。
+    """
+    N = len(As)
+    n_u = Bs[0].shape[1]
+    reg = mu * np.eye(n_u)
+    Ks = []
+    ks = []
+    V_x = l_x_N.copy()
+    V_xx = l_xx_N.copy()
+    for k in range(N - 1, -1, -1):
+        A_T = As[k].T
+        B_T = Bs[k].T
+        Q_x = l_xs[k] + A_T @ V_x
+        Q_u = l_us[k] + B_T @ V_x
+        Q_xx = l_xxs[k] + A_T @ V_xx @ As[k]
+        Q_ux = l_uxs[k] + B_T @ V_xx @ As[k]
+        Q_uu = l_uus[k] + B_T @ V_xx @ Bs[k]
+        Q_uu_reg = Q_uu + reg
+        try:
+            Q_uu_inv = np.linalg.solve(Q_uu_reg, np.eye(n_u))
+        except np.linalg.LinAlgError:
+            return None
+        K_k = -Q_uu_inv @ Q_ux
+        k_k = -Q_uu_inv @ Q_u
+        Ks.insert(0, K_k)
+        ks.insert(0, k_k)
+        Q_ux_T = Q_ux.T
+        V_x = Q_x - Q_ux_T @ Q_uu_inv @ Q_u
+        V_xx = Q_xx - Q_ux_T @ Q_uu_inv @ Q_ux
+        V_xx = 0.5 * (V_xx + V_xx.T)
+    return Ks, ks
 
 if not _CPP_AVAILABLE:
     # 如果没有 C++ 模块，直接导入原始求解器
@@ -175,46 +223,24 @@ else:
 
         def _backward_pass(self, As, Bs, l_xs, l_us, l_xxs, l_uxs, l_uus,
                            l_x_N, l_xx_N, mu):
-            """后向传递（numpy，已足够快）。"""
+            """后向传递：C++ 加速 > numpy 回退。
+
+            C++ 路径报告奇异（ok=False）时返回 None，触发外层正则化。
+            """
             N = len(As)
-            n_u = Bs[0].shape[1]
-            reg = mu * np.eye(n_u)
-
-            Ks = []
-            ks = []
-
-            V_x = l_x_N.copy()
-            V_xx = l_xx_N.copy()
-
-            for k in range(N - 1, -1, -1):
-                A_T = As[k].T
-                B_T = Bs[k].T
-
-                Q_x = l_xs[k] + A_T @ V_x
-                Q_u = l_us[k] + B_T @ V_x
-                Q_xx = l_xxs[k] + A_T @ V_xx @ As[k]
-                Q_ux = l_uxs[k] + B_T @ V_xx @ As[k]
-                Q_uu = l_uus[k] + B_T @ V_xx @ Bs[k]
-
-                Q_uu_reg = Q_uu + reg
-
-                try:
-                    Q_uu_inv = np.linalg.solve(Q_uu_reg, np.eye(n_u))
-                except np.linalg.LinAlgError:
-                    return None
-
-                K_k = -Q_uu_inv @ Q_ux
-                k_k = -Q_uu_inv @ Q_u
-
-                Ks.insert(0, K_k)
-                ks.insert(0, k_k)
-
-                Q_ux_T = Q_ux.T
-                V_x = Q_x - Q_ux_T @ Q_uu_inv @ Q_u
-                V_xx = Q_xx - Q_ux_T @ Q_uu_inv @ Q_ux
-                V_xx = 0.5 * (V_xx + V_xx.T)
-
-            return Ks, ks
+            if _CPP_AVAILABLE:
+                ok, Ks_arr, ks_arr = cpp_backward_pass(
+                    np.stack(As), np.stack(Bs),
+                    np.stack(l_xs), np.stack(l_us),
+                    np.stack(l_xxs), np.stack(l_uxs), np.stack(l_uus),
+                    l_x_N, l_xx_N, mu,
+                )
+                if ok:
+                    return [Ks_arr[k] for k in range(N)], \
+                           [ks_arr[k] for k in range(N)]
+                return None
+            return _backward_pass_numpy(
+                As, Bs, l_xs, l_us, l_xxs, l_uxs, l_uus, l_x_N, l_xx_N, mu)
 
         def _get_ball_geom_start(self, env) -> int:
             """获取球 body 的 geom 起始索引（惰性缓存）。"""
