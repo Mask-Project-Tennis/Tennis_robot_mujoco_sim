@@ -1,7 +1,7 @@
 ---
 description: 启动批量实验（tmux 后台），仅执行 mkdir→tmux→返回
 mode: subagent
-model: deepseek-v4-flash
+model: glm-5.2
 temperature: 0.0
 hidden: false
 permission:
