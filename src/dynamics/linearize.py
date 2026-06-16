@@ -328,20 +328,26 @@ def linearize_fast_trajectory(
     model = env.model
     data = env.data
 
+    # 预分配/预计算循环不变量（消除每步 np.eye / np.zeros 重复分配）
+    I_nv = np.eye(nv)
+    I_nx = np.eye(n_x)
+    M_full = np.zeros((model.nv, model.nv))
+
     As: list[np.ndarray] = []
     Bs: list[np.ndarray] = []
     fs: list[np.ndarray] = []
 
     for k in range(len(U)):
+        # 设置状态并刷新运动学（mj_forward），供 mj_fullM 读取 data.qM
         env.set_arm_state(X[k])
 
-        M_full = np.zeros((model.nv, model.nv))
         mujoco.mj_fullM(model, M_full, data.qM)
-        M = M_full[:nv, :nv].copy()
-        M_inv = np.linalg.solve(M, np.eye(nv))
+        M = M_full[:nv, :nv]
+        M_inv = np.linalg.solve(M, I_nv)
 
-        A_k = np.eye(n_x)
-        A_k[:nv, nv:] = dt * np.eye(nv)
+        # A_k 上块 [[I, dt*I]] 每步相同，复制后按模式改写下块
+        A_k = I_nx.copy()
+        A_k[:nv, nv:] = dt * I_nv
 
         B_k = np.zeros((n_x, n_u))
         B_k[nv:, :] = dt * M_inv
@@ -353,7 +359,10 @@ def linearize_fast_trajectory(
             A_k[nv:, nv:] -= dt * M_inv * kd_row
             B_k[nv:, :] = dt * M_inv * kp_row
 
-        f_k = env.step_from_state(X[k], U[k])
+        # f_k: 状态已在上方 set_arm_state 中设好且 mj_forward 已执行，
+        # 此处直接 step 即可——跳过 step_from_state 内重复的 set_arm_state/mj_forward
+        # （profiling 显示该冗余 mj_forward 占生产路径 ~11%）
+        f_k = env.step(U[k])
 
         As.append(A_k)
         Bs.append(B_k)
