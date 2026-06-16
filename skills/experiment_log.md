@@ -130,13 +130,26 @@ Agent 基于聚合数据和关键数字自动生成事实性结论，结构与�
 
 ### 6. 更新索引表
 
-在 `$EXPERIMENT_DOCS_DIR/README.md` 索引表追加一行：
+在 `docs/experiments/README.md` 的 `实验矩阵` 中处理该实验行。
+
+> ⚠️ 索引在父级 `docs/experiments/README.md`，**不是** `$EXPERIMENT_DOCS_DIR/README.md`（该变量仅指向 `reports/` 子目录）。`$EXPERIMENT_DOCS_DIR` 仍用于写报告文件本身（见第 5 步）。
+
+`实验矩阵` 为 5 列稳定表，按实验编号索引：
 
 ```markdown
-| YYYY-MM-DD | [实验名](filename.md) | 球速范围 | 约束 | 命中率区间 | (结论待填) |
+| 编号 | 名称 | 设计 | 报告 | 状态 |
+|------|------|------|------|------|
 ```
 
-**去重**：日期+实验名已存在则跳过。
+按实验编号查找处理：
+
+- **exp 已在表中**：更新该行"报告"列填入新报告链接 `[YYYY-MM-DD](reports/YYYY-MM-DD_expN_*.md)`，"状态"列设为 ✅。不追加新行。
+- **exp 不在表中**（新实验）：末尾追加一行，匹配 5 列 schema：
+  ```markdown
+  | expN | 实验名称 | [design](design/expN_*.md) | [YYYY-MM-DD](reports/YYYY-MM-DD_expN_*.md) | ✅ |
+  ```
+
+**去重**：该 exp 编号已在表中则只更新报告链接，不重复追加。
 
 ## 易错点与处理
 
