@@ -87,6 +87,10 @@ class HittingCost:
             actuator_mode: 执行器模式，0=力矩(默认), 1=位置模式(R=0, 控制代价置零)。
         """
         self.env = env
+        # 预分配单位矩阵常量（消除热路径 running_derivatives / _add_smoothness_derivatives
+        # 中 np.eye 的重复构造，profiling 显示 np.eye 占生产路径 ~4.8% / 96000 次调用）
+        self._eye_nu = np.eye(env.NU)
+        self._eye_nq = np.eye(env.NQ)
         self.p_hit = p_hit.copy()
         self.v_hit = v_hit.copy()
         self._p_ball_running = p_ball_running.copy() if p_ball_running is not None else None
@@ -534,7 +538,7 @@ class HittingCost:
             R_k = self._R_schedule[k]
             if np.ndim(R_k) == 0:
                 l_u = R_k * u
-                l_uu = R_k * np.eye(n_u)
+                l_uu = R_k * self._eye_nu
             else:
                 l_u = R_k * u
                 l_uu = np.diag(R_k)
@@ -970,15 +974,13 @@ class HittingCost:
         if self._Q_qdot_effective > 0:
             qdot = x[nq:]
             l_x[nq:] += self._Q_qdot_effective * qdot
-            l_xx_diag = np.eye(nq) * self._Q_qdot_effective
-            l_xx[nq:, nq:] += l_xx_diag
+            l_xx[nq:, nq:] += self._Q_qdot_effective * self._eye_nq
 
         if self._Q_qddot_effective > 0:
             qdot = x[nq:]
             qddot_proxy = qdot / dt
             l_x[nq:] += self._Q_qddot_effective * qddot_proxy / dt
-            l_xx_diag = np.eye(nq) * (self._Q_qddot_effective / (dt * dt))
-            l_xx[nq:, nq:] += l_xx_diag
+            l_xx[nq:, nq:] += (self._Q_qddot_effective / (dt * dt)) * self._eye_nq
 
         if self._Q_du_effective > 0 and k is not None and k > 0 and self._u_prev is not None:
             du = u - self._u_prev
