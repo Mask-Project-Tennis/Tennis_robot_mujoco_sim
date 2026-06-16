@@ -28,27 +28,69 @@ python scripts/tools/test_real_robot/03_read_temperature.py
 
 # 4. 回到零位（微风险，需确认）
 python scripts/tools/test_real_robot/04_send_zero_pose.py
+
+# 5. 发送任意角度（中风险）
+python scripts/tools/test_real_robot/05_send_joint_command.py --deg 0 30 0 0 0 0
+
+# 6. 验证安全参数已生效（零风险）
+python scripts/tools/test_real_robot/06_safety_config_verify.py
+
+# 7. 测试缓停（中风险，推荐首次只测缓停）
+python scripts/tools/test_real_robot/07_emergency_stop.py
+
+# 8. 正弦波运动（中风险）
+python scripts/tools/test_real_robot/08_full_motion_test.py --joint 1 --amplitude 5
 ```
 
 ## 脚本清单
 
-### 首批（已实现）
+### 只读测试（零风险）
+
+| 脚本 | 说明 | 关键 SDK API |
+|------|------|-------------|
+| `01_connect_disconnect.py` | 连接→安全配置→读角度→断开 | `rm_create_robot_arm` / `rm_get_joint_degree` / `rm_delete_robot_arm` |
+| `02_read_joints.py` | 持续表格显示角度/速度（20Hz） | `rm_get_joint_degree`（数值微分速度） |
+| `03_read_temperature.py` | 持续表格显示温度/电压/电流 | `rm_get_current_joint_temperature` / `_voltage` / `_current` |
+| `06_safety_config_verify.py` | 读回安全参数，验证 `_configure_safety()` 是否生效 | `rm_get_collision_stage` / `rm_get_self_collision_enable` / ... |
+
+### 运动测试
 
 | 脚本 | 风险 | 说明 | 关键 SDK API |
 |------|------|------|-------------|
-| `01_connect_disconnect.py` | 零 | 连接→安全配置→读角度→断开 | `rm_create_robot_arm` / `rm_get_joint_degree` / `rm_delete_robot_arm` |
-| `02_read_joints.py` | 零 | 持续表格显示角度/速度（20Hz） | `rm_get_joint_degree`（数值微分速度） |
-| `03_read_temperature.py` | 零 | 持续表格显示温度/电压/电流 | `rm_get_current_joint_temperature` / `_voltage` / `_current` |
 | `04_send_zero_pose.py` | 微 | 流式插值回零位（YES确认+预检） | `rm_movej_follow` |
+| `05_send_joint_command.py` | 中 | 发送任意角度（`--deg`/`--rad`/交互式） | `rm_movej_follow` |
+| `07_emergency_stop.py` | 中 | 缓停+急停测试 | `rm_set_arm_slow_stop` / `rm_set_arm_stop` |
+| `08_full_motion_test.py` | 中 | 小幅正弦波运动（可配置关节/幅度/周期） | `rm_movej_follow` 连续发送 |
 
-### 第二批（待实现）
+### 运动脚本参数详解
 
-| 脚本 | 风险 | 说明 |
-|------|------|------|
-| `05_send_joint_command.py` | 中 | 发送任意关节角度（`--deg`/`--rad`/交互式） |
-| `06_safety_config_verify.py` | 零 | 读回安全参数验证是否生效 |
-| `07_emergency_stop.py` | 中 | 测试缓停+急停 |
-| `08_full_motion_test.py` | 中 | 小幅正弦波运动测试 |
+#### 05_send_joint_command.py
+
+```bash
+# 方式 1: 度数（推荐日常使用）
+python 05_send_joint_command.py --deg 0 30 -15 0 5 0
+
+# 方式 2: 弧度
+python 05_send_joint_command.py --rad 0.0 0.524 -0.262 0 0.087 0
+
+# 方式 3: 交互式（不传参数）
+python 05_send_joint_command.py
+# 逐个输入 J1~J6 角度（度），回车保持当前值
+
+# 可选参数
+python 05_send_joint_command.py --deg 0 30 0 0 0 0 --duration 2.0  # 2秒到达
+python 05_send_joint_command.py --deg 0 30 0 0 0 0 --no-algo-check  # 跳过碰撞检查
+```
+
+#### 08_full_motion_test.py
+
+```bash
+# 默认: J1 ±5°, 周期2s, 持续10s
+python 08_full_motion_test.py
+
+# J2 ±10°, 周期3s, 持续20s
+python 08_full_motion_test.py --joint 2 --amplitude 10 --period 3 --duration 20
+```
 
 ## 公共模块
 
@@ -62,6 +104,17 @@ python scripts/tools/test_real_robot/04_send_zero_pose.py
 | `safe_disconnect(ri)` | 缓停 + 断开连接 |
 | `add_config_arg(parser)` | argparse 添加 `--config` 参数 |
 | `add_algo_check_arg(parser)` | argparse 添加 `--no-algo-check` 参数 |
+
+### `pre_motion_check` 检查项
+
+按顺序执行，任一失败即取消运动：
+
+| # | 检查项 | 来源 | 可跳过 |
+|---|--------|------|--------|
+| 1 | 关节位置限位 `q_lower ≤ q ≤ q_upper` | SafetyMonitor | ❌ 不可跳过 |
+| 2 | 关节速度限位 `\|qdot\| ≤ max_qdot` | SafetyMonitor | ❌ 不可跳过 |
+| 3 | 自碰撞检测 | SDK Algo (`rm_algo_safety_robot_self_collision_detection`) | ✅ `--no-algo-check` |
+| 4 | 奇异性检测 | SDK Algo (`rm_algo_kin_robot_singularity_analyse`) | ✅ `--no-algo-check` |
 
 ## 常见问题
 
@@ -92,8 +145,13 @@ python scripts/tools/test_real_robot/04_send_zero_pose.py
 ### 安全参数配置失败
 
 `_configure_safety` 中的 `try/except` 会跳过部分失败的配置项。
-运行 `01_connect_disconnect.py` 查看日志中是否有 `控制器安全配置部分失败` 警告。
+运行 `06_safety_config_verify.py` 读回参数验证是否生效。
 
 ### 温度超过 60°C
 
 `03_read_temperature.py` 会标记 `⚠️`。持续高温需停机冷却。
+
+### 急停后无法恢复
+
+`07_emergency_stop.py --test-estop` 触发的 `rm_set_arm_stop` 不可软件恢复。
+需要重新连接机械臂或手动复位（重新上电）。
