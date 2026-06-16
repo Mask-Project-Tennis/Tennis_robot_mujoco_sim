@@ -58,6 +58,30 @@ class MockRoboticArm:
         self.calls.append(("slow_stop",))
         return 0
 
+    def rm_set_collision_state(self, stage: int) -> int:
+        self.calls.append(("set_collision_state", stage))
+        return 0
+
+    def rm_set_self_collision_enable(self, enable: bool) -> int:
+        self.calls.append(("set_self_collision", enable))
+        return 0
+
+    def rm_set_avoid_singularity_mode(self, mode: int) -> int:
+        self.calls.append(("set_singularity", mode))
+        return 0
+
+    def rm_set_controller_torque_limit(self, limit: list[float]) -> int:
+        self.calls.append(("set_torque_limit", list(limit)))
+        return 0
+
+    def rm_set_arm_max_line_speed(self, speed: float) -> int:
+        self.calls.append(("set_max_line_speed", speed))
+        return 0
+
+    def rm_set_arm_max_line_acc(self, acc: float) -> int:
+        self.calls.append(("set_max_line_acc", acc))
+        return 0
+
     def rm_delete_robot_arm(self) -> int:
         self.calls.append(("delete",))
         return 0
@@ -195,3 +219,40 @@ class TestRobotInterfaceSafety:
         ri.connect()
         ri.slow_stop()
         assert any(c[0] == "slow_stop" for c in mock_arm.calls)
+
+
+class TestRobotInterfaceSafetyConfig:
+    """连接时控制器安全配置测试（Layer 1）。"""
+
+    def test_connect_configures_collision_stage(
+        self, mock_arm: MockRoboticArm, config: RealRobotConfig
+    ):
+        """S11: connect() 后调用 rm_set_collision_state。"""
+        config.collision_stage = 5
+        ri = RobotInterface(config, arm=mock_arm)
+        ri.connect()
+        calls = [c for c in mock_arm.calls if c[0] == "set_collision_state"]
+        assert len(calls) == 1
+        assert calls[0][1] == 5
+
+    def test_connect_configures_self_collision(
+        self, mock_arm: MockRoboticArm, config: RealRobotConfig
+    ):
+        """S12: connect() 后调用 rm_set_self_collision_enable。"""
+        config.enable_self_collision = True
+        ri = RobotInterface(config, arm=mock_arm)
+        ri.connect()
+        calls = [c for c in mock_arm.calls if c[0] == "set_self_collision"]
+        assert len(calls) == 1
+        assert calls[0][1] is True
+
+    def test_connect_configures_torque_limit(
+        self, mock_arm: MockRoboticArm, config: RealRobotConfig
+    ):
+        """S13: connect() 后调用 rm_set_controller_torque_limit。"""
+        config.torque_limit = [50, 50, 50, 30, 30, 30]
+        ri = RobotInterface(config, arm=mock_arm)
+        ri.connect()
+        calls = [c for c in mock_arm.calls if c[0] == "set_torque_limit"]
+        assert len(calls) == 1
+        assert calls[0][1] == [50, 50, 50, 30, 30, 30]

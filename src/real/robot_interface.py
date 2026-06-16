@@ -71,9 +71,40 @@ class RobotInterface:
                 self._config.robot_port,
                 self._handle.id,
             )
+            self._configure_safety()
             return True
         logger.error("机械臂连接失败")
         return False
+
+    def _configure_safety(self) -> None:
+        """连接成功后配置控制器安全参数（Layer 1）。
+
+        由 RM-65B 控制器固件实时执行，不占用控制循环时间：
+          - 碰撞检测灵敏度
+          - 自碰撞检测
+          - 奇异性规避
+          - 力矩硬限制
+          - TCP 速度/加速度限制
+        """
+        arm = self._arm
+        cfg = self._config
+        try:
+            arm.rm_set_collision_state(cfg.collision_stage)
+            arm.rm_set_self_collision_enable(cfg.enable_self_collision)
+            arm.rm_set_avoid_singularity_mode(
+                1 if cfg.enable_singularity_avoidance else 0
+            )
+            arm.rm_set_controller_torque_limit(cfg.torque_limit)
+            arm.rm_set_arm_max_line_speed(cfg.max_tcp_speed)
+            arm.rm_set_arm_max_line_acc(cfg.max_line_acc)
+            logger.info(
+                "控制器安全配置完成: collision=%d, torque=%s, tcp_speed=%.1f m/s",
+                cfg.collision_stage,
+                cfg.torque_limit,
+                cfg.max_tcp_speed,
+            )
+        except Exception as e:
+            logger.warning("控制器安全配置部分失败: %s", e)
 
     def get_arm_state(self) -> np.ndarray:
         """读取右臂状态 [q(6), qdot(6)]，弧度制。
