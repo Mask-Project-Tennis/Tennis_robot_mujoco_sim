@@ -108,6 +108,8 @@ mujoco_sim/
 │   │   ├── retiming.py                # 时间重映射工具
 │   │   ├── async_replanner.py         # 异步重规划器（后台线程 iLQR）
 │   │   ├── jt_init.py                 # 位置模式 JT 初始控制 + 后摆 warm-start
+│   │   ├── robot_env_protocol.py      # RobotEnv Protocol（@runtime_checkable，RM65Env/PlanningEnv 共同接口）
+│   │   ├── planning_env.py            # MPC 规划计算环境（MuJoCo 纯计算，无球/无左臂/无碰撞，供真机 iLQR 规划）
 │   │   └── costs/                     # 模块化代价函数
 │   │       ├── __init__.py
 │   │       ├── base.py                # BaseCost 基类
@@ -134,15 +136,15 @@ mujoco_sim/
 │   │   ├── __init__.py
 │   │   ├── ball.py                    # 网球抛物线轨迹预测
 │   │   └── hitting.py                 # 击打点计算 & 球拍-球接触判断
-│   ├── real/                          # 真实部署模块（未实施，已设计见 plans/real_robot_framework.md）
+│   ├── real/                          # 真机部署模块（纯真机接口，不含 MuJoCo 仿真）
 │   │   ├── __init__.py
-│   │   ├── config.py                  # RealRobotConfig（底座位姿、控制频率、安全参数）
-│   │   ├── robot_interface.py         # ROS 2 机器人接口（JointState 读 / 位置指令写）
-│   │   ├── mocap_interface.py         # 动捕抽象基类 + OptiTrack/Vicon/仿真实现
-│   │   ├── ball_perceiver.py          # 球状态感知（动捕→卡尔曼→速度→抛物线预测）
-│   │   ├── pinocchio_env.py           # Pinocchio 动力学环境（替代 MuJoCo env）
-│   │   ├── torque_to_position.py      # 力矩→位置积分器
-│   │   └── real_runner.py             # 真实部署主循环
+│   │   ├── config.py                  # RealRobotConfig（控制器安全参数/PD增益/感知配置，from_yaml）
+│   │   ├── robot_interface.py         # Realman SDK 封装（rm_movej_follow 角度控制 + 连接时配置控制器安全）
+│   │   ├── torque_to_position.py      # 力矩→位置积分器（备用，位置模式不用）
+│   │   ├── adaptive_timer.py          # 在线自适应频率控制（EMA 平滑）
+│   │   ├── safety_monitor.py          # 软件层安全检查（关节位置/速度/TCP 超限）
+│   │   ├── ball_sensor.py             # BallSensor ABC + SimulatedBallSensor（动捕/相机抽象接口）
+│   │   └── ball_perceiver.py          # BallPerceiver（sensor → 有限差分速度 → KF 滤波 → pos/vel）
 │   └── utils/
 │       ├── __init__.py
 │       ├── math_utils.py              # 通用数学工具
@@ -454,98 +456,96 @@ mujoco_sim/
 将 MPC+iLQR+Tube 框架从 MuJoCo 仿真迁移到真实 RM-65B 双臂机械臂。
 核心挑战：力矩→位置控制转换、动捕感知、坐标系标定、动力学差异。
 
-- **控制模式**: 位置控制 @ 100Hz（ROS 2 JointState），MPC 内部仍为力矩规划
-- **感知**: 动捕系统（待选定）追踪网球位置 → 卡尔曼滤波 → 抛物线轨迹预测
-- **动力学**: Pinocchio 替代 MuJoCo，提供 FK / Jacobian / forward dynamics
+- **控制模式**: 位置控制（角度指令），MPC 用 MuJoCo PD 执行器规划 q_desired 轨迹
+- **感知**: 动捕/相机（待选定）追踪网球位置 → 卡尔曼滤波 → 抛物线轨迹预测
+- **规划计算**: `PlanningEnv`（`src/ilqt/planning_env.py`）基于 MuJoCo 做 FK/Jacobian/前向仿真
 - **坐标系**: 通过 `configs/real_robot.yaml` 标定真实底座位姿（位置+旋转）
 
 ### 模块结构
 ```
-src/real/                              # 真实部署模块
+src/real/                              # 真机部署模块（纯真机接口，不含 MuJoCo 仿真）
 ├── __init__.py
-├── config.py                          # RealRobotConfig（底座位姿、控制频率、安全参数）
-├── robot_interface.py                 # ROS 2 机器人接口（JointState 读 / 位置指令写）
-├── mocap_interface.py                 # 动捕抽象基类 + OptiTrack/Vicon/仿真实现
-├── ball_perceiver.py                  # 球状态感知（动捕→卡尔曼→速度→抛物线预测）
-├── pinocchio_env.py                   # Pinocchio 动力学环境（替代 MuJoCo env，对齐接口）
-├── torque_to_position.py             # 力矩→位置积分器（MPC 力矩输出→关节位置指令）
-└── real_runner.py                     # 真实部署主循环（替代仿真脚本中的主循环）
+├── config.py                          # RealRobotConfig（控制器安全参数/PD增益/感知配置，from_yaml）
+├── robot_interface.py                 # Realman SDK 封装（rm_movej_follow 角度控制 + 连接时配置控制器安全）
+├── torque_to_position.py             # 力矩→位置积分器（备用，位置模式不用）
+├── adaptive_timer.py                 # 在线自适应频率控制（EMA 平滑）
+├── safety_monitor.py                 # 软件层安全检查（关节位置/速度/TCP 超限）
+├── ball_sensor.py                    # BallSensor ABC + SimulatedBallSensor（动捕/相机抽象接口）
+└── ball_perceiver.py                  # BallPerceiver（sensor → 有限差分速度 → KF 滤波 → pos/vel）
+src/ilqt/
+└── planning_env.py                    # MPC 规划计算环境（MuJoCo 纯计算，不接触真机硬件）
 configs/
-├── real_robot.yaml                    # 真实机器人配置（底座位姿、坐标系标定、控制频率）
-scripts/
-├── run_real_robot.py                  # 真实部署入口脚本
-├── tools/calibrate_base.py            # 底座位姿标定工具
+└── real_robot.yaml                    # 真机配置（7节+丰富注释，实验时频繁调整）
 ```
 
 ### 各模块职责
 
 #### `config.py` — RealRobotConfig
-- 底座位姿（base_position, base_orientation）：通过标定测量获得
-- 控制参数：control_dt=0.010s, mpc_dt=0.005s, position_hz=100Hz
+- 控制器安全参数：collision_stage / torque_limit / max_tcp_speed / max_line_acc
+- 位置模式 PD：kp / kd / enable_feedforward
+- 感知参数：sensor_type / pos_noise_std / vel_noise_std
 - 关节零位偏移：仿真 vs 真实关节零位差异
-- 安全参数：比仿真更保守的速度限制（max_tcp_speed=1.0 m/s）
+- `from_yaml()` 支持 YAML 度→弧度自动转换（q_lower/q_upper）
 
 #### `robot_interface.py` — RobotInterface
-- 封装 ROS 2 通信：订阅 `/joint_states`，发布位置指令
-- 接口：`get_arm_state()` → [q(6), qdot(6)]，`send_joint_command(q_desired)`
-- 参考：`assets/rm_65/realmanControlNode.py`（ROS 2 + JointState）
+- 封装 Realman SDK：`rm_get_joint_degree()` 读角度，`rm_movej_follow()` / `rm_movej_canfd()` 写角度
+- `connect()` 后自动配置控制器安全参数（碰撞灵敏度/自碰撞/力矩限制/TCP 速度）
+- 内部处理弧度↔角度转换，对外统一弧度制
+- 关节速度：数值微分（SDK 状态字典实测不可靠，错误码 165/-3）
 
-#### `mocap_interface.py` — MocapInterface (ABC)
-- 抽象基类：`get_ball_position()` → (3,) 或 None
-- 子类：`OptiTrackInterface`(NatNet SDK), `ViconInterface`(Stream SDK), `SimulatedMocapInterface`(MuJoCo 调试用)
-- 动捕系统待选定，先实现抽象接口
+#### `ball_sensor.py` — BallSensor(ABC) + SimulatedBallSensor
+- ABC 接口：`start()` / `stop()` / `get_latest() → (pos, ts)` / `is_running`
+- `SimulatedBallSensor`：push 模式（测试+MuJoCo 仿真用）
+- 未来实现：`OptiTrackSensor` / `RealSenseSensor`
 
 #### `ball_perceiver.py` — BallPerceiver
-- 流水线：动捕原始位置 → `BallEstimator` 卡尔曼滤波 → 速度估计 → 抛物线预测
-- 复用 `src/perception/ball_estimator.py`（已有卡尔曼滤波器）
-- 复用 `src/tennis/ball.py` 中的抛物线预测（无 MuJoCo 依赖的纯数学版本）
+- Pipeline: `BallSensor.get_latest()` → 有限差分速度 → `BallEstimator` KF 滤波 → (pos, vel)
+- 有限差分噪声自动缩放：σ_v = σ_p·√2/dt_obs
+- 挂钟时间同步（修复 exp8 dt 陷阱）
+- 过时数据短路（避免零速度注入 KF）
 
-#### `pinocchio_env.py` — PinocchioEnv
-- 替代 `RM65Env`，对齐关键接口：`get_ee_pos()`, `get_ee_vel()`, `get_ee_jacp()`, `get_ee_normal()`, `step_from_state(x, u)`
-- URDF 待确认：需验证 `assets/rm_65/urdf/overseas_65_corrected.urdf` 与真机匹配
-- 所有 FK/Jacobian 计算需考虑底座偏移和旋转（`base_position` + `base_orientation`）
-- URDF 需包含球拍连杆（当前 URDF 可能不含球拍，需要追加）
+#### `safety_monitor.py` — SafetyMonitor
+- 三重检查：关节位置超限 / 关节速度超限 / TCP 速度超限
+- 失败时委托 `RobotInterface.slow_stop()` / `emergency_stop()`
 
-#### `torque_to_position.py` — TorqueToPositionIntegrator
-- MPC 输出力矩 u_k → 积分为关节位置 q_desired
-- 方法：`q_desired = q_current + qdot * dt + 0.5 * (u / M) * dt^2`（简化积分）
-- 或使用 Pinocchio ABA 正向动力学计算精确加速度
-- 真机内部位置控制器跟踪 q_desired
+#### `planning_env.py` — PlanningEnv（位于 `src/ilqt/`）
+- MPC 规划计算环境，基于 MuJoCo 纯计算（不接触真机硬件）
+- 实现 `RobotEnv` Protocol：FK / Jacobian / step_from_state / solve_ik
+- 无球物理/无左臂PD/无碰撞（全禁用，碰撞由控制器固件负责）
+- 支持力矩模式 + 位置模式（`configure_actuator_mode`）
 
-#### `real_runner.py` — RealRunner
-- 主循环：读传感器 → 球感知 → 击球点预测 → iLQR 规划 → 力矩→位置 → 发送指令
-- 复用 `src/ilqt/solver.py` 的 `solve_few_iters()`
-- 复用 `src/ilqt/cost.py` 的 `HittingCost`（Tube + Softmin + 跑道代价）
-- 紧急停止：监听 ROS emergency_stop 话题 + 键盘中断
+### 三层安全架构
+```
+Layer 1: 控制器固件（实时，连接时配置）
+  rm_set_collision_state / rm_set_self_collision_enable / rm_set_controller_torque_limit / rm_set_arm_max_line_speed
 
-### 坐标系标定
-- `configs/real_robot.yaml` 中定义底座在世界坐标系的位置和朝向
-- 标定方法：手动移动机械臂到已知世界坐标点 → 读关节角 → Pinocchio FK → 最小二乘拟合底座位姿
-- 标定工具：`scripts/tools/calibrate_base.py`
-- 所有坐标变换统一在 `PinocchioEnv` 内处理，外部接口使用世界坐标系
+Layer 2: SafetyMonitor（软件，每 tick 检查）
+  关节位置/速度/TCP 速度超限 → slow_stop()
+
+Layer 3: 紧急停止（兜底）
+  rm_set_arm_stop()（不可恢复）/ rm_set_arm_slow_stop()（缓停）/ 硬件急停按钮
+```
 
 ### 安全注意事项
-1. **紧急停止**：`real_runner.py` 监听 ROS emergency_stop 话题 + KeyboardInterrupt
-2. **关节位置限制**：发送前检查 q_desired 在安全范围内
-3. **速度限制**：真机比仿真更保守（max_qdot 降低 20-30%, max_tcp_speed=1.0 m/s）
-4. **工作空间检查**：更严格的 X 平面墙和工作空间限制
-5. **首次运行**：必须先用 `SimulatedMocapInterface` + MuJoCo 端到端验证
-6. **渐进步进**：先低速（ball_speed=3）验证，再逐步提高到 7 m/s
+1. **紧急停止**：`RobotInterface.emergency_stop()` 调用 `rm_set_arm_stop()`
+2. **关节位置限制**：`SafetyMonitor` 检查 q_desired 在 `q_lower`/`q_upper` 范围内
+3. **速度限制**：真机比仿真更保守（max_tcp_speed=1.0 m/s）
+4. **首次运行**：必须先用 `SimulatedBallSensor` + MuJoCo 端到端验证
+5. **渐进步进**：先低速（ball_speed=3）验证，再逐步提高到 7 m/s
 
-### 实施阶段
-| 阶段 | 任务 | 优先级 | 依赖 |
-|------|------|--------|------|
-| P0 | `configs/real_robot.yaml` + `src/real/config.py` | 高 | 无 |
-| P1 | `pinocchio_env.py`（FK/Jacobian/step_from_state） | 高 | URDF 确认 |
-| P2 | `robot_interface.py`（ROS 2 读写关节） | 高 | ROS 2 环境 |
-| P3 | `mocap_interface.py` + `ball_perceiver.py` | 中 | 动捕系统 |
-| P4 | `torque_to_position.py` 力矩→位置积分器 | 高 | P1 |
-| P5 | `real_runner.py` 主循环 | 高 | P1-P4 |
-| P6 | `run_real_robot.py` 入口脚本 | 中 | P5 |
-| P7 | `calibrate_base.py` 标定工具 + 安全测试 | 中 | P1-P6 |
+### 实施进度
+| 阶段 | 状态 | 模块 |
+|------|------|------|
+| Stage 0 | ✅ | `config.py`（12字段）+ `real_robot.yaml`（7节注释） |
+| Stage 1 | ✅ | `robot_env_protocol.py`（Protocol） |
+| Stage 2+3 | ✅ | `planning_env.py`（规划计算环境，MuJoCo 纯计算） |
+| Stage 4 | ✅ | `robot_interface` + `torque_to_position` + `adaptive_timer` + `safety_monitor` |
+| Stage 5 | ✅ | `ball_sensor` + `ball_perceiver` |
+| Stage 6 | ⬜ | ★ MPCController 提取（从 V11 重构为共享类） |
+| Stage 7 | ⬜ | `real_runner.py`（主循环编排） |
 
 ### 待确认事项
-- **URDF**：需验证 `assets/rm_65/urdf/overseas_65_corrected.urdf` 与真机匹配，并追加球拍连杆
-- **动捕系统**：待选定，`mocap_interface.py` 设计为抽象基类
+- **真机 MuJoCo 模型**：当前使用占位模型（rm65_model.xml），真机模型开发中
+- **动捕系统**：待选定，`BallSensor` 设计为抽象基类
 - **球拍安装**：真机球拍安装方式需测量确认（与仿真中垂直安装是否一致）
 - **底座位姿**：需要实际测量后填入 `real_robot.yaml`

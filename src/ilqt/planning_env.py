@@ -1,6 +1,11 @@
-"""真机环境 — MuJoCo 纯计算（无渲染），单臂 + 球拍。
+"""MPC 规划计算环境 — 基于 MuJoCo 的正运动学/雅可比/前向仿真。
 
-实现 RobotEnv Protocol，用于真机部署的 MPC 规划。
+供 iLQR 规划使用：给定关节状态和候选控制序列，模拟未来 N 步的
+末端位置/速度/雅可比，用于优化最优轨迹。
+
+本模块不接触真机硬件。真机关节状态的读取和指令发送由
+RobotInterface 负责，球感知由 BallPerceiver 负责。
+
 与 RM65Env 的核心区别：
   - 无球物理（无 _handle_ball_bounce / BALL_* 常量）
   - 无左臂 PD 维持（左臂固定零位，不影响右臂动力学）
@@ -21,10 +26,11 @@ from src.utils.mujoco_loader import load_mujoco_model
 logger = logging.getLogger(__name__)
 
 
-class RealEnv:
-    """真机环境 — MuJoCo 纯计算（单臂 + 球拍）。
+class PlanningEnv:
+    """MPC 规划计算环境 — MuJoCo 纯计算（单臂 + 球拍）。
 
-    实现 RobotEnv Protocol 接口，加载 rm65_model.xml 但只操作右臂 6 关节。
+    实现 RobotEnv Protocol 接口，加载 MuJoCo 模型做正运动学/雅可比/
+    前向仿真，供 iLQR 规划使用。不接触真机硬件。
     真机模型就绪后换 model_path 即可。
 
     Attributes:
@@ -67,7 +73,7 @@ class RealEnv:
         # 禁用所有 MuJoCo 碰撞（碰撞由控制器固件负责）
         self.model.geom_contype[:] = 0
         self.model.geom_conaffinity[:] = 0
-        logger.info("RealEnv 已禁用所有 MuJoCo 碰撞（由控制器固件负责）")
+        logger.info("PlanningEnv 已禁用所有 MuJoCo 碰撞（碰撞由控制器固件负责）")
 
         # 保存原始力矩模式参数（configure_actuator_mode 切换时恢复用）
         self._torque_ctrlrange = self.model.actuator_ctrlrange[: self.NU].copy()
@@ -367,11 +373,11 @@ class RealEnv:
         else:
             raise ValueError(f"未知执行器模式: {mode}")
 
-    def clone_actuator_config(self, target_env: "RealEnv") -> None:
+    def clone_actuator_config(self, target_env: "PlanningEnv") -> None:
         """将当前 env 的执行器配置复制到目标 env。
 
         Args:
-            target_env: 目标 RealEnv 实例。
+            target_env: 目标 PlanningEnv 实例。
         """
         if self._actuator_mode == 0:
             target_env.configure_actuator_mode("torque")

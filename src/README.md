@@ -7,10 +7,11 @@
 | `robot/` | 机器人模型定义（MuJoCo XML + 正运动学） | `rm65_model.xml`, `kinematics.py` | 9 |
 | `sim/` | MuJoCo 环境封装（状态读写、仿真步进、雅可比缓存） | `rm65_env.py`, `env.py`, `viewer.py` | 91 |
 | `dynamics/` | 动力学线性化（解析/有限差分）+ 前向 rollout | `linearize.py`, `simulate.py` | 13 |
-| `ilqt/` | iLQR 求解器 + 代价函数 + 约束 + 异步重规划 | `solver.py`, `cost.py`, `robot_limits.py`, `utils.py` | 144 |
+| `ilqt/` | iLQR 求解器 + 代价函数 + 约束 + 异步重规划 + 规划计算环境 | `solver.py`, `cost.py`, `planning_env.py`, `robot_env_protocol.py` | 160 |
 | `cpp/` | C++ 加速模块（pybind11：线性化、前向传递、约束检查） | `solver_cpp.py`, `mujoco_utils.h`, `cost_params.h` | 91 |
 | `perception/` | 球状态估计（6D 卡尔曼滤波 + 观测门控） | `ball_estimator.py`, `ball_obs_gate.py` | 31 |
 | `tennis/` | 网球抛物线预测 + 击打点计算 + 球拍接触判断 | `ball.py`, `hitting.py` | 24 |
+| `real/` | 真机部署模块（SDK 封装、安全监控、球感知，不接触 MuJoCo） | `robot_interface.py`, `config.py`, `safety_monitor.py`, `ball_sensor.py` | 35 |
 | `utils/` | 通用工具（跨平台模型加载、噪声注入、数学） | `mujoco_loader.py`, `noise.py`, `math_utils.py` | 32 |
 
 ## 依赖方向
@@ -74,6 +75,8 @@ from src.utils.mujoco_loader import load_mujoco_model     # 跨平台模型加�
 - `utils.py`：前向传递（含 alpha 回退）+ 轨迹指标 + 控制量缩放
 - `async_replanner.py`：异步重规划器（后台线程 iLQR + buffer 机制）
 - `jt_init.py`：位置模式 JT 初始控制 + 后摆 warm-start
+- `robot_env_protocol.py`：`RobotEnv` Protocol（@runtime_checkable，RM65Env/PlanningEnv 共同接口）
+- `planning_env.py`：`PlanningEnv` MPC 规划计算环境（MuJoCo 纯计算，无球/无左臂/无碰撞，供真机管线 iLQR 规划用）
 - `costs/`：模块化代价函数基类（`BaseCost` + `HittingCost`）
 
 ### cpp/ — C++ 加速
@@ -95,6 +98,18 @@ from src.utils.mujoco_loader import load_mujoco_model     # 跨平台模型加�
 
 - `ball.py`：抛物线轨迹预测（无空气阻力）+ serve_box 随机发球
 - `hitting.py`：击打点/时刻计算 + 球拍-球接触判断
+
+### real/ — 真机部署模块
+
+纯真机接口模块，不含 MuJoCo 仿真。规划计算由 `ilqt/planning_env.py` 提供。
+
+- `config.py`：`RealRobotConfig` 配置数据类（从 YAML 加载，含控制器安全参数/PD 增益/感知配置）
+- `robot_interface.py`：`RobotInterface` Realman SDK 封装（角度控制 IP/CANFD 模式 + 连接时自动配置控制器安全参数）
+- `torque_to_position.py`：`TorqueToPositionIntegrator` 力矩→位置积分器（备用，位置模式不用）
+- `adaptive_timer.py`：`AdaptiveTimer` 在线自适应频率控制（EMA 平滑）
+- `safety_monitor.py`：`SafetyMonitor` 软件层安全检查（关节位置/速度/TCP 超限 → 委托 RobotInterface 急停）
+- `ball_sensor.py`：`BallSensor` ABC + `SimulatedBallSensor`（动捕/相机抽象接口）
+- `ball_perceiver.py`：`BallPerceiver` 球感知器（sensor → 有限差分速度 → KF 滤波 → pos/vel）
 
 ### utils/ — 工具
 

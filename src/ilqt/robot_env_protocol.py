@@ -1,7 +1,7 @@
-"""RobotEnv Protocol — 仿真/真机环境共同接口。
+"""RobotEnv Protocol — 仿真/规划环境的共同接口。
 
 iLQR 求解器、代价函数、安全滤波器仅依赖此协议，
-实现仿真（RM65Env）与真机（RealEnv）的零耦合替换。
+实现仿真（RM65Env）与规划计算（PlanningEnv）的零耦合替换。
 """
 
 from typing import Protocol, runtime_checkable
@@ -11,7 +11,7 @@ import numpy as np
 
 @runtime_checkable
 class RobotEnv(Protocol):
-    """机器人环境协议 — RM65Env 和 RealEnv 的共同接口。
+    """机器人环境协议 — RM65Env 和 PlanningEnv 的共同接口。
 
     维度常量 NQ/NX/NU 为类变量（非 property），
     与 MujocoEnv 基类定义一致。
