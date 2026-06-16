@@ -530,7 +530,7 @@ def main():
     report = generate_report(result_a, result_b, 
                              [int(s) if s == int(s) else s for s in args.speeds_a],
                              [int(s) if s == int(s) else s for s in args.speeds_b])
-    report_path = SCRIPT_DIR / "docs" / "experiment_report.md"
+    report_path = SCRIPT_DIR / "docs" / "experiments" / "reports" / "experiment_report.md"
     report_path.parent.mkdir(exist_ok=True)
     with open(report_path, "w", encoding="utf-8") as f:
         f.write(report)

@@ -19,4 +19,4 @@
 | buffer_exhaust_count | buffer 耗尽次数 |
 
 ## 状态
-✅ 已完成 → 参见 `docs/realtime_performance_analysis.md`
+✅ 已完成 → 参见 `docs/experiments/reports/2026-05-31_exp5_realtime.md`
