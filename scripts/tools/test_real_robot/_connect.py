@@ -1,0 +1,190 @@
+"""_connect.py — 真机测试公共模块。
+
+所有测试脚本 import 此模块获取连接和安全预检功能。
+"""
+
+import argparse
+import sys
+from pathlib import Path
+
+import numpy as np
+
+# 确保项目根目录在 sys.path 中
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
+from src.real.config import RealRobotConfig
+from src.real.robot_interface import RobotInterface
+from src.real.safety_monitor import SafetyMonitor
+
+
+def add_config_arg(parser: argparse.ArgumentParser) -> None:
+    """为 argparse 添加 --config 参数。"""
+    parser.add_argument(
+        "--config",
+        type=str,
+        default=str(_PROJECT_ROOT / "configs" / "real_robot.yaml"),
+        help="真机配置 YAML 路径（默认: configs/real_robot.yaml）",
+    )
+
+
+def add_algo_check_arg(parser: argparse.ArgumentParser) -> None:
+    """为 argparse 添加 --no-algo-check 参数。"""
+    parser.add_argument(
+        "--no-algo-check",
+        action="store_true",
+        default=False,
+        help="跳过 SDK Algo 类自碰撞/奇异性检查（仅保留 SafetyMonitor 限位检查）",
+    )
+
+
+def load_config(config_path: str) -> RealRobotConfig:
+    """加载 YAML 配置。
+
+    Args:
+        config_path: YAML 文件路径。
+
+    Returns:
+        RealRobotConfig 实例。
+    """
+    path = Path(config_path)
+    if not path.exists():
+        print(f"❌ 配置文件不存在: {path}")
+        sys.exit(1)
+    return RealRobotConfig.from_yaml(path)
+
+
+def load_and_connect(config_path: str = None) -> tuple[RobotInterface, RealRobotConfig]:
+    """加载配置，连接真机，返回 (RobotInterface, config)。
+
+    连接失败时打印错误并退出（不返回 None）。
+
+    Args:
+        config_path: YAML 路径。None 时用默认路径。
+
+    Returns:
+        (RobotInterface, RealRobotConfig)
+    """
+    if config_path is None:
+        config_path = str(_PROJECT_ROOT / "configs" / "real_robot.yaml")
+
+    config = load_config(config_path)
+    print(f"正在连接 {config.robot_ip}:{config.robot_port} ...")
+
+    ri = RobotInterface(config)
+    if not ri.connect():
+        print("❌ 连接失败，请检查:")
+        print(f"  - 机械臂 IP 地址: {config.robot_ip}")
+        print("  - 网线是否连接")
+        print("  - Realman SDK 是否安装: pip install Robotic_Arm")
+        sys.exit(1)
+
+    print(f"✅ 连接成功 {config.robot_ip}:{config.robot_port}")
+    return ri, config
+
+
+def init_algo():
+    """初始化 SDK Algo 类（用于自碰撞/奇异性预检）。
+
+    配置球拍工具包络球（粗略估计，后续精调）。
+
+    Returns:
+        Algo 实例，或 None（SDK 不可用时）。
+    """
+    try:
+        from Robotic_Arm.rm_robot_interface import (
+            rm_robot_arm_model_e,
+            rm_force_type_e,
+        )
+
+        # 尝试导入 Algo 类（不同 SDK 版本路径可能不同）
+        try:
+            from Robotic_Arm.rm_robot_interface import Algo
+        except ImportError:
+            return None
+
+        algo = Algo(rm_robot_arm_model_e.RM_MODEL_RM_65_E, rm_force_type_e.RM_MODEL_RM_B_E)
+
+        # 配置球拍工具包络球（粗略估计）
+        # 球拍: 手柄长 25cm + 拍面 12cm，沿 Z 轴
+        # 球 0: 法兰中心，球 1: 手柄中部，球 2: 拍面中心
+        try:
+            from Robotic_Arm.rm_robot_interface import rm_tool_sphere_t
+            spheres = [
+                rm_tool_sphere_t(x=0, y=0, z=0.0, radius=0.03),
+                rm_tool_sphere_t(x=0, y=0, z=0.12, radius=0.02),
+                rm_tool_sphere_t(x=0, y=0, z=0.25, radius=0.13),
+            ]
+            for i, s in enumerate(spheres):
+                algo.rm_algo_set_tool_envelope(i, s)
+        except Exception:
+            pass
+
+        return algo
+    except ImportError:
+        return None
+
+
+def pre_motion_check(
+    ri: RobotInterface,
+    monitor: SafetyMonitor,
+    q_desired: np.ndarray,
+    arm_state: np.ndarray = None,
+    algo=None,
+) -> tuple[bool, str]:
+    """运动前安全预检。
+
+    检查项（按顺序）:
+      1. SafetyMonitor 关节位置限位
+      2. SafetyMonitor 关节速度限位
+      3. SDK Algo 自碰撞检测（algo 非 None 时）
+      4. SDK Algo 奇异性检测（algo 非 None 时）
+
+    Args:
+        ri: RobotInterface 实例。
+        monitor: SafetyMonitor 实例。
+        q_desired: (6,) 目标关节角度，弧度。
+        arm_state: (12,) 当前臂状态。None 时从 ri 读取。
+        algo: Algo 实例。None 时跳过碰撞/奇异性检查。
+
+    Returns:
+        (is_safe, message) — 是否通过，原因说明。
+    """
+    if arm_state is None:
+        arm_state = ri.get_arm_state()
+
+    # 1. SafetyMonitor 限位检查
+    if not monitor.is_safe(arm_state, q_desired):
+        return False, "❌ 限位检查未通过（关节位置/速度/TCP 超限）"
+
+    # 2. SDK Algo 自碰撞检测
+    if algo is not None:
+        q_deg = np.degrees(q_desired).tolist()
+        try:
+            ret = algo.rm_algo_safety_robot_self_collision_detection(q_deg)
+            if ret == 1:
+                return False, "❌ 自碰撞风险"
+        except Exception:
+            pass
+
+        # 3. SDK Algo 奇异性检测
+        try:
+            ret, dist = algo.rm_algo_kin_robot_singularity_analyse(q_deg)
+            if ret != 0:
+                codes = {0: "正常", -1: "肩部奇异", -2: "肘部奇异", -3: "腕部奇异"}
+                return False, f"❌ 奇异性风险 ({codes.get(ret, f'code={ret}')}, dist={dist:.3f}m)"
+        except Exception:
+            pass
+
+    return True, "✅ 预检通过"
+
+
+def safe_disconnect(ri: RobotInterface) -> None:
+    """安全断开连接（先缓停再断开）。"""
+    try:
+        ri.slow_stop()
+    except Exception:
+        pass
+    ri.disconnect()
+    print("已安全断开连接")
