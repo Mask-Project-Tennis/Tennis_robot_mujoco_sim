@@ -1,0 +1,24 @@
+# 真机部署配置
+# 详细参数说明见 plans/real_robot_framework.md §13
+
+robot:
+  ip: "192.168.1.18"
+  port: 8080
+
+control:
+  control_mode: "ip"            # "ip" (默认, rm_movej_follow) | "canfd" (rm_movej_canfd)
+  dt: 0.005                     # MPC 规划步长 (秒)
+  canfd_trajectory_mode: 1      # CANFD: 0=透传 1=曲线拟合 2=滤波
+  canfd_smooth_radio: 50        # CANFD 平滑系数 0-100
+
+torque_to_position:
+  M_diag: [5.0, 5.0, 3.0, 1.0, 1.0, 0.5]  # 对角惯量近似
+
+safety:
+  max_tcp_speed: 1.0            # 末端最大线速度 m/s（比仿真保守）
+  max_qdot: [3.14, 3.14, 3.14, 3.14, 3.14, 3.14]  # 关节最大角速度 rad/s
+  # 关节位置限制（RM-65B 出厂范围，度）
+  q_lower: [-180, -270, -150, -180, -115, -180]
+  q_upper: [ 180,   90,  150,  180,  115,  180]
+
+joint_zero_offset: [0, 0, 0, 0, 0, 0]  # 仿真 vs 真实零位偏移 (rad)

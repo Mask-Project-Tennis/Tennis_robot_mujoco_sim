@@ -50,6 +50,18 @@ class RealRobotConfig:
     canfd_trajectory_mode: int = 1
     canfd_smooth_radio: int = 50
 
+    # 关节位置限制（RM-65B 出厂范围，弧度）
+    q_lower: np.ndarray = field(
+        default_factory=lambda: np.radians(
+            np.array([-180, -270, -150, -180, -115, -180])
+        )
+    )
+    q_upper: np.ndarray = field(
+        default_factory=lambda: np.radians(
+            np.array([180, 90, 150, 180, 115, 180])
+        )
+    )
+
     # 关节零位偏移（仿真 vs 真实）
     joint_zero_offset: np.ndarray = field(
         default_factory=lambda: np.zeros(6)
@@ -85,7 +97,8 @@ class RealRobotConfig:
             展平后的 kwargs 字典。
         """
         valid_names = {f.name for f in fields(RealRobotConfig)}
-        array_keys = {"max_qdot", "M_diag", "joint_zero_offset"}
+        array_keys = {"max_qdot", "M_diag", "joint_zero_offset",
+                      "q_lower", "q_upper"}
         kwargs: dict[str, Any] = {}
         for section in data.values():
             if isinstance(section, dict):
