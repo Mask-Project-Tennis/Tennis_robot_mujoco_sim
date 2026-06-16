@@ -89,6 +89,7 @@ mujoco_sim/
 │   └── paper_review.md                # 论文审稿与迭代
 ├── src/
 │   ├── __init__.py
+│   ├── README.md                     # 源代码模块索引与依赖说明
 │   ├── robot/                         # 机器人模型定义
 │   │   ├── __init__.py
 │   │   ├── rm65_model.xml             # MuJoCo XML 模型（双臂12DOF + 球拍 + 球）
