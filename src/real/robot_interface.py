@@ -86,8 +86,9 @@ class RobotInterface:
         """
         ret, joint_deg = self._arm.rm_get_joint_degree()
         if ret != 0:
-            logger.error("rm_get_joint_degree 失败，错误码 %d", ret)
-            return np.zeros(12)
+            raise RuntimeError(
+                f"rm_get_joint_degree 失败，错误码 {ret}"
+            )
 
         q_rad = np.radians(np.array(joint_deg[:6], dtype=np.float64))
 
@@ -144,8 +145,10 @@ class RobotInterface:
         logger.info("缓停已触发")
 
     def disconnect(self) -> None:
-        """断开机械臂连接。"""
+        """断开机械臂连接，重置内部状态。"""
         if self._arm is not None:
             self._arm.rm_delete_robot_arm()
             self._connected = False
+            self._last_q = None
+            self._last_time = None
             logger.info("机械臂连接已断开")

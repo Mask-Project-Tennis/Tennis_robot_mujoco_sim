@@ -3,7 +3,7 @@
 从 YAML 加载或直接构造，包含机器人连接、控制模式、安全参数等。
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any
 
@@ -76,17 +76,22 @@ class RealRobotConfig:
     def _flatten(data: dict[str, Any]) -> dict[str, Any]:
         """将嵌套 YAML 展平为 dataclass kwargs。
 
+        仅保留 dataclass 已定义的字段名，忽略未知键。
+
         Args:
             data: 原始 YAML 字典（含 robot/control/safety 等嵌套节）。
 
         Returns:
             展平后的 kwargs 字典。
         """
+        valid_names = {f.name for f in fields(RealRobotConfig)}
         array_keys = {"max_qdot", "M_diag", "joint_zero_offset"}
         kwargs: dict[str, Any] = {}
         for section in data.values():
             if isinstance(section, dict):
                 for k, v in section.items():
+                    if k not in valid_names:
+                        continue
                     if k in array_keys and isinstance(v, list):
                         kwargs[k] = np.array(v)
                     else:

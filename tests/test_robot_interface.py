@@ -45,7 +45,8 @@ class MockRoboticArm:
         trajectory_mode: int = 0,
         radio: int = 0,
     ) -> int:
-        self.calls.append(("movej_canfd", list(joint), follow))
+        self.calls.append(("movej_canfd", list(joint), follow,
+                           trajectory_mode, radio))
         self._joint_deg = list(joint)
         return 0
 
@@ -99,6 +100,20 @@ class TestRobotInterfaceState:
         state = ri.get_arm_state()
         assert state.shape == (12,)
         np.testing.assert_allclose(state[0], np.pi / 2, atol=1e-10)
+
+    def test_get_arm_state_raises_on_sdk_failure(
+        self, mock_arm: MockRoboticArm, config: RealRobotConfig
+    ):
+        """SDK 返回错误码时，get_arm_state 抛出 RuntimeError（而非静默返回零）。"""
+
+        def fail_get_joint_degree():
+            return (-1, [0.0] * 6)
+
+        mock_arm.rm_get_joint_degree = fail_get_joint_degree
+        ri = RobotInterface(config, arm=mock_arm)
+        ri.connect()
+        with pytest.raises(RuntimeError, match="rm_get_joint_degree"):
+            ri.get_arm_state()
 
     def test_velocity_numerical_diff(
         self, monkeypatch, mock_arm: MockRoboticArm, config: RealRobotConfig
@@ -156,6 +171,8 @@ class TestRobotInterfaceControl:
         canfd_calls = [c for c in mock_arm.calls if c[0] == "movej_canfd"]
         assert len(canfd_calls) == 1
         assert canfd_calls[0][2] is True  # follow=True
+        assert canfd_calls[0][3] == 1     # trajectory_mode
+        assert canfd_calls[0][4] == 50    # radio
 
 
 class TestRobotInterfaceSafety:
