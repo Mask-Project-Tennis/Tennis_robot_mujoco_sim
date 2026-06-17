@@ -21,6 +21,7 @@ import numpy as np
 import mujoco
 from numpy.typing import NDArray
 
+from src.ilqt.ball_predictor import BallPredictor
 from src.utils.mujoco_loader import load_mujoco_model
 
 logger = logging.getLogger(__name__)
@@ -42,6 +43,13 @@ class PlanningEnv:
     NQ: int = 6
     NX: int = 12
     NU: int = 6
+
+    # 兼容常量（PlanningEnv 无实际球 qpos，值为 NQ）
+    BALL_QPOS_START: int = 6
+    BALL_QVEL_START: int = 6
+
+    # 左臂关节数（rm65_model.xml 含双臂，C++ 线性化需维持左臂位姿）
+    LEFT_ARM_NQ: int = 6
 
     def __init__(
         self,
@@ -90,7 +98,13 @@ class PlanningEnv:
         self._jacp_cache: np.ndarray | None = None
         self._jacr_cache: np.ndarray | None = None
 
+        # 左臂初始关节角度（C++ 线性化需维持左臂位姿，避免双臂模型漂移）
+        self.init_q_left: np.ndarray = np.zeros(self.LEFT_ARM_NQ)
+
         mujoco.mj_forward(self.model, self.data)
+
+        # 球轨迹预测器（解析抛物线+弹跳，委托给 BallPredictor）
+        self._ball = BallPredictor(dt=self.dt)
 
     # ── 状态读写 ──
 
@@ -384,3 +398,56 @@ class PlanningEnv:
         else:
             target_env.configure_actuator_mode("position", self._kp, self._kd)
             target_env.configure_feedforward(self._use_feedforward)
+
+    # ── 球状态委托（鸭子兼容 RM65Env，供 do_replan 复用） ──
+
+    def set_ball_state(self, pos: np.ndarray, vel: np.ndarray) -> None:
+        """设置虚拟球状态（解析预测用，不做 MuJoCo 物理）。
+
+        Args:
+            pos: 球的当前位置 (3,)。
+            vel: 球的当前速度 (3,)。
+        """
+        self._ball.set_state(pos, vel)
+
+    def get_ball_state(self) -> tuple[np.ndarray, np.ndarray]:
+        """返回虚拟球 (pos, vel)。
+
+        Returns:
+            (位置 (3,), 速度 (3,)) 元组。
+        """
+        return self._ball.get_state()
+
+    def get_ball_pos(self) -> np.ndarray:
+        """返回虚拟球位置 (3,)。"""
+        return self._ball.get_state()[0]
+
+    def get_ball_vel(self) -> np.ndarray:
+        """返回虚拟球速度 (3,)。"""
+        return self._ball.get_state()[1]
+
+    def set_ball_vel(self, vel: np.ndarray) -> None:
+        """仅设置虚拟球速度（不改变位置）。
+
+        Args:
+            vel: 球的新速度 (3,)。
+        """
+        pos, _ = self._ball.get_state()
+        self._ball.set_state(pos, vel)
+
+    def predict_ball_trajectory(
+        self, ball_pos: np.ndarray, ball_vel: np.ndarray, n_steps: int
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """解析抛物线预测球轨迹（含地面弹跳）。
+
+        委托给 BallPredictor.predict_from。不改变 PlanningEnv 的 MuJoCo 状态。
+
+        Args:
+            ball_pos: 初始位置 (3,)。
+            ball_vel: 初始速度 (3,)。
+            n_steps: 预测步数。
+
+        Returns:
+            (positions (n,3), velocities (n,3))。
+        """
+        return self._ball.predict_from(ball_pos, ball_vel, n_steps)

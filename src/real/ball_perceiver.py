@@ -141,3 +141,11 @@ class BallPerceiver:
         self._last_sensor_ts = None
         self._filtered = None
         logger.debug("BallPerceiver 已重置")
+
+    def start_sensor(self) -> None:
+        """启动底层传感器。"""
+        self._sensor.start()
+
+    def stop_sensor(self) -> None:
+        """停止底层传感器。"""
+        self._sensor.stop()

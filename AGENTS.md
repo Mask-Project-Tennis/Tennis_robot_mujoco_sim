@@ -355,15 +355,19 @@ mujoco_sim/
 - 激活环境: `conda activate mujoco_tennis`
 - 安装依赖: `pip install -r requirements.txt`
 - 编译 C++ 扩展: `python setup.py build_ext --inplace`
-- 运行 MPC 仿真（当前活跃版本）: `python scripts/rm65_mpc_v11.py --serve-box --ball-speed 7`
+- Linux 设置 MuJoCo 库路径: `export LD_LIBRARY_PATH="$(python -c 'import mujoco, os; print(os.path.dirname(mujoco.__file__))'):$LD_LIBRARY_PATH"`
+- 运行 MPC 仿真（力矩模式，默认）: `python scripts/rm65_mpc_v11.py --serve-box --ball-speed 7`
 - 位置模式仿真: `python scripts/rm65_mpc_v11.py --serve-box --ball-speed 7 --position-mode`
 - 离线测试: `python scripts/rm65_mpc_tube_constraint.py --serve-box --ball-speed 9`
 - 关节安全扫描: `python scripts/scan_joint_safety.py`
 - 运行测试: `pytest tests/`
 - 代码检查: `ruff check src/ tests/ scripts/`
 - 类型检查: `mypy src/`
-- 真实部署: `python scripts/run_real_robot.py`
-- 底座标定: `python scripts/tools/calibrate_base.py`
+- 真机接口测试（逐个 API 验证）:
+  - 连接测试: `python scripts/tools/test_real_robot/01_connect_disconnect.py`
+  - 读关节: `python scripts/tools/test_real_robot/02_read_joints.py`
+  - 回零位: `python scripts/tools/test_real_robot/04_send_zero_pose.py`
+  - 完整清单: `scripts/tools/test_real_robot/README.md`
 
 ## 批量实验架构
 

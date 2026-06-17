@@ -199,9 +199,13 @@ class AsyncReplanner:
             return self._is_planning
 
     def _ensure_env_plan(self) -> RM65Env:
-        """在后台线程中延迟创建规划环境（避免主线程资源竞争）。"""
+        """在后台线程中延迟创建规划环境（避免主线程资源竞争）。
+
+        使用 type(self._env) 动态创建，支持 RM65Env（仿真）和 PlanningEnv（真机）。
+        """
         if self.env_plan is None:
-            self.env_plan = RM65Env(self._model_path, dt=self._dt)
+            env_class = type(self._env)
+            self.env_plan = env_class(self._model_path, dt=self._dt)
             if hasattr(self._env, 'init_q_left'):
                 self.env_plan.init_q_left = self._env.init_q_left.copy()
             self._env.clone_actuator_config(self.env_plan)
