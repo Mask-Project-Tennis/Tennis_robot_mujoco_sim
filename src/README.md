@@ -67,7 +67,7 @@ from src.utils.mujoco_loader import load_mujoco_model     # 跨平台模型加�
 - `linearize.py`：解析线性化（`linearize_analytical_trajectory`）+ 有限差分 + 快速模式（跳过 H_q/H_qdot）
 - `simulate.py`：前向 rollout 工具
 
-### ilqt/ — iLQR 核心
+### ilqt/ — iLQR 核心 + 管线架构
 
 - `solver.py`：纯 Python iLQR 求解器（后向 Riccati + 前向线搜索）
 - `cost.py`：`HittingCost` 代价函数（终端 Q_p/Q_v/Q_n + 运行 R/Q_p_running/平滑项/X 墙/body 规避/softmin）
@@ -78,6 +78,28 @@ from src.utils.mujoco_loader import load_mujoco_model     # 跨平台模型加�
 - `robot_env_protocol.py`：`RobotEnv` Protocol（@runtime_checkable，RM65Env/PlanningEnv 共同接口）
 - `planning_env.py`：`PlanningEnv` MPC 规划计算环境（MuJoCo 纯计算，无球/无左臂/无碰撞，供真机管线 iLQR 规划用）
 - `costs/`：模块化代价函数基类（`BaseCost` + `HittingCost`）
+- `tube_types.py`：Tube 数据结构（TubeConfig/HitWindow/HittingTube/ReplanState）
+- `tube_builder.py`：Tube 构建函数（search_hit_window/build_hitting_tube）
+- `tube_cost.py`：代价包装器（TubeHittingCostWrapper/TubeOnlyCost/SoftminOnlyCost）
+- `mpc_helpers.py`：JT 初始控制 dispatch + fix_joint5 + R 退火调度
+- `replan_core.py`：`do_replan` 完整重规划编排（含 Tube 构建 + iLQR 求解 + warm-start）
+- `ball_predictor.py`：`BallPredictor` 解析抛物线预测（无 MuJoCo 依赖）
+- `mpc_controller.py`：★ `MPCController` 可组合规划模块（封装完整规划生命周期，含策略注入）+ `MPCConfig` + `MPCStepResult`
+- `episode_runner.py`：★ `EpisodeRunner` 通用管线编排器（感知→规划→安全→执行→诊断，仿真/真机共用）
+- `replan_config.py`：★ `ReplanConfig` 类型安全配置（替代 43-key dict）
+- `strategies/`：★ 可插拔策略模块
+  - `follow_through.py`：`FollowThroughPolicy`（Planned/Contact/No 随挥策略）
+  - `hit_point_refiner.py`：`HitPointRefiner`（Hybrid/No 击球点后过滤）
+  - `replan_mode.py`：`ReplanMode`（Sync/Async 重规划模式）
+  - `phase_schedule.py`：`PhaseSchedule`（far/mid/near 阶段调度）
+  - `direction.py`：`DirectionPolicy`（来球反方向计算）
+- `components/`：★ 可组合管线组件
+  - `protocols.py`：4 个 Protocol（Perception/Executor/Safety/Diagnostics）
+  - `sim_perception.py`：`SimPerception`（读 MuJoCo 球状态）
+  - `sim_executor.py`：`SimExecutor`（env.step_full 物理步进）
+  - `predictive_safety.py`：`PredictiveSafetyFilter`（beta 递降 + X 墙，用 RobotEnv 预测）
+  - `basic_safety.py`：`BasicSafetyFilter`（仅限位检查，无预测）
+  - `sim_diagnostics.py`：`SimDiagnostics`（tube 指标 + 碰撞检测 + history）
 
 ### cpp/ — C++ 加速
 
@@ -110,6 +132,13 @@ from src.utils.mujoco_loader import load_mujoco_model     # 跨平台模型加�
 - `safety_monitor.py`：`SafetyMonitor` 软件层安全检查（关节位置/速度/TCP 超限 → 委托 RobotInterface 急停）
 - `ball_sensor.py`：`BallSensor` ABC + `SimulatedBallSensor`（动捕/相机抽象接口）
 - `ball_perceiver.py`：`BallPerceiver` 球感知器（sensor → 有限差分速度 → KF 滤波 → pos/vel）
+- `robot_arm_protocol.py`：`RobotArmInterface` Protocol（@runtime_checkable，真机/Mock 共同接口）
+- `fake_robot.py`：`FakeRobot` Mock 实现（简单一阶动力学，测试用）
+- `real_runner.py`：`RealRunner` 真机部署主循环（start/step/stop 分步 + run_episode EpisodeRunner 编排）
+- `runner_factory.py`：工厂函数（build_robot_limits/build_solver/build_replan_cfg + 共享常量）
+- `robot_executor.py`：`RobotExecutor` 适配器（RobotArmInterface → ExecutorComponent）
+- `perception_adapter.py`：`PerceptionAdapter` 适配器（BallPerceiver → PerceptionComponent）
+- `safety_adapter.py`：`SafetyAdapter` 适配器（SafetyMonitor → SafetyComponent）
 
 ### utils/ — 工具
 

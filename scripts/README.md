@@ -36,7 +36,8 @@
 | `rm65_mpc_v8.py` | V8：解耦 Tube 走廊 + Softmin 终端，`--no-tube`/`--no-softmin` | run_20hits_video import + run_v8_exp subprocess |
 | `rm65_mpc_v9.py` | V9：V8 + 更长随挥距离(0.20m) + 更多随挥步数(80步) | run_20hits_video import + v9 消融 subprocess |
 | `rm65_mpc_v10.py` | V10：V9 去随挥 + 40cm 终端偏移 | v10 消融 subprocess |
-| `rm65_mpc_v11.py` | V11：V9 bug修复 + sigmoid 权重调度 + 远段轻量 iLQR | exp9 batch subprocess |
+| `rm65_mpc_v11.py` | V11：V9 bug修复 + sigmoid 权重调度 + 远段轻量 iLQR（⚠️ 已废弃，保留对比） | — |
+| `rm65_mpc_v12.py` | ★ V12：EpisodeRunner 管线架构 + MPCController 策略化 + 可组合组件（命中率 4/4） | exp9/11/12 batch subprocess |
 | `run_20hits_video.py` | 连续 20 次击打视频生成脚本（V9） | 独立运行 |
 
 ### sim/ — 独立仿真脚本（17 个）

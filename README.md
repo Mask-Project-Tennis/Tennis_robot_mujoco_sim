@@ -34,14 +34,14 @@ export LD_LIBRARY_PATH="$(python -c 'import mujoco, os; print(os.path.dirname(mu
 ### 仿真
 
 ```bash
-# ★ V11 最新版 — 力矩模式（默认）
-python scripts/rm65_mpc_v11.py --serve-box --ball-speed 7 --viewer
+# ★ V12 最新版 — EpisodeRunner 管线架构（力矩模式，默认）
+python scripts/rm65_mpc_v12.py --serve-box --ball-speed 7 --viewer
 
-# V11 位置模式（模拟真机角度控制）
-python scripts/rm65_mpc_v11.py --serve-box --ball-speed 7 --position-mode --viewer
+# V12 位置模式（模拟真机角度控制）
+python scripts/rm65_mpc_v12.py --serve-box --ball-speed 7 --position-mode --viewer
 
 # 指定随机种子
-python scripts/rm65_mpc_v11.py --serve-box --ball-speed 7 --seed 42 --viewer
+python scripts/rm65_mpc_v12.py --serve-box --ball-speed 7 --seed 42 --viewer
 
 # 离线仿真（无渲染，更快）
 python scripts/rm65_mpc_tube_constraint.py --serve-box --ball-speed 9 --no-plot
@@ -66,7 +66,7 @@ python scripts/tools/test_real_robot/04_send_zero_pose.py        # 回零位
 ### 测试
 
 ```bash
-# 运行全部测试（217 tests）
+# 运行全部测试（311 tests）
 pytest tests/
 
 # 代码检查
@@ -84,7 +84,7 @@ ruff check src/ tests/ scripts/
 MPC 输出关节力矩 `u = tau(6)`，MuJoCo `motor` 执行器直接输出力矩到关节。
 
 ```bash
-python scripts/rm65_mpc_v11.py --serve-box --ball-speed 7
+python scripts/rm65_mpc_v12.py --serve-box --ball-speed 7
 ```
 
 ### 位置模式（`--position-mode`）
@@ -96,7 +96,7 @@ tau = Kp * (q_desired - q) - Kd * qdot
 iLQR 在 PD 执行器动态下规划最优 q_desired 轨迹，前馈补偿重力+科氏力。
 
 ```bash
-python scripts/rm65_mpc_v11.py --serve-box --ball-speed 7 --position-mode
+python scripts/rm65_mpc_v12.py --serve-box --ball-speed 7 --position-mode
 ```
 
 **真机使用位置模式** — Realman SDK `rm_movej_follow` 接受角度指令，PlanningEnv 用 MuJoCo PD 执行器模拟真机控制器。
@@ -228,7 +228,7 @@ Layer 3: 紧急停止（兜底）
 
 ---
 
-## V11 命令行参数
+## V12 命令行参数
 
 | 参数 | 类型 | 默认 | 说明 |
 |------|------|------|------|
@@ -246,7 +246,7 @@ Layer 3: 紧急停止（兜底）
 | `--max-tcp` | float | None | TCP 线速度硬限制 (m/s) |
 | `--terminal-exempt-steps` | int | None | 终段 qdot/TCP 豁免步数 |
 
-> V5 参数表已过时，请使用 V11。完整参数列表运行 `python scripts/rm65_mpc_v11.py --help`
+> V11 已废弃，请使用 V12。完整参数列表运行 `python scripts/rm65_mpc_v12.py --help`
 
 ---
 
@@ -266,7 +266,8 @@ mujoco_sim/
 │   └── real_robot.yaml                   # 真机配置（7节+丰富注释）
 │
 ├── scripts/
-│   ├── rm65_mpc_v11.py                   # ★ V11 最新仿真主脚本
+│   ├── rm65_mpc_v12.py                   # ★ V12 最新仿真主脚本（EpisodeRunner 管线架构）
+│   ├── rm65_mpc_v11.py                   # V11（保留对比基准）
 │   ├── rm65_mpc_tube_constraint.py       # 离线仿真
 │   ├── tools/
 │   │   ├── rm65_joint_viewer.py          # 关节调节查看器
