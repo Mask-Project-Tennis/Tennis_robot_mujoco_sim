@@ -22,10 +22,13 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from numpy.typing import NDArray
+
+if TYPE_CHECKING:
+    from src.ilqt.mpc_controller import MPCConfig
 
 from src.ilqt.async_replanner import AsyncReplanner, PlanRequest
 from src.ilqt.replan_core import do_replan
@@ -416,3 +419,91 @@ class RealRunner:
         }
         logger.info("RealRunner.stop: %s", metrics)
         return metrics
+
+    # ── EpisodeRunner 编排模式 ──
+
+    def run_episode(self, max_steps: int = 500) -> dict[str, Any]:
+        """运行完整 episode（内部用 EpisodeRunner 统一编排）。
+
+        与 start/step/stop 分步接口等价，但通过 EpisodeRunner 组合
+        MPCController + PerceptionAdapter + SafetyAdapter + RobotExecutor，
+        统一仿真/真机编排路径。
+
+        流程：
+            1. 组装 4 个组件（mpc/perception/safety/executor）
+            2. 连接机器人 + 启动球传感器
+            3. EpisodeRunner.run(max_steps)
+            4. 清理（停止传感器 + 断开机器人）
+
+        Args:
+            max_steps: 最大运行步数。
+
+        Returns:
+            metrics dict，含 total_steps/safe_steps/mpc_done 等键。
+        """
+        # 延迟导入：避免模块级循环依赖
+        from src.ilqt.episode_runner import EpisodeRunner
+        from src.ilqt.mpc_controller import MPCController
+        from src.real.perception_adapter import PerceptionAdapter
+        from src.real.robot_executor import RobotExecutor
+        from src.real.safety_adapter import SafetyAdapter
+
+        # 1. 组装组件
+        mpc = MPCController(self._env, self._build_episode_mpc_config())
+        perception = PerceptionAdapter(self._perceiver)
+        safety = SafetyAdapter(self._safety, self._env)
+        executor = RobotExecutor(self._robot)
+
+        # 2. 启动硬件
+        self._robot.connect()
+        self._perceiver.start_sensor()
+        logger.info("RealRunner.run_episode: 硬件已就绪，开始编排")
+
+        # 3. EpisodeRunner 编排
+        runner = EpisodeRunner(
+            mpc=mpc,
+            perception=perception,
+            safety=safety,
+            executor=executor,
+        )
+        try:
+            metrics = runner.run(max_steps=max_steps)
+        finally:
+            # 4. 清理（异常安全）
+            try:
+                self._perceiver.stop_sensor()
+            except Exception as e:
+                logger.warning("RealRunner.run_episode: 停止球传感器异常: %s", e)
+            try:
+                self._robot.disconnect()
+            except Exception as e:
+                logger.warning("RealRunner.run_episode: 断开机器人异常: %s", e)
+
+        logger.info("RealRunner.run_episode: %s", metrics)
+        return metrics
+
+    def _build_episode_mpc_config(self) -> "MPCConfig":
+        """构建 run_episode 专用 MPCConfig（真机位置模式对齐）。
+
+        从现有 replan_cfg 提取时间/horizon 参数（保持与 start/step/stop
+        路径一致），迭代次数采用真机保守值（少迭代减延迟）。
+
+        Returns:
+            MPCConfig 实例（位置模式，真机对齐）。
+        """
+        from src.ilqt.mpc_controller import MPCConfig
+
+        return MPCConfig(
+            is_position_mode=True,
+            version="real",
+            dt=float(self._replan_cfg.get("dt", 0.005)),
+            total_horizon=int(self._replan_cfg.get("total_horizon", 200)),
+            fixed_horizon=int(self._replan_cfg.get("fixed_horizon", 60)),
+            replan_interval=int(self._replan_cfg.get("replan_interval", 20)),
+            max_iter_per_plan=3,
+            first_plan_iters=5,
+            near_plan_iters=2,
+            near_threshold=80,
+            far_threshold=50,
+            async_mode=False,
+        )

@@ -34,6 +34,7 @@ from src.ilqt.tube_cost import (
 from src.tennis.hitting import find_hitting_point_physics
 
 if TYPE_CHECKING:
+    from src.ilqt.replan_config import ReplanConfig
     from src.sim.rm65_env import RM65Env
 
 
@@ -44,7 +45,7 @@ def do_replan(
     request: PlanRequest,
     env_plan: "RM65Env",
     state: ReplanState,
-    cfg: dict,
+    cfg: "dict | ReplanConfig",
 ) -> PlanResult:
     """在后台线程中执行完整的重规划流程。
 
@@ -54,11 +55,17 @@ def do_replan(
         request: 规划请求（球状态、臂状态等）。
         env_plan: 独立 MjData 的规划环境。
         state: 当前的重规划状态快照。
-        cfg: 配置字典，包含所有规划参数。
+        cfg: 配置字典或 ReplanConfig（B2 兼容层自动转 dict），
+            包含所有规划参数。
 
     Returns:
         PlanResult: 规划结果（新控制序列、击打点等）。
     """
+    # B2 兼容层: ReplanConfig → dict（统一支持类型安全对象与旧 dict 接口）
+    # isinstance 缩窄确保后续 cfg["..."] / cfg.get(...) 类型安全
+    if not isinstance(cfg, dict):
+        cfg = cfg.to_dict()
+
     result = PlanResult()
     x_current = request.x_current.copy()
     ball_pos = request.ball_pos.copy()

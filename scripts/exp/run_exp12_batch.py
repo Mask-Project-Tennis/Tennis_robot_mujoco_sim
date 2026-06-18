@@ -16,7 +16,7 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 DATA_DIR = PROJECT_ROOT / "experiment_data" / "exp12_feedforward"
-V11 = PROJECT_ROOT / "scripts" / "rm65_mpc_v11.py"
+V11 = PROJECT_ROOT / "scripts" / "rm65_mpc_v12.py"
 PYTHON_EXE = str(Path(sys.executable))
 
 # ==================== Phase A: 核心消融 ====================

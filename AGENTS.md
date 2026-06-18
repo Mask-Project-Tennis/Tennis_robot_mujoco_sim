@@ -168,7 +168,8 @@ mujoco_sim/
 │   ├── rm65_mpc_v8.py                            # V8 仿真主脚本（被 import + subprocess 调用）
 │   ├── rm65_mpc_v9.py                            # V9 仿真主脚本（解耦 Tube/Softmin + ablation 模式）
 │   ├── rm65_mpc_v10.py                           # V10 仿真主脚本（V9 去随挥 + 40cm 终端偏移）
-│   ├── rm65_mpc_v11.py                           # ★ V11 仿真主脚本（最新迭代：bug修复 + sigmoid 权重调度）
+│   ├── rm65_mpc_v12.py                           # ★ V12 仿真主脚本（EpisodeRunner 管线架构 + MPCController 策略化）
+│   ├── rm65_mpc_v11.py                           # V11（保留对比基准，已废弃）
 │   ├── run_20hits_video.py                       # 连续 20 次击打视频生成脚本
 │   ├── sim/            # 独立仿真（v4/v5/v8v9变体/fast/ilqt/train）
 │   ├── exp/            # 实验设施 52 个（包装·批量·运行器）
@@ -356,8 +357,8 @@ mujoco_sim/
 - 安装依赖: `pip install -r requirements.txt`
 - 编译 C++ 扩展: `python setup.py build_ext --inplace`
 - Linux 设置 MuJoCo 库路径: `export LD_LIBRARY_PATH="$(python -c 'import mujoco, os; print(os.path.dirname(mujoco.__file__))'):$LD_LIBRARY_PATH"`
-- 运行 MPC 仿真（力矩模式，默认）: `python scripts/rm65_mpc_v11.py --serve-box --ball-speed 7`
-- 位置模式仿真: `python scripts/rm65_mpc_v11.py --serve-box --ball-speed 7 --position-mode`
+- 运行 MPC 仿真（力矩模式，默认）: `python scripts/rm65_mpc_v12.py --serve-box --ball-speed 7`
+- 位置模式仿真: `python scripts/rm65_mpc_v12.py --serve-box --ball-speed 7 --position-mode`
 - 离线测试: `python scripts/rm65_mpc_tube_constraint.py --serve-box --ball-speed 9`
 - 关节安全扫描: `python scripts/scan_joint_safety.py`
 - 运行测试: `pytest tests/`
@@ -440,7 +441,8 @@ mujoco_sim/
 | 脚本 | 用途 | 关键特性 |
 |------|------|---------|
 | `scripts/rm65_mpc_tube_constraint.py` | 离线仿真主脚本 | MPC+iLQR+Tube+硬约束+X平面墙 |
-| `scripts/rm65_mpc_v11.py` | ★ 最新版本（V11） | V9 基础 + X平面墙修复 + sigmoid 权重调度 + 远段轻量 iLQR + `--position-mode` 双模式 |
+| `scripts/rm65_mpc_v12.py` | ★ 最新版本（V12） | EpisodeRunner 管线架构 + MPCController 策略化 + 可组合组件，命中率 4/4 |
+| `scripts/rm65_mpc_v11.py` | V11（保留对比） | V9 + X平面墙 + sigmoid 权重 + 双模式，命中率 2/4 |
 | `scripts/rm65_mpc_v10.py` | V10 仿真主脚本 | V9 去随挥 + 40cm 终端偏移，用于消融对比 |
 | `scripts/rm65_mpc_v9.py` | V9 仿真主脚本 | 解耦 Tube 走廊 + Softmin 终端，`--ablation` 消融模式 |
 | `scripts/rm65_mpc_v8.py` | V8 仿真主脚本 | 解耦 Tube 走廊 + Softmin 终端，`--no-tube`/`--no-softmin` |

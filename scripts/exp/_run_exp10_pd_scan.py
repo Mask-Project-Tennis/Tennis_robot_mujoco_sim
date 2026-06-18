@@ -32,7 +32,7 @@ kp = [kp_base * r for r in ratio]
 kd = [v * kd_ratio for v in kp]
 
 sys.argv = [
-    "rm65_mpc_v11.py",
+    "rm65_mpc_v12.py",
     "--position-mode",
     "--serve-box",
     "--ball-speed", "7",
@@ -44,5 +44,5 @@ sys.argv = [
     "--replan-interval", "20",
 ]
 
-import scripts.rm65_mpc_v11 as main_mod  # noqa: E402
+import scripts.rm65_mpc_v12 as main_mod  # noqa: E402
 main_mod.main()

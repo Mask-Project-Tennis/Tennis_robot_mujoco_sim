@@ -17,9 +17,26 @@ import numpy as np
 
 from src.ilqt.async_replanner import AsyncReplanner, PlanRequest
 from src.ilqt.planning_env import PlanningEnv
+from src.ilqt.replan_config import ReplanConfig
 from src.ilqt.replan_core import do_replan
+from src.ilqt.strategies.direction import DirectionPolicy, ReflectDirection
+from src.ilqt.strategies.follow_through import (
+    FollowContext,
+    FollowThroughPolicy,
+    PlannedFollowThrough,
+)
+from src.ilqt.strategies.hit_point_refiner import (
+    HitPointRefiner,
+    HybridRefiner,
+)
+from src.ilqt.strategies.phase_schedule import DefaultPhaseSchedule, PhaseSchedule
+from src.ilqt.strategies.replan_mode import (
+    AsyncReplanMode,
+    ReplanMode,
+    SyncReplanMode,
+)
 from src.ilqt.tube_types import ReplanState, TubeConfig
-from src.real.runner_factory import build_replan_cfg, build_robot_limits, build_solver
+from src.real.runner_factory import build_robot_limits, build_solver
 
 logger = logging.getLogger(__name__)
 
@@ -108,11 +125,11 @@ class MPCConfig:
         default_factory=lambda: {"Q_qdot_mult": 1.0, "Q_qddot_mult": 1.0, "Q_du_mult": 0.5}
     )
 
-    # ── 代价基底（v12: 对齐 V11 base_cost_fn 的 Q_p/Q_v基底）──
-    Q_p_base: np.ndarray = field(
+    # ── 代价基底（v12: 对齐 V11 base_cost_fn 的 Q_p/Q_v基底；None 表示走 do_replan 默认 eye(3)）──
+    Q_p_base: np.ndarray | None = field(
         default_factory=lambda: np.array([100000.0, 100000.0, 100000.0])
     )
-    Q_v_base: np.ndarray = field(
+    Q_v_base: np.ndarray | None = field(
         default_factory=lambda: np.array([400.0, 400.0, 400.0])
     )
     Q_qdot_base: float = 0.001
@@ -175,7 +192,7 @@ class MPCController:
         self._replanner = AsyncReplanner(
             env, do_replan, config={}, state=None, model_path=model_path,
         )
-        self._replan_cfg: dict | None = None
+        self._replan_cfg: ReplanConfig | None = None
         self._replan_state: ReplanState | None = None
 
         # ── 规划状态变量（V11 行 1047-1067）──
@@ -193,27 +210,61 @@ class MPCController:
         self._x_current: np.ndarray = np.zeros(env.NX)
 
         # ── 随挥状态（V11 行 1054-1061）──
-        self._follow_through_start: int = -1
         self._ball_was_hit: bool = False
-        self._p_ee_at_hit: np.ndarray | None = None
-        self._ball_pos_at_hit: np.ndarray | None = None
-        self._k_hit_at_follow: int = 0
-
-        # ── refine_hit_point 状态（V11 行 1072-1074）──
-        self._hit_lock_active: bool = False
-        self._last_p_hit: np.ndarray | None = None
 
         # ── 结束标志 ──
         self._ball_unreachable: bool = False
         self._done: bool = False
 
         # ── 异步状态 ──
-        self._async_replan_submitted: bool = False
         self._mpc_horizon: int = config.total_horizon
+
+        # ── 策略（A4/A1/A2 提取）──
+        self._phase_schedule: PhaseSchedule = DefaultPhaseSchedule(
+            far_threshold=config.far_threshold,
+        )
+        self._direction_policy: DirectionPolicy = ReflectDirection(
+            target_speed=config.target_speed,
+        )
+        follow_steps = 0 if config.no_follow_through else config.follow_through_steps
+        self._follow_through: FollowThroughPolicy = PlannedFollowThrough(
+            follow_through_steps=follow_steps,
+            follow_trigger=config.follow_trigger,
+            dt=config.dt,
+            is_position_mode=config.is_position_mode,
+            NQ=self._NQ,
+            NU=self._NU,
+        )
+        self._refiner: HitPointRefiner = HybridRefiner(
+            shoulder_pos=config.shoulder_pos,
+            workspace_radius=config.workspace_radius,
+        )
+
+        # ── 重规划模式（A3 提取：同步/异步统一）──
+        if config.async_mode:
+            self._replan_mode: ReplanMode = AsyncReplanMode(self._replanner)
+        else:
+            self._replan_mode = SyncReplanMode(self._sync_replan_fn)
 
     # ──────────────────────────────────────────────────────────────────
     # 公有接口
     # ──────────────────────────────────────────────────────────────────
+
+    def _sync_replan_fn(self, request: PlanRequest) -> Any:
+        """同步重规划闭包 — 供 SyncReplanMode 调用。
+
+        Args:
+            request: 规划请求。
+
+        Returns:
+            PlanResult（do_replan 结果）。
+        """
+        assert self._replanner.env_plan is not None
+        assert self._replan_cfg is not None and self._replan_state is not None
+        return do_replan(
+            request, self._replanner.env_plan,
+            self._replan_state, self._replan_cfg,
+        )
 
     def start(self, ball_pos: np.ndarray, ball_vel: np.ndarray,
               arm_state: np.ndarray) -> None:
@@ -228,11 +279,13 @@ class MPCController:
         """
         self._x_current = arm_state.copy()
 
-        # 1. 计算击球方向（V11 行 819-838）
-        self._d_hat, self._v_hit_desired = self._compute_direction(ball_vel)
-        self._d_follow = self._d_hat.copy()
+        # 1. 计算击球方向（V11 行 819-838）→ DirectionPolicy
+        direction = self._direction_policy.compute(ball_vel)
+        self._d_hat = direction.d_hat.copy()
+        self._v_hit_desired = direction.v_hit_desired.copy()
+        self._d_follow = direction.d_follow.copy()
 
-        # 2. 构建 replan_cfg（复用 runner_factory.build_replan_cfg + MPCConfig 覆盖）
+        # 2. 构建 replan_cfg（B2: ReplanConfig.from_mpc_config 类型安全工厂）
         self._replan_cfg = self._build_replan_cfg(self._d_hat, self._v_hit_desired)
 
         # 3. 构建 ReplanState（V11 行 1254-1261）
@@ -291,17 +344,22 @@ class MPCController:
         self._n_des = result.n_des_new.copy()
         self._U_prev = result.U_prev.copy()
 
-        # 8. refine_hit_point 初始过滤（V11 行 1590 调用点）
+        # 8. refine_hit_point 初始过滤 → HitPointRefiner（V11 行 1590 调用点）
         self._env.set_ball_state(ball_pos.copy(), ball_vel.copy())
-        self._p_hit, self._k_hit, refine_log = self._refine_hit_point(
-            self._p_hit, self._k_hit, self._config.total_horizon, self._env,
+        refine_result = self._refiner.refine(
+            p_hit=self._p_hit, k_hit=self._k_hit,
+            remaining=self._config.total_horizon,
+            env=self._env, arm_state=self._x_current,
+            robot_limits=self._robot_limits,
         )
+        self._p_hit = refine_result.p_hit
+        self._k_hit = refine_result.k_hit
         self._replan_state.p_hit_new = self._p_hit.copy()
         self._replan_state.k_hit_new = self._k_hit
-        if refine_log == "swapped":
+        if refine_result.log == "swapped":
             logger.info(
                 "MPCController.start refine: p_hit 修正, k_hit=%d, refine=%s",
-                self._k_hit, refine_log,
+                self._k_hit, refine_result.log,
             )
 
         # 9. 初始化 buffer（V11 行 1381-1382）
@@ -310,25 +368,16 @@ class MPCController:
         self._step_count = 0
         self._mpc_horizon = self._config.total_horizon
 
-        # 10. 更新 replan_cfg 的 k_hit_total
-        self._replan_cfg["k_hit_total"] = self._k_hit
+        # 10. 更新 replan_cfg 的 k_hit_total（B2: ReplanConfig 属性访问替代 dict 下标）
+        assert self._replan_cfg is not None
+        self._replan_cfg.k_hit_total = self._k_hit
 
-        # 11. 异步模式首次提交（V11 行 1394-1409）
+        # 11. 异步模式首次提交 → ReplanMode.submit（V11 行 1394-1409）
         if self._config.async_mode:
-            async_request = PlanRequest(
-                x_current=arm_state.copy(),
-                ball_pos=ball_pos.copy(),
-                ball_vel=ball_vel.copy(),
-                step=0,
-                k_hit_current=self._k_hit,
-                U_prev=self._U_prev.copy(),
-                p_hit_current=self._p_hit.copy(),
-                v_hit_desired=self._v_hit_desired.copy(),
-                n_des_current=self._n_des.copy(),
-                is_first_plan=False,
+            async_request = self._build_replan_request(
+                ball_pos, ball_vel, arm_state, step=0,
             )
-            if self._replanner.submit(async_request):
-                self._async_replan_submitted = True
+            self._replan_mode.submit(async_request)
 
         logger.info(
             "MPCController.start 完成: k_hit=%d, p_hit=%s, buffer=%d",
@@ -364,12 +413,21 @@ class MPCController:
                 ball_unreachable=self._ball_unreachable,
             )
 
-        # ── 1. 检查随挥触发 ──
-        if self._follow_through_start < 0:
-            triggered = self._check_follow_through(sc, self._k_hit, arm_state, ball_pos)
-            if triggered:
-                # 触发当步即进入随挥（dt_follow=0）
-                u_cmd = self._compute_follow_through_control(arm_state, dt_follow=0)
+        # ── 1. 检查随挥触发 → FollowThroughPolicy ──
+        follow_ctx = FollowContext(
+            step_count=sc,
+            mpc_horizon=self._mpc_horizon,
+            k_hit=self._k_hit,
+            arm_state=arm_state,
+            ball_pos=ball_pos,
+            d_follow=self._d_follow,
+            v_hit_desired=self._v_hit_desired,
+            env=self._env,
+        )
+        if not self._follow_through.is_active:
+            if self._follow_through.should_trigger(follow_ctx):
+                # 触发当步即进入随挥（step_in_follow=0）
+                u_cmd = self._follow_through.compute_control(follow_ctx, 0)
                 return MPCStepResult(
                     u_cmd=u_cmd, phase="follow_through", k_hit=0,
                     p_hit=self._p_hit.copy(), n_des=self._n_des.copy(),
@@ -377,13 +435,13 @@ class MPCController:
                 )
         else:
             # ── 已在随挥阶段 ──
-            dt_follow = sc - self._follow_through_start
-            if dt_follow <= self._config.follow_through_steps:
-                u_cmd = self._compute_follow_through_control(arm_state, dt_follow)
+            step_in_follow = sc - self._follow_through.follow_through_start
+            if not self._follow_through.is_done(step_in_follow, follow_ctx):
+                u_cmd = self._follow_through.compute_control(follow_ctx, step_in_follow)
                 return MPCStepResult(
                     u_cmd=u_cmd, phase="follow_through", k_hit=0,
                     p_hit=self._p_hit.copy(), n_des=self._n_des.copy(),
-                    info={"follow_step": dt_follow},
+                    info={"follow_step": step_in_follow},
                 )
             else:
                 # 随挥完成
@@ -393,25 +451,40 @@ class MPCController:
                     u_cmd=u_hold, phase="done", k_hit=0,
                 )
 
-        # ── 2. MPC 阶段 ──
+        # ── 2. MPC 阶段（A3 统一：ReplanMode 调度）──
         need_replan = (
             (sc % self._config.replan_interval == 0)
             or (self._buffer_idx >= len(self._U_buffer))
         ) and sc < self._mpc_horizon
 
         replanned = False
+
+        # 2a. 轮询异步结果（之前提交的规划完成）
+        if self._config.async_mode and self._replan_mode.has_result():
+            replanned = self._apply_async_result(
+                self._replan_mode.get_result(), sc,
+            )
+
+        # 2b. 提交新请求（同步：立即获取结果；异步：提交到后台）
+        can_submit = need_replan and not self._replan_mode.is_busy()
         if self._config.async_mode:
-            replanned = self._async_step(ball_pos, ball_vel, arm_state, sc, need_replan)
-        else:
-            if need_replan:
-                replanned = True
-                unreachable = self._sync_replan(ball_pos, ball_vel, arm_state, sc)
+            can_submit = can_submit and sc > 0  # async: start() 已首次提交
+        if can_submit:
+            request = self._build_replan_request(ball_pos, ball_vel, arm_state, sc)
+            self._replan_mode.submit(request)
+            if not self._config.async_mode:
+                # 同步：submit 后结果立即可用
+                result = self._replan_mode.get_result()
+                unreachable = self._apply_sync_result(
+                    result, sc, ball_pos, ball_vel,
+                )
                 if unreachable:
                     u_hold = self._hold_control(arm_state)
                     return MPCStepResult(
                         u_cmd=u_hold, phase="done", k_hit=0,
                         ball_unreachable=True,
                     )
+                replanned = True
 
         # ── 3. 提取 U_buffer（V11 行 1889-1912）──
         if self._buffer_idx < len(self._U_buffer):
@@ -420,8 +493,8 @@ class MPCController:
         else:
             u_cmd = self._compute_buffer_fallback(arm_state)
 
-        # ── 4. 确定阶段 ──
-        phase = self._classify_phase(self._k_hit)
+        # ── 4. 确定阶段 → PhaseSchedule ──
+        phase = self._phase_schedule.classify(self._k_hit)
 
         return MPCStepResult(
             u_cmd=u_cmd, phase=phase, k_hit=self._k_hit,
@@ -444,125 +517,55 @@ class MPCController:
         return self._ball_unreachable
 
     # ──────────────────────────────────────────────────────────────────
-    # 私有方法：方向与配置
+    # 私有方法：配置
     # ──────────────────────────────────────────────────────────────────
-
-    def _compute_direction(
-        self, ball_vel: np.ndarray,
-    ) -> tuple[np.ndarray, np.ndarray]:
-        """从球速度计算击球方向（V11 行 819-838）。
-
-        Args:
-            ball_vel: 球速度 (3,)。
-
-        Returns:
-            (d_hat, v_hit_desired)：d_hat 为来球反方向单位向量，
-            v_hit_desired 为期望击球时刻末端速度。
-        """
-        v_norm = float(np.linalg.norm(ball_vel))
-        if v_norm > 1e-6:
-            d_hat = -ball_vel / v_norm
-        else:
-            d_hat = np.array([0.0, 1.0, 0.0])
-        v_hit_desired = self._config.target_speed * d_hat
-        return d_hat, v_hit_desired
 
     def _build_replan_cfg(
         self, d_hat: np.ndarray, v_hit_desired: np.ndarray,
-    ) -> dict:
-        """构建 do_replan 所需配置字典。
+    ) -> ReplanConfig:
+        """构建 do_replan 所需类型安全配置。
 
-        复用 ``runner_factory.build_replan_cfg`` 基础字典，用 MPCConfig 覆盖。
+        复用 ``ReplanConfig.from_mpc_config`` 工厂（消除 80 行字段翻译），
+        替代旧的 runner_factory.build_replan_cfg() + MPCConfig.update() dict 路径。
+        do_replan 入口兼容层会自动 to_dict() 以支持旧 cfg["..."] 访问。
 
         Args:
             d_hat: 击球方向单位向量。
             v_hit_desired: 期望末端速度。
 
         Returns:
-            replan_cfg dict（可直接传给 do_replan）。
+            ReplanConfig（可直接传给 do_replan）。
         """
-        cfg = build_replan_cfg(
-            self._env, self._robot_limits, self._solver, d_hat, v_hit_desired,
+        return ReplanConfig.from_mpc_config(
+            self._config,
+            robot_limits=self._robot_limits,
+            solver=self._solver,
+            d_hat=d_hat,
+            v_hit_desired=v_hit_desired,
         )
-        c = self._config
-        cfg.update({
-            # 时间与迭代参数
-            "dt": c.dt,
-            "total_horizon": c.total_horizon,
-            "fixed_horizon": c.fixed_horizon,
-            "replan_interval": c.replan_interval,
-            "max_iter_per_plan": c.max_iter_per_plan,
-            "first_plan_iters": c.first_plan_iters,
-            "near_plan_iters": c.near_plan_iters,
-            "near_threshold": c.near_threshold,
-            # 代价参数
-            "R": c.R,
-            "Q_p_scale_far": c.Q_p_scale_far,
-            "Q_v_scale_far": c.Q_v_scale_far,
-            "Q_p_scale_near": c.Q_p_scale_near,
-            "Q_v_scale_near": c.Q_v_scale_near,
-            "normal_weight": c.normal_weight,
-            "racket_speed": c.racket_speed,
-            "max_tcp_speed": c.max_tcp_speed,
-            # 模式
-            "is_position_mode": c.is_position_mode,
-            "ablation_mode": c.ablation_mode,
-            "use_backswing": c.use_backswing,
-            "use_r_decay": c.use_r_decay,
-            "r_decay_ratio": c.r_decay_ratio,
-            "fix_joint5_angle": c.fix_joint5_angle,
-            "backswing_offset": c.backswing_offset,
-            "backswing_ratio": c.backswing_ratio,
-            "normal_flip": c.normal_flip,
-            # 几何
-            "shoulder_pos": c.shoulder_pos,
-            "workspace_radius": c.workspace_radius,
-            # 方向（d_follow = d_hat）
-            "d_hat": d_hat,
-            "d_follow": d_hat,
-            "v_hit_desired": v_hit_desired,
-            "v_hit_at_contact": v_hit_desired,
-            # 随挥
-            "hit_shift": c.follow_through_length,
-            "follow_through_length": c.follow_through_length,
-            "follow_through_steps": c.follow_through_steps,
-            "follow_through_v_terminal": c.follow_through_v_terminal,
-            # Tube
-            "tube_cfg": c.tube_cfg,
-            "smooth_far": c.smooth_far,
-            "smooth_mid": c.smooth_mid,
-            "smooth_near": c.smooth_near,
-            # 扰动
-            "time_perturb_s": c.time_perturb_s,
-            "space_perturb_m": c.space_perturb_m,
-            "perturb_alpha_min": c.perturb_alpha_min,
-            # v12: 代价基底 + 远段阈值（对齐 V11 base_cost_fn）
-            "Q_p_base": c.Q_p_base,
-            "Q_v_base": c.Q_v_base,
-            "Q_qdot_base": c.Q_qdot_base,
-            "Q_qddot_base": c.Q_qddot_base,
-            "Q_du_base": c.Q_du_base,
-            "far_threshold": c.far_threshold,
-            # 初始 k_hit_total（首次规划后更新）
-            "k_hit_total": c.total_horizon,
-        })
-        return cfg
 
     # ──────────────────────────────────────────────────────────────────
-    # 私有方法：重规划
+    # 私有方法：重规划（A3 统一辅助）
     # ──────────────────────────────────────────────────────────────────
 
-    def _sync_replan(
+    def _build_replan_request(
         self, ball_pos: np.ndarray, ball_vel: np.ndarray,
         arm_state: np.ndarray, step: int,
-    ) -> bool:
-        """同步重规划 — 统一调用 do_replan（V11 行 1548-1872 简化）。
+        is_first_plan: bool = False,
+    ) -> PlanRequest:
+        """构建重规划请求（消除 start/sync/async 三处重复）。
+
+        Args:
+            ball_pos: 球当前位置 (3,)。
+            ball_vel: 球当前速度 (3,)。
+            arm_state: 臂状态 [q(6), qdot(6)]。
+            step: 当前步索引。
+            is_first_plan: 是否首次规划。
 
         Returns:
-            True 表示球不可达。
+            PlanRequest（可直接传给 do_replan 或 ReplanMode.submit）。
         """
-        assert self._replan_cfg is not None and self._replan_state is not None
-        request = PlanRequest(
+        return PlanRequest(
             x_current=arm_state.copy(),
             ball_pos=ball_pos.copy(),
             ball_vel=ball_vel.copy(),
@@ -572,373 +575,114 @@ class MPCController:
             p_hit_current=self._p_hit.copy(),
             v_hit_desired=self._v_hit_desired.copy(),
             n_des_current=self._n_des.copy(),
-            is_first_plan=False,
-        )
-        assert self._replanner.env_plan is not None
-        result = do_replan(
-            request, self._replanner.env_plan,
-            self._replan_state, self._replan_cfg,
+            is_first_plan=is_first_plan,
         )
 
-        if result.ball_unreachable:
-            self._ball_unreachable = True
-            self._done = True
-            logger.warning("MPCController.step %d: 球不可达", step)
-            return True
+    def _apply_plan_fields(self, result: Any) -> None:
+        """从 PlanResult 更新规划字段 + 同步 replan_state（共享后处理）。
 
-        # 更新规划状态
-        self._k_hit = result.k_hit_new
+        更新：_p_hit, _v_ball_hit, _n_des, _U_prev 及对应的 replan_state 字段。
+        注意：_k_hit 由调用方设置（sync/async 计算方式不同）。
+
+        Args:
+            result: PlanResult（do_replan 或 AsyncReplanner 的结果）。
+        """
+        assert self._replan_state is not None
         self._p_hit = result.p_hit_new.copy()
         self._v_ball_hit = result.v_ball_hit_new.copy()
         self._n_des = result.n_des_new.copy()
         self._U_prev = result.U_prev.copy()
-
-        # refine_hit_point 后过滤（V11 行 1590）
-        self._env.set_ball_state(ball_pos.copy(), ball_vel.copy())
-        remaining = max(self._config.total_horizon - step, 5)
-        self._p_hit, self._k_hit, refine_log = self._refine_hit_point(
-            self._p_hit, self._k_hit, remaining, self._env,
-        )
-
-        # 同步到 replan_state
         self._replan_state.k_hit_new = self._k_hit
         self._replan_state.p_hit_new = self._p_hit.copy()
         self._replan_state.v_ball_hit_new = self._v_ball_hit.copy()
         self._replan_state.current_n_des = self._n_des.copy()
         self._replan_state.U_prev = self._U_prev.copy()
 
-        # 更新 buffer
+    def _apply_sync_result(
+        self, result: Any, step: int,
+        ball_pos: np.ndarray, ball_vel: np.ndarray,
+    ) -> bool:
+        """应用同步重规划结果（含 refine）。
+
+        Args:
+            result: PlanResult（SyncReplanMode.get_result）。
+            step: 当前步索引。
+            ball_pos: 球当前位置（refine 用）。
+            ball_vel: 球当前速度（refine 用）。
+
+        Returns:
+            True 表示球不可达。
+        """
+        if result.ball_unreachable:
+            self._ball_unreachable = True
+            self._done = True
+            logger.warning("MPCController.step %d: 球不可达", step)
+            return True
+
+        self._k_hit = result.k_hit_new
+        self._apply_plan_fields(result)
+
+        # refine_hit_point 后过滤 → HitPointRefiner（V11 行 1590）
+        self._env.set_ball_state(ball_pos.copy(), ball_vel.copy())
+        remaining = max(self._config.total_horizon - step, 5)
+        refine_result = self._refiner.refine(
+            p_hit=self._p_hit, k_hit=self._k_hit, remaining=remaining,
+            env=self._env, arm_state=self._x_current,
+            robot_limits=self._robot_limits,
+        )
+        self._p_hit = refine_result.p_hit
+        self._k_hit = refine_result.k_hit
+        self._replan_state.k_hit_new = self._k_hit
+        self._replan_state.p_hit_new = self._p_hit.copy()
+
         self._U_buffer = result.U_buffer.copy()
         self._buffer_idx = 0
 
         logger.info(
             "MPCController.step %d: replan k_hit=%d refine=%s buffer=%d",
-            step, self._k_hit, refine_log, len(self._U_buffer),
+            step, self._k_hit, refine_result.log, len(self._U_buffer),
         )
         return False
 
-    def _async_step(
-        self, ball_pos: np.ndarray, ball_vel: np.ndarray,
-        arm_state: np.ndarray, step: int, need_replan: bool,
-    ) -> bool:
-        """异步重规划路径（V11 行 1475-1546）。
+    def _apply_async_result(self, result: Any, step: int) -> bool:
+        """应用异步重规划结果（含 buffer 时间偏移，无 refine）。
+
+        异步结果可能来自若干步前的请求，需按 elapsed 偏移 U_mpc_full。
+
+        Args:
+            result: PlanResult（AsyncReplanMode.get_result）。
+            step: 当前步索引。
 
         Returns:
-            True 表示本步应用了新规划（replanned）。
+            True 表示成功应用了新规划（replanned）。
         """
         assert self._replan_state is not None
-        replanned = False
-
-        # 检查异步结果（V11 行 1478-1527）
-        if self._replanner.has_new_plan():
-            result = self._replanner.apply_new_plan()
-            if result is not None and result.request_step >= 0 and result.k_hit_new > 0:
-                self._async_replan_submitted = False
-                elapsed = step - result.request_step
-                if elapsed < len(result.U_mpc_full) and elapsed < result.k_hit_new:
-                    U_shifted = result.U_mpc_full[elapsed:]
-                    k_hit_adjusted = max(1, result.k_hit_new - elapsed)
-                    ri = self._config.replan_interval
-                    if len(U_shifted) >= ri:
-                        # 选择 buffer 长度（V11 行 1487-1494）
-                        if len(U_shifted) >= ri * 6:
-                            self._U_buffer = U_shifted[:ri * 6]
-                        elif len(U_shifted) >= ri * 4:
-                            self._U_buffer = U_shifted[:ri * 4]
-                        elif len(U_shifted) >= ri * 2:
-                            self._U_buffer = U_shifted[:ri * 2]
-                        else:
-                            self._U_buffer = U_shifted[:ri]
-                        self._buffer_idx = 0
-                        self._k_hit = k_hit_adjusted
-                        self._p_hit = result.p_hit_new.copy()
-                        self._v_ball_hit = result.v_ball_hit_new.copy()
-                        self._n_des = result.n_des_new.copy()
-                        self._U_prev = result.U_prev.copy()
-                        self._replan_state.k_hit_new = self._k_hit
-                        self._replan_state.p_hit_new = self._p_hit.copy()
-                        self._replan_state.v_ball_hit_new = self._v_ball_hit.copy()
-                        self._replan_state.current_n_des = self._n_des.copy()
-                        self._replan_state.U_prev = self._U_prev.copy()
-                        replanned = True
-                        logger.info(
-                            "ASYNC_APPLY step=%d k_hit=%d elapsed=%d",
-                            step, self._k_hit, elapsed,
-                        )
-
-        # 提交新请求（V11 行 1529-1546）
-        can_submit = (
-            not self._async_replan_submitted
-            and not self._replanner.is_planning()
-            and step > 0
-        )
-        if need_replan and can_submit:
-            request = PlanRequest(
-                x_current=arm_state.copy(),
-                ball_pos=ball_pos.copy(),
-                ball_vel=ball_vel.copy(),
-                step=step,
-                k_hit_current=self._k_hit,
-                U_prev=self._U_prev.copy() if len(self._U_prev) > 0 else np.zeros((0, self._NU)),
-                p_hit_current=self._p_hit.copy(),
-                v_hit_desired=self._v_hit_desired.copy(),
-                n_des_current=self._n_des.copy(),
-                is_first_plan=False,
-            )
-            if self._replanner.submit(request):
-                self._async_replan_submitted = True
-
-        return replanned
-
-    # ──────────────────────────────────────────────────────────────────
-    # 私有方法：refine_hit_point（V11 行 1076-1236 闭包提取）
-    # ──────────────────────────────────────────────────────────────────
-
-    def _refine_hit_point(
-        self,
-        p_hit: np.ndarray,
-        k_hit: int,
-        remaining: int,
-        env_local: PlanningEnv,
-    ) -> tuple[np.ndarray, int, str]:
-        """击球点可执行性后过滤（V11 行 1076-1236 嵌套闭包提取）。
-
-        在 tube 候选窗口内搜索关节裕度更充足的替代点。
-        闭包变量变为实例属性：self._hit_lock_active, self._last_p_hit, self._x_current。
-
-        Args:
-            p_hit: 原始击球点 (3,)。
-            k_hit: 原始击球步数。
-            remaining: 剩余步数。
-            env_local: 用于 IK 和轨迹预测的环境。
-
-        Returns:
-            (p_hit_refined, k_hit_refined, log_message)。
-        """
-        hit_lock_threshold = 60
-        hard_margin_deg = 2.0
-        warn_margin_deg = 5.0
-        j1_warn_margin_deg = 8.0
-        window_half_steps = 15
-
-        # 防抖锁定：末段不再换点
-        if k_hit <= hit_lock_threshold:
-            if not self._hit_lock_active:
-                self._hit_lock_active = True
-                logger.info(
-                    "[HIT_LOCK] k_hit=%d ≤ %d, 锁定击球点不再替换",
-                    k_hit, hit_lock_threshold,
-                )
-            return p_hit, k_hit, "locked"
-
-        # 快速 IK 检查当前点的双边裕度
-        q_ik = env_local.solve_ik(
-            p_hit, q_init=self._x_current[:env_local.NQ], max_iter=50, eps=1e-2,
-        )
-        margin_lower_deg = (q_ik - self._robot_limits.q_lower) * 180.0 / np.pi
-        margin_upper_deg = (self._robot_limits.q_upper - q_ik) * 180.0 / np.pi
-        margin_min_deg = float(np.min(np.minimum(margin_lower_deg, margin_upper_deg)))
-        margin_j1_deg = float(min(margin_lower_deg[1], margin_upper_deg[1]))
-
-        high_risk = margin_min_deg < hard_margin_deg
-        j1_near = margin_j1_deg < j1_warn_margin_deg
-        medium_risk = margin_min_deg < warn_margin_deg
-
-        if not high_risk and not j1_near:
-            if medium_risk:
-                logger.info(
-                    "[HIT_KEEP] p=%s min_margin=%.1f° j1=%.1f° → feasible (medium risk)",
-                    np.round(p_hit, 3), margin_min_deg, margin_j1_deg,
-                )
-            return p_hit, k_hit, "feasible"
-
-        logger.warning(
-            "[HIT_RISK] p=%s k=%d min_margin=%.1f° j1=%.1f° → searching alternatives",
-            np.round(p_hit, 3), k_hit, margin_min_deg, margin_j1_deg,
-        )
-
-        shoulder_pos = self._config.shoulder_pos
-        workspace_radius = self._config.workspace_radius
-        best_candidate: tuple | None = None
-        best_score = -1e9
-
-        # 策略1：微调位置偏移（保持时间不变）
-        if j1_near:
-            j1_dir = 1.0 if margin_j1_deg == margin_lower_deg[1] else -1.0
-            for offset_cm in [3, 5, 8, 12]:
-                offset_m = offset_cm / 100.0
-                p_shifted = p_hit.copy()
-                p_shifted[1] += j1_dir * offset_m
-                dist_s = float(np.linalg.norm(p_shifted - shoulder_pos))
-                if dist_s > workspace_radius or p_shifted[2] < 0.3:
-                    continue
-                q_s = env_local.solve_ik(
-                    p_shifted, q_init=self._x_current[:env_local.NQ],
-                    max_iter=30, eps=2e-2,
-                )
-                m_low_s = (q_s - self._robot_limits.q_lower) * 180.0 / np.pi
-                m_up_s = (self._robot_limits.q_upper - q_s) * 180.0 / np.pi
-                m_min_s = float(np.min(np.minimum(m_low_s, m_up_s)))
-                m_j1_s = float(min(m_low_s[1], m_up_s[1]))
-                if m_min_s < margin_min_deg - 0.5:
-                    continue
-                if m_j1_s < j1_warn_margin_deg:
-                    continue
-                score_s = (
-                    2.0 * m_min_s
-                    + 3.0 * m_j1_s
-                    - 50.0 * float(np.linalg.norm(p_shifted - p_hit))
-                )
-                if score_s > best_score:
-                    best_score = score_s
-                    best_candidate = (p_shifted.copy(), k_hit, m_min_s, m_j1_s)
-
-        # 策略2：tube 窗口搜索（改变时间点）
-        ball_positions_pred, _ = env_local.predict_ball_trajectory(
-            env_local.get_ball_pos(), env_local.get_ball_vel(),
-            min(remaining + 30, 300),
-        )
-        k_min = max(1, k_hit - window_half_steps)
-        k_max = min(len(ball_positions_pred), k_hit + window_half_steps)
-
-        for k_cand in range(k_min, k_max + 1):
-            if k_cand == k_hit:
-                continue
-            p_cand = ball_positions_pred[k_cand - 1]
-            dist_cand = float(np.linalg.norm(p_cand - shoulder_pos))
-            if dist_cand > workspace_radius * 1.1 or p_cand[2] < 0.3:
-                continue
-            q_cand = env_local.solve_ik(
-                p_cand, q_init=self._x_current[:env_local.NQ],
-                max_iter=30, eps=2e-2,
-            )
-            m_low = (q_cand - self._robot_limits.q_lower) * 180.0 / np.pi
-            m_up = (self._robot_limits.q_upper - q_cand) * 180.0 / np.pi
-            m_min = float(np.min(np.minimum(m_low, m_up)))
-            m_j1 = float(min(m_low[1], m_up[1]))
-            if m_min < margin_min_deg - 0.5:
-                continue
-            y_risk = max(0.0, (shoulder_pos[1] - 0.40) - p_cand[1])
-            score = (
-                2.0 * m_min
-                + 3.0 * m_j1
-                - 1.0 * abs(k_cand - k_hit)
-                - 30.0 * float(np.linalg.norm(p_cand - p_hit))
-                - 10.0 * y_risk
-            )
-            if score > best_score:
-                best_score = score
-                best_candidate = (p_cand.copy(), k_cand, m_min, m_j1)
-
-        # hysteresis：新点需显著优于旧点
-        if best_candidate is not None:
-            p_new, k_new, m_min_new, m_j1_new = best_candidate
-            score_original = 2.0 * margin_min_deg + 3.0 * margin_j1_deg
-            if best_score > score_original + 10.0:
-                logger.warning(
-                    "[HIT_SWAP] k %d→%d, min_margin %.1f°→%.1f°, j1 %.1f°→%.1f°",
-                    k_hit, k_new, margin_min_deg, m_min_new, margin_j1_deg, m_j1_new,
-                )
-                self._last_p_hit = p_new.copy()
-                return p_new, k_new, "swapped"
-
-        logger.warning(
-            "[HIT_RISK] min_margin=%.1f° j1=%.1f°, no safer candidate found",
-            margin_min_deg, margin_j1_deg,
-        )
-        return p_hit, k_hit, "risk_kept"
-
-    # ──────────────────────────────────────────────────────────────────
-    # 私有方法：随挥
-    # ──────────────────────────────────────────────────────────────────
-
-    def _check_follow_through(
-        self, step_count: int, k_hit: int,
-        arm_state: np.ndarray, ball_pos: np.ndarray,
-    ) -> bool:
-        """随挥触发检测（V11 行 1418-1425 + 2127-2143）。
-
-        Args:
-            step_count: 当前步索引。
-            k_hit: 剩余击球步数。
-            arm_state: 臂状态。
-            ball_pos: 球位置。
-
-        Returns:
-            True 表示触发了随挥。
-        """
-        if self._follow_through_start >= 0:
-            return False
-        if self._config.follow_through_steps <= 0:
+        if result is None or result.request_step < 0 or result.k_hit_new <= 0:
             return False
 
-        triggered = False
-        # 强制触发：MPC 阶段结束（V11 行 1418-1425）
-        if step_count >= self._mpc_horizon:
-            triggered = True
-        # planned 模式：到达计划击打时刻（V11 行 2133-2143）
-        elif (self._config.follow_trigger == "planned" and k_hit <= 1):
-            triggered = True
+        elapsed = step - result.request_step
+        if elapsed >= len(result.U_mpc_full) or elapsed >= result.k_hit_new:
+            return False
 
-        if triggered:
-            self._follow_through_start = step_count
-            self._k_hit_at_follow = k_hit
-            self._env.set_arm_state(arm_state)
-            if self._p_ee_at_hit is None:
-                self._p_ee_at_hit = self._env.get_ee_pos().copy()
-            if self._ball_pos_at_hit is None:
-                self._ball_pos_at_hit = ball_pos.copy()
-            logger.info(
-                "MPCController.step %d: 触发随挥 (%d 步)",
-                step_count, self._config.follow_through_steps,
-            )
+        U_shifted = result.U_mpc_full[elapsed:]
+        ri = self._config.replan_interval
+        if len(U_shifted) < ri:
+            return False
 
-        return triggered
+        # 选择 buffer 长度（V11 行 1487-1494）
+        for mult in [6, 4, 2, 1]:
+            if len(U_shifted) >= ri * mult:
+                self._U_buffer = U_shifted[:ri * mult]
+                break
 
-    def _compute_follow_through_control(
-        self, arm_state: np.ndarray, dt_follow: int,
-    ) -> np.ndarray:
-        """随挥 PD/IK 控制计算（V11 行 2149-2214）。
-
-        位置模式：``env.solve_ik(p_des_follow)``
-        力矩模式：``J_p.T @ (Kp*dp - Kd*v_ee)``
-
-        Args:
-            arm_state: 臂状态 [q, qdot] (12,)。
-            dt_follow: 随挥内步数（0=触发当步）。
-
-        Returns:
-            控制指令 (6,)。
-        """
-        assert self._p_ee_at_hit is not None, "随挥未初始化 p_ee_at_hit"
-        c = self._config
-
-        # 沿 d_follow 方向匀减速直线延伸（V11 行 2152-2158）
-        v_max_follow = float(np.linalg.norm(self._v_hit_desired))
-        T_follow = c.follow_through_steps * c.dt
-        a_follow = v_max_follow / T_follow if T_follow > 0 else 0.0
-        t_elapsed = dt_follow * c.dt
-        p_des_follow = self._p_ee_at_hit + self._d_follow * (
-            v_max_follow * t_elapsed - 0.5 * a_follow * t_elapsed ** 2
+        self._buffer_idx = 0
+        self._k_hit = max(1, result.k_hit_new - elapsed)
+        self._apply_plan_fields(result)
+        logger.info(
+            "ASYNC_APPLY step=%d k_hit=%d elapsed=%d",
+            step, self._k_hit, elapsed,
         )
-
-        self._env.set_arm_state(arm_state)
-        if c.is_position_mode:
-            u_follow = self._env.solve_ik(
-                p_des_follow, q_init=arm_state[:self._NQ], max_iter=20, eps=1e-2,
-            )
-        else:
-            p_ee_cur = self._env.get_ee_pos()
-            J_p = self._env.get_ee_jacp()
-            dp = p_des_follow - p_ee_cur
-            Kp_follow = 200.0
-            Kd_follow = 20.0
-            F_follow = Kp_follow * dp - Kd_follow * (J_p @ arm_state[self._NQ:])
-            u_follow = J_p.T @ F_follow
-
-        ctrl_lo = self._env.model.actuator_ctrlrange[:self._NU, 0]
-        ctrl_hi = self._env.model.actuator_ctrlrange[:self._NU, 1]
-        return np.clip(u_follow, ctrl_lo, ctrl_hi)
+        return True
 
     # ──────────────────────────────────────────────────────────────────
     # 私有方法：辅助
@@ -985,19 +729,3 @@ class MPCController:
         if self._config.is_position_mode:
             return arm_state[:self._NQ].copy()
         return np.zeros(self._NU)
-
-    def _classify_phase(self, k_hit: int) -> str:
-        """根据剩余击球步数判定阶段。
-
-        Args:
-            k_hit: 剩余击球步数。
-
-        Returns:
-            "far" / "mid" / "near"。
-        """
-        if k_hit > 50:
-            return "far"
-        elif k_hit > 20:
-            return "mid"
-        else:
-            return "near"

@@ -7,17 +7,25 @@ tests/test_replan_core.py 中逐字复制的工厂函数
 
 常量对齐 V11 真机配置；函数去掉下划线前缀作为公开 API，
 供真机入口脚本与测试用例共同复用，确保规划行为完全一致。
+
+B3 统一：build_replan_cfg 经 ReplanConfig.from_mpc_config().to_dict() 构建，
+与 MPCController._build_replan_cfg() 共享同一字段映射，消除重复翻译。
 """
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
 from src.ilqt.planning_env import PlanningEnv
+from src.ilqt.replan_config import ReplanConfig
 from src.ilqt.robot_limits import RobotLimits
 from src.ilqt.tube_types import TubeConfig
+
+if TYPE_CHECKING:
+    # 仅类型检查期导入 MPCConfig，运行期用延迟导入打破与 mpc_controller 的循环依赖
+    from src.ilqt.mpc_controller import MPCConfig
 
 # ── 共享常量（对齐 V11 真机配置）──
 DT: float = 0.005
@@ -80,6 +88,78 @@ def build_solver() -> Any:
     )
 
 
+def _build_real_robot_mpc_config() -> "MPCConfig":
+    """构建真机专用 MPCConfig（对齐旧 build_replan_cfg 硬编码值）。
+
+    旧 build_replan_cfg 内联 42 个键值；本函数将这些值映射到 MPCConfig 字段，
+    再由 ReplanConfig.from_mpc_config().to_dict() 统一产出 51-key dict。
+
+    关键差异（vs MPCConfig 默认）：
+    - total_horizon=200, fixed_horizon=60（短 horizon 加速真机响应）
+    - max_iter_per_plan=3, first_plan_iters=5, near_plan_iters=2（少迭代减延迟）
+    - is_position_mode=True（真机位置控制）
+    - racket_speed=5.0, backswing_offset=0.0, backswing_ratio=0.3, r_decay_ratio=0.3
+    - smooth_far/mid/near 真机专用权重
+
+    行为保留：Q_p_base/Q_v_base/Q_qdot_base/Q_qddot_base/Q_du_base 显式置空/零，
+    使 do_replan 的 .get() 默认路径（eye(3) / 0.0）与旧路径（键缺失）等价。
+
+    Returns:
+        MPCConfig 实例（真机专用参数集）。
+    """
+    # 延迟导入：mpc_controller 反向依赖本模块的 build_robot_limits/build_solver，
+    # 运行期延迟到此函数调用时再加载，打破模块级循环依赖
+    from src.ilqt.mpc_controller import MPCConfig
+
+    return MPCConfig(
+        dt=DT,
+        total_horizon=200,
+        fixed_horizon=60,
+        replan_interval=20,
+        max_iter_per_plan=3,
+        first_plan_iters=5,
+        near_plan_iters=2,
+        near_threshold=80,
+        R=0.0001,
+        Q_p_scale_far=5.0,
+        Q_v_scale_far=3.0,
+        Q_p_scale_near=8.0,
+        Q_v_scale_near=120.0,
+        normal_weight=500000.0,
+        racket_speed=5.0,
+        max_tcp_speed=1.8,
+        is_position_mode=True,
+        ablation_mode="full",
+        use_backswing=False,
+        use_r_decay=False,
+        r_decay_ratio=0.3,
+        fix_joint5_angle=None,
+        backswing_offset=0.0,
+        backswing_ratio=0.3,
+        normal_flip=False,
+        shoulder_pos=SHOULDER_POS,
+        workspace_radius=WORKSPACE_RADIUS,
+        follow_through_length=0.0,
+        follow_through_steps=0,
+        follow_through_v_terminal=0.3,
+        time_perturb_s=0.0,
+        space_perturb_m=0.0,
+        perturb_alpha_min=0.0,
+        smooth_far={"Q_qdot_mult": 1.0, "Q_qddot_mult": 1.0, "Q_du_mult": 1.0},
+        smooth_mid={"Q_qdot_mult": 2.0, "Q_qddot_mult": 2.0, "Q_du_mult": 2.0},
+        smooth_near={"Q_qdot_mult": 2.0, "Q_qddot_mult": 2.0, "Q_du_mult": 3.0},
+        tube_cfg=TubeConfig(),
+        # 行为保留：do_replan 对这些键用 .get(..., None/0.0)，
+        # 显式置空使值与旧路径（键缺失）完全等价
+        Q_p_base=None,
+        Q_v_base=None,
+        Q_qdot_base=0.0,
+        Q_qddot_base=0.0,
+        Q_du_base=0.0,
+        far_threshold=50,
+    )
+
+
 def build_replan_cfg(
     env: PlanningEnv,
     robot_limits: RobotLimits,
@@ -87,9 +167,12 @@ def build_replan_cfg(
     d_hat: np.ndarray,
     v_hit_desired: np.ndarray,
 ) -> dict:
-    """构建 do_replan 所需的完整配置字典（43 键）。
+    """构建 do_replan 所需的完整配置字典（51 键）。
 
-    参数集合在真机入口与测试用例间完全对齐，确保规划行为一致。
+    B3 统一：经 ``ReplanConfig.from_mpc_config().to_dict()`` 构建，
+    与 ``MPCController._build_replan_cfg()`` 共享同一字段映射工厂，
+    消除两条路径各自维护字段翻译的重复。
+
     ``env`` 参数预留以备未来扩展（如从 env 读取额外配置），当前未使用。
 
     Args:
@@ -100,52 +183,14 @@ def build_replan_cfg(
         v_hit_desired: 期望击球时刻末端速度。
 
     Returns:
-        replan_cfg dict，可直接传给 AsyncReplanner / do_replan。
+        replan_cfg dict，可直接传给 AsyncReplanner / do_replan / RealRunner。
     """
-    total_horizon = 200
-    return {
-        # ── 必需键 ──
-        "dt": DT,
-        "shoulder_pos": SHOULDER_POS,
-        "workspace_radius": WORKSPACE_RADIUS,
-        "total_horizon": total_horizon,
-        "fixed_horizon": 60,
-        "replan_interval": 20,
-        "max_iter_per_plan": 3,
-        "first_plan_iters": 5,
-        "near_plan_iters": 2,
-        "near_threshold": 80,
-        "R": 0.0001,
-        "Q_p_scale_far": 5.0,
-        "Q_v_scale_far": 3.0,
-        "Q_p_scale_near": 8.0,
-        "Q_v_scale_near": 120.0,
-        "robot_limits": robot_limits,
-        "solver": solver,
-        "d_hat": d_hat,
-        "v_hit_desired": v_hit_desired,
-        "v_hit_at_contact": v_hit_desired,
-        "hit_shift": 0.0,
-        "follow_through_length": 0.0,
-        "time_perturb_s": 0.0,
-        "space_perturb_m": 0.0,
-        # ── 可选键（真机位置模式）──
-        "ablation_mode": "full",
-        "is_position_mode": True,
-        "use_backswing": False,
-        "use_r_decay": False,
-        "fix_joint5_angle": None,
-        "backswing_offset": 0.0,
-        "backswing_ratio": 0.3,
-        "r_decay_ratio": 0.3,
-        "racket_speed": 5.0,
-        "normal_weight": 500000.0,
-        "normal_flip": False,
-        "max_tcp_speed": 1.8,
-        "perturb_alpha_min": 0.0,
-        "k_hit_total": total_horizon,
-        "tube_cfg": TubeConfig(),
-        "smooth_far": {"Q_qdot_mult": 1.0, "Q_qddot_mult": 1.0, "Q_du_mult": 1.0},
-        "smooth_mid": {"Q_qdot_mult": 2.0, "Q_qddot_mult": 2.0, "Q_du_mult": 2.0},
-        "smooth_near": {"Q_qdot_mult": 2.0, "Q_qddot_mult": 2.0, "Q_du_mult": 3.0},
-    }
+    config = _build_real_robot_mpc_config()
+    replan_cfg = ReplanConfig.from_mpc_config(
+        config,
+        robot_limits=robot_limits,
+        solver=solver,
+        d_hat=d_hat,
+        v_hit_desired=v_hit_desired,
+    )
+    return replan_cfg.to_dict()

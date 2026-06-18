@@ -202,3 +202,15 @@ class TestRealRunnerBallUnreachable:
         metrics = runner.stop()
         assert metrics["ball_unreachable"] is True
         assert metrics["safe_steps"] == 0
+
+
+class TestRealRunnerEpisodeMode:
+    """轮 5：run_episode 模式 — 内部用 EpisodeRunner 编排。"""
+
+    def test_runner_episode_mode(self) -> None:
+        """run_episode(10) 返回 dict，含 total_steps/safe_steps 键（EpisodeRunner 编排）。"""
+        runner = _build_test_runner()
+        metrics = runner.run_episode(10)
+        assert isinstance(metrics, dict)
+        assert "total_steps" in metrics
+        assert "safe_steps" in metrics

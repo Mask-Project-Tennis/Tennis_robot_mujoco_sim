@@ -27,10 +27,14 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 
 from src.sim.rm65_env import RM65Env
+
+if TYPE_CHECKING:
+    from src.ilqt.replan_config import ReplanConfig
 
 logger = logging.getLogger(__name__)
 
@@ -89,12 +93,14 @@ class AsyncReplanner:
         self,
         env: RM65Env,
         replan_fn: "callable",
-        config: dict | None = None,
+        config: "dict | ReplanConfig | None" = None,
         state: object | None = None,
         model_path: "Path | None" = None,
     ) -> None:
         self._replan_fn = replan_fn
-        self._config = config or {}
+        # config 可为 dict（V11/旧路径）或 ReplanConfig（V12/B2 类型安全路径）；
+        # do_replan 兼容层会自动 to_dict()，此处保留原对象避免无谓转换
+        self._config: "dict | ReplanConfig" = config if config is not None else {}
         self._state = state
         self._env = env
 

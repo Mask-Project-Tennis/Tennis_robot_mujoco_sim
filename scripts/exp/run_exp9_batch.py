@@ -17,7 +17,7 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 RAW_DIR = PROJECT_ROOT / "experiment_data" / "exp9_obs_freq_robustness" / "raw"
-V11_SCRIPT = PROJECT_ROOT / "scripts" / "rm65_mpc_v11.py"
+V11_SCRIPT = PROJECT_ROOT / "scripts" / "rm65_mpc_v12.py"
 PYTHON_EXE = str(Path(sys.executable))
 
 SPEEDS = [6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
