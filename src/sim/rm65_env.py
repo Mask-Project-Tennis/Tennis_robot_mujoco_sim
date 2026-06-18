@@ -366,6 +366,7 @@ class RM65Env:
         """设置球的位置和速度并刷新。"""
         self._set_ball_pos_vel(pos, vel)
         mujoco.mj_forward(self.model, self.data)
+        self._cached_ball_state = None  # 物理状态已变，缓存作废
 
     def set_ball_vel(self, vel: np.ndarray) -> None:
         """仅设置球的速度（不改变位置）。"""
@@ -373,6 +374,7 @@ class RM65Env:
         self.data.qvel[bv:bv + 3] = vel[:3]
         if vel.shape[0] >= 6:
             self.data.qvel[bv + 3:bv + 6] = vel[3:6]
+        self._cached_ball_state = None  # 物理状态已变，缓存作废
 
     def get_ball_state(self) -> tuple[np.ndarray, np.ndarray]:
         """获取球的当前位置和速度（如有缓存则返回缓存值，否则读 MuJoCo）。"""

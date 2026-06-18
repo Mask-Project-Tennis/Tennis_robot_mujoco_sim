@@ -485,7 +485,7 @@ class MPCController:
                 # 同步：submit 后结果立即可用
                 result = self._replan_mode.get_result()
                 if result is not None:
-                    logger.info(
+                    logger.debug(
                         "REPLAN step=%d k_hit=%d iters=%d horizon=%d t=%.0fms",
                         sc, result.k_hit_new, result.iters_plan,
                         result.horizon_plan, t_replan_ms,
@@ -656,7 +656,7 @@ class MPCController:
         self._U_buffer = result.U_buffer.copy()
         self._buffer_idx = 0
 
-        logger.info(
+        logger.debug(
             "MPCController.step %d: replan k_hit=%d refine=%s buffer=%d",
             step, self._k_hit, refine_result.log, len(self._U_buffer),
         )

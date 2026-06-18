@@ -16,6 +16,7 @@ V12 是组装器 + 球生成 + 评估。
 用法（与 V11 一致）:
     python scripts/rm65_mpc_v12.py --serve-box --ball-speed 7 --seed 42
     python scripts/rm65_mpc_v12.py --serve-box --ball-speed 7 --no-plot
+    python scripts/rm65_mpc_v12.py --serve-box --ball-speed 7 --seed 2 --viewer --position-mode --no-r-decay
 """
 
 from __future__ import annotations
@@ -1092,23 +1093,26 @@ def main() -> None:
     if args.viewer:
         try:
             visualize_fn, _ = _import_v11_visuals()
-            _X_arr = np.array(X_history)
             U_arr = np.array(U_history) if len(U_history) > 0 else np.zeros((0, env.NU))
             env.reset(init_q)
             env.data.qpos[env.NQ:env.NQ + env.LEFT_ARM_NQ] = init_q_left
             env.data.qvel[env.NQ:env.NQ + env.LEFT_ARM_NQ] = 0.0
             env.update_kinematics()
             env.set_ball_state(p0, v0)
-            ball_replay = [env.get_ball_pos().copy()]
+            # 禁用碰撞避免重新仿真时球拍提前碰球
+            # （原仿真按 k_hit 动态切换 set_arm_collision，前 ~199 步禁用碰撞让球拍就位）
+            if hasattr(env, "set_arm_collision"):
+                env.set_arm_collision(False)
             X_replay = [env.get_arm_state().copy()]
             for u_cmd in U_arr:
                 env.step(u_cmd)
                 X_replay.append(env.get_arm_state().copy())
-                ball_replay.append(env.get_ball_pos().copy())
             if hasattr(env, "set_arm_collision"):
                 env.set_arm_collision(True)
+            # 球轨迹直接用原仿真保存的（含碰撞窗口管理+弹性反弹），避免重新仿真偏差
+            ball_replay = np.array(ball_pos_history)
             visualize_fn(
-                env, np.array(X_replay), U_arr, np.array(ball_replay), config_dict,
+                env, np.array(X_replay), U_arr, ball_replay, config_dict,
                 init_q_left=init_q_left,
                 post_hit_steps=post_hit_steps,
             )

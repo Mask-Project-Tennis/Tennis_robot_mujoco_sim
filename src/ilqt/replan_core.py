@@ -180,7 +180,7 @@ def do_replan(
             if len(request.U_prev) > 0
             else np.zeros((0, env_plan.NU))
         )
-        logger.info("FAR_JT step=%d k_hit=%d (JT gain=60, skip iLQR)", step, k_hit_new)
+        logger.debug("FAR_JT step=%d k_hit=%d (JT gain=60, skip iLQR)", step, k_hit_new)
         return result
 
     # 6. 位置误差 → 权重调度

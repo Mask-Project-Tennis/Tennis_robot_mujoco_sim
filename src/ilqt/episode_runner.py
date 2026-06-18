@@ -118,5 +118,16 @@ class EpisodeRunner:
         if self._diagnostics is not None:
             metrics.update(self._diagnostics.get_metrics())
 
-        logger.info(f"EpisodeRunner 完成: {metrics}")
+        # 关键标量（INFO）+ 完整 metrics（DEBUG，避免大数组刷屏）
+        logger.info(
+            "EpisodeRunner 完成: total_steps=%s safe_steps=%s mpc_done=%s "
+            "min_dist=%s ball_near=%s tube_ready=%s",
+            metrics.get("total_steps"),
+            metrics.get("safe_steps"),
+            metrics.get("mpc_done"),
+            metrics.get("min_dist"),
+            metrics.get("ball_near_count"),
+            metrics.get("tube_ready_count"),
+        )
+        logger.debug("EpisodeRunner metrics 详情: %s", metrics)
         return metrics
