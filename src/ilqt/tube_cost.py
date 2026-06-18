@@ -154,7 +154,7 @@ class TubeHittingCostWrapper:
                 f"k={int(tube.k_candidates[i])}:w={self._candidate_weights[i]:.3f}"
                 for i in top3
             )
-            logger.info(f"[Softmin诊断] 候选权重TOP3: {w_str}")
+            logger.info("[Softmin诊断] 候选权重TOP3: %s", w_str)
 
     def running_cost(self, x: np.ndarray, u: np.ndarray, k: int | None = None) -> float:
         """计算运行代价 = 原始运行代价 + tube 代价（若 k 在候选窗口内）。"""

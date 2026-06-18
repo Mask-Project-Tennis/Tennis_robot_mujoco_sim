@@ -76,8 +76,8 @@ def do_replan(
     )
     if hit_info_new is None:
         logger.warning(
-            f"ASYNC 步 {step}: 球不可达, ball_pos={ball_pos}, ball_vel={ball_vel}, "
-            f"remaining_horizon={remaining_horizon}"
+            "ASYNC 步 %d: 球不可达, ball_pos=%s, ball_vel=%s, remaining_horizon=%d",
+            step, ball_pos, ball_vel, remaining_horizon,
         )
         result.ball_unreachable = True
         return result
@@ -113,7 +113,7 @@ def do_replan(
     max_ee_v = float(np.linalg.norm(np.abs(J_p_feas) @ cfg["robot_limits"].qdot_max))
     ball_spd = float(np.linalg.norm(v_ball_hit_new))
     if ball_spd > max_ee_v * 2.0:
-        logger.warning(f"ASYNC 步 {step}: 球速 {ball_spd:.1f}m/s 超过限速 {max_ee_v:.1f}m/s")
+        logger.warning("ASYNC 步 %d: 球速 %.1fm/s 超过限速 %.1fm/s", step, ball_spd, max_ee_v)
 
     # 3. 空间偏移（衰减式）
     if abs(cfg.get("space_perturb_m", 0.0)) > 1e-6:

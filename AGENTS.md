@@ -545,8 +545,8 @@ Layer 3: 紧急停止（兜底）
 | Stage 2+3 | ✅ | `planning_env.py`（规划计算环境，MuJoCo 纯计算） |
 | Stage 4 | ✅ | `robot_interface` + `torque_to_position` + `adaptive_timer` + `safety_monitor` |
 | Stage 5 | ✅ | `ball_sensor` + `ball_perceiver` |
-| Stage 6 | ⬜ | ★ MPCController 提取（从 V11 重构为共享类） |
-| Stage 7 | ⬜ | `real_runner.py`（主循环编排） |
+| Stage 6 | 🔶 | 共享模块提取完成（tube_types/builder/cost/helpers/replan_core），MPCController.step() 完整提取待做 |
+| Stage 7 | ✅ | `real_runner.py`（start/step/stop 分步，4 tests Mock 闭环）+ `run_real_robot.py` 入口 |
 
 ### 待确认事项
 - **真机 MuJoCo 模型**：当前使用占位模型（rm65_model.xml），真机模型开发中
