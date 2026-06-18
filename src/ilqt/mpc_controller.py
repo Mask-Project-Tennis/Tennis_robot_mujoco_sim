@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -318,9 +319,15 @@ class MPCController:
             is_first_plan=True,
         )
         assert self._replanner.env_plan is not None, "env_plan 未就绪"
+        t_replan_start = time.perf_counter()
         result = do_replan(
             first_request, self._replanner.env_plan,
             self._replan_state, self._replan_cfg,
+        )
+        t_replan_ms = (time.perf_counter() - t_replan_start) * 1000
+        logger.info(
+            "REPLAN step=0 k_hit=%d iters=%d horizon=%d t=%.0fms",
+            result.k_hit_new, result.iters_plan, result.horizon_plan, t_replan_ms,
         )
 
         # 6. 球不可达处理
@@ -471,10 +478,18 @@ class MPCController:
             can_submit = can_submit and sc > 0  # async: start() 已首次提交
         if can_submit:
             request = self._build_replan_request(ball_pos, ball_vel, arm_state, sc)
+            t_replan_start = time.perf_counter()
             self._replan_mode.submit(request)
+            t_replan_ms = (time.perf_counter() - t_replan_start) * 1000
             if not self._config.async_mode:
                 # 同步：submit 后结果立即可用
                 result = self._replan_mode.get_result()
+                if result is not None:
+                    logger.info(
+                        "REPLAN step=%d k_hit=%d iters=%d horizon=%d t=%.0fms",
+                        sc, result.k_hit_new, result.iters_plan,
+                        result.horizon_plan, t_replan_ms,
+                    )
                 unreachable = self._apply_sync_result(
                     result, sc, ball_pos, ball_vel,
                 )
