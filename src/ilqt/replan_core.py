@@ -144,6 +144,38 @@ def do_replan(
     p_terminal_v5 = p_hit_new + cfg["follow_through_length"] * cfg["d_hat"]
     v_terminal_v5 = cfg["v_hit_at_contact"]
 
+    # v11: 远段 JT 控制（k_hit > far_threshold 且非首次规划时跳过 iLQR）
+    # 对齐 V11 主循环 1679-1694 行：远段用雅可比转置初始控制，近段才用 iLQR
+    far_threshold_jt = cfg.get("far_threshold", 50)
+    if k_hit_new > far_threshold_jt and not request.is_first_plan:
+        ball_pos_save_jt, ball_vel_save_jt = env_plan.get_ball_state()
+        u_jt = _jt_init_dispatch(
+            env_plan, x_current, p_follow_new, cfg["replan_interval"], gain=60.0,
+            fix_joint5_angle=cfg.get("fix_joint5_angle"),
+        )
+        env_plan.set_ball_state(ball_pos_save_jt, ball_vel_save_jt)
+        env_plan.set_arm_state(x_current)
+
+        result.request_step = step
+        result.k_hit_new = k_hit_new
+        result.p_hit_new = p_hit_new.copy()
+        result.v_ball_hit_new = v_ball_hit_new.copy()
+        result.n_des_new = n_des_new.copy()
+        result.solver_ok = True
+        result.iters_plan = 0
+        result.horizon_plan = 0
+        result.fast_lin = False
+        result.fp_limits_was_none = True
+        result.U_mpc_full = u_jt.copy()
+        result.U_buffer = u_jt[: cfg["replan_interval"]].copy()
+        result.U_prev = (
+            request.U_prev.copy()
+            if len(request.U_prev) > 0
+            else np.zeros((0, env_plan.NU))
+        )
+        logger.info("FAR_JT step=%d k_hit=%d (JT gain=60, skip iLQR)", step, k_hit_new)
+        return result
+
     # 6. 位置误差 → 权重调度
     env_plan.set_arm_state(x_current)
     env_plan.update_kinematics()
@@ -208,13 +240,29 @@ def do_replan(
             U_warm = U_warm_full[:horizon_plan]
 
     # 9. 构建 cost_fn（使用临时 cost_fn，env_plan 独立 MjData）
-    Q_p_mat = Q_p_scale * np.eye(3)
-    Q_v_mat = Q_v_scale * np.eye(3)
+    # v12: 使用配置中的 Q_p_base/Q_v_base（对齐 V11 base_cost_fn 的权重基底）
+    _q_p_base = cfg.get("Q_p_base", None)
+    if _q_p_base is None:
+        Q_p_mat = Q_p_scale * np.eye(3)
+    elif _q_p_base.ndim == 1:
+        Q_p_mat = Q_p_scale * np.diag(_q_p_base)
+    else:
+        Q_p_mat = Q_p_scale * _q_p_base
+    _q_v_base = cfg.get("Q_v_base", None)
+    if _q_v_base is None:
+        Q_v_mat = Q_v_scale * np.eye(3)
+    elif _q_v_base.ndim == 1:
+        Q_v_mat = Q_v_scale * np.diag(_q_v_base)
+    else:
+        Q_v_mat = Q_v_scale * _q_v_base
     R_mat = cfg["R"] * np.eye(env_plan.NU)
-    max_tcp_val = float(cfg.get("max_tcp_speed", 1.8))
     cost_fn_plan = HittingCost(
         env_plan, p_terminal_v5, v_terminal_v5, Q_p_mat, Q_v_mat, R_mat,
         Q_n=cfg.get("normal_weight", 500000.0),
+        n_des=n_des_new,
+        Q_qdot=cfg.get("Q_qdot_base", 0.0),
+        Q_qddot=cfg.get("Q_qddot_base", 0.0),
+        Q_du=cfg.get("Q_du_base", 0.0),
         actuator_mode=1 if cfg.get("is_position_mode", False) else 0,
     )
 
