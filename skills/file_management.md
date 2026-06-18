@@ -117,16 +117,61 @@
 源文件与测试文件的对应关系：
 
 ```
-src/robot/kinematics.py      → tests/test_kinematics.py
-src/dynamics/linearize.py    → tests/test_dynamics.py
-src/dynamics/simulate.py     → tests/test_dynamics.py
-src/ilqt/solver.py           → tests/test_ilqt.py
-src/ilqt/cost.py             → tests/test_ilqt.py
-src/ilqt/utils.py            → tests/test_ilqt.py
-src/tennis/ball.py           → tests/test_tennis.py
-src/tennis/hitting.py        → tests/test_tennis.py
-src/sim/env.py               → tests/test_sim.py
-src/utils/math_utils.py      → tests/test_math_utils.py
+# ── 基础模块 ──
+src/robot/kinematics.py           → tests/test_kinematics.py
+src/dynamics/linearize.py         → tests/test_dynamics.py
+src/dynamics/simulate.py          → tests/test_dynamics.py
+src/sim/env.py                    → tests/test_sim.py
+src/sim/rm65_env.py               → tests/test_actuator_modes.py
+src/utils/math_utils.py           → tests/test_math_utils.py
+
+# ── iLQR 核心 + 共享模块 ──
+src/ilqt/solver.py                → tests/test_ilqt.py
+src/ilqt/cost.py                  → tests/test_ilqt.py
+src/ilqt/utils.py                 → tests/test_ilqt.py
+src/ilqt/tube_types.py            → tests/test_tube_types.py (如需)
+src/ilqt/tube_builder.py          → (通过 test_replan_core 间接覆盖)
+src/ilqt/tube_cost.py             → (通过 test_replan_core 间接覆盖)
+src/ilqt/mpc_helpers.py           → tests/test_mpc_helpers.py
+src/ilqt/replan_core.py           → tests/test_replan_core.py
+src/ilqt/ball_predictor.py        → tests/test_ball_predictor.py
+src/ilqt/replan_config.py         → tests/test_replan_config.py
+
+# ── 管线架构 ──
+src/ilqt/mpc_controller.py        → tests/test_mpc_controller.py
+src/ilqt/episode_runner.py        → tests/test_episode_runner.py
+src/ilqt/components/protocols.py  → tests/test_component_protocols.py
+src/ilqt/components/sim_perception.py    → tests/test_sim_components.py
+src/ilqt/components/sim_executor.py      → tests/test_sim_components.py
+src/ilqt/components/predictive_safety.py → tests/test_sim_components.py
+src/ilqt/components/basic_safety.py      → tests/test_sim_components.py
+src/ilqt/components/sim_diagnostics.py   → tests/test_sim_components.py
+
+# ── 策略模块 ──
+src/ilqt/strategies/follow_through.py    → tests/test_follow_through.py
+src/ilqt/strategies/hit_point_refiner.py → tests/test_hit_point_refiner.py
+src/ilqt/strategies/replan_mode.py       → tests/test_replan_mode.py
+src/ilqt/strategies/phase_schedule.py    → tests/test_strategies.py
+src/ilqt/strategies/direction.py         → tests/test_strategies.py
+
+# ── 真机部署 ──
+src/real/config.py                → tests/test_robot_interface.py (含 SafetyConfig)
+src/real/robot_interface.py       → tests/test_robot_interface.py
+src/real/fake_robot.py            → tests/test_fake_robot.py
+src/real/real_runner.py           → tests/test_real_runner.py
+src/real/robot_arm_protocol.py    → tests/test_fake_robot.py (isinstance)
+src/real/runner_factory.py        → tests/test_real_runner.py + test_replan_core.py
+src/real/robot_executor.py        → (通过 test_real_runner 间接覆盖)
+src/real/perception_adapter.py    → (通过 test_real_runner 间接覆盖)
+src/real/safety_adapter.py        → (通过 test_real_runner 间接覆盖)
+
+# ── 网球场景 ──
+src/tennis/ball.py                → tests/test_tennis.py
+src/tennis/hitting.py             → tests/test_tennis.py
+
+# ── 异步规划 ──
+src/ilqt/async_replanner.py       → tests/test_async_replanner.py
+src/ilqt/planning_env.py          → tests/test_planning_env.py + test_planning_env_ball.py
 ```
 
 ## 结果目录规范

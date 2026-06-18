@@ -17,7 +17,7 @@
 
 | 脚本 | 用途 |
 |------|------|
-| `scripts/rm65_mpc_v11.py` | ★ 当前活跃仿真主脚本（V11） |
+| `scripts/rm65_mpc_v12.py` | ★ 当前活跃仿真主脚本（V12, EpisodeRunner 架构） |
 | `scripts/rm65_mpc_tube_constraint.py` | 离线仿真（exp1-7 使用） |
 | `scripts/exp/_run_expN_*.py` | 实验包装脚本（monkey-patch 约束） |
 | `scripts/exp/run_expN_batch.py` | 批量运行器 |
@@ -90,7 +90,7 @@ np.savez_compressed(
 | 严格约束包装 | `scripts/exp/_run_exp2_v3_strict.py` |
 | 批量运行器 | `scripts/exp/run_exp2_v3_batch.py` |
 | 提取脚本（离线） | `scripts/extract/extract_exp2_v3_results.py` |
-| 提取脚本（实时 V11） | `scripts/extract/extract_exp1_results.py` |
+| 提取脚本（实时 V12） | `scripts/extract/extract_exp1_results.py` |
 | 默认约束参数 | `configs/default.yaml` |
 
 ### 包装脚本模板
@@ -125,14 +125,14 @@ def _patched(cls, config, dt, ctrlrange):
 RobotLimits.from_config = _patched
 
 sys.argv = [
-    "rm65_mpc_v11.py",
+    "rm65_mpc_v12.py",
     "--serve-box",
     "--ball-speed", ball_speed,
     "--seed", seed,
     "--no-plot",
 ]
 
-import scripts.rm65_mpc_v11 as main_mod  # noqa: E402
+import scripts.rm65_mpc_v12 as main_mod  # noqa: E402
 main_mod.main()
 ```
 
@@ -210,7 +210,7 @@ constraint_type: <exempt|strict|custom>
 seeds: <N>
 ball_speeds: [<speeds>]
 tube_modes: [<modes>]
-script_type: <v11|offline|realtime>
+script_type: <v12|offline|realtime>
 constraints:
   forward_pass_margin: <值>
   qdot_scale: <值>
