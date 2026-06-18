@@ -613,6 +613,9 @@ class MPCController:
         Returns:
             True 表示球不可达。
         """
+        if result is None:
+            logger.warning("MPCController.step %d: 同步重规划返回 None", step)
+            return False
         if result.ball_unreachable:
             self._ball_unreachable = True
             self._done = True

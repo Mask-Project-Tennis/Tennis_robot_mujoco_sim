@@ -16,7 +16,7 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 DATA_DIR = PROJECT_ROOT / "experiment_data" / "exp12_feedforward"
-V11 = PROJECT_ROOT / "scripts" / "rm65_mpc_v12.py"
+SCRIPT = PROJECT_ROOT / "scripts" / "rm65_mpc_v12.py"
 PYTHON_EXE = str(Path(sys.executable))
 
 # ==================== Phase A: 核心消融 ====================
@@ -54,8 +54,8 @@ def _make_kp_kd(kp_base: float, kd_ratio: float) -> tuple[list[float], list[floa
 
 
 def _build_cmd_phase_a(mode: str, speed: int, seed: int) -> list[str]:
-    """构造 Phase A 的 V11 命令行。"""
-    cmd = [PYTHON_EXE, str(V11), "--serve-box",
+    """构造 Phase A 的 SCRIPT 命令行。"""
+    cmd = [PYTHON_EXE, str(SCRIPT), "--serve-box",
            "--ball-speed", str(speed), "--seed", str(seed),
            "--no-plot", "--replan-interval", "20"]
     if mode == "pos_ff":
@@ -72,9 +72,9 @@ def _build_cmd_phase_a(mode: str, speed: int, seed: int) -> list[str]:
 
 
 def _build_cmd_phase_b(kp_base: float, kd_ratio: float, seed: int) -> list[str]:
-    """构造 Phase B 的 V11 命令行（全部 pos+FF）。"""
+    """构造 Phase B 的 SCRIPT 命令行（全部 pos+FF）。"""
     kp, kd = _make_kp_kd(kp_base, kd_ratio)
-    return [PYTHON_EXE, str(V11), "--serve-box",
+    return [PYTHON_EXE, str(SCRIPT), "--serve-box",
             "--ball-speed", str(PHASE_B_BALL_SPEED), "--seed", str(seed),
             "--no-plot", "--replan-interval", "20",
             "--position-mode",
@@ -85,9 +85,9 @@ def _build_cmd_phase_b(kp_base: float, kd_ratio: float, seed: int) -> list[str]:
 def _build_cmd_phase_c(ff_mode: str, noise_name: str,
                        pos_std: float, vel_std: float, use_kf: bool,
                        seed: int) -> list[str]:
-    """构造 Phase C 的 V11 命令行。"""
+    """构造 Phase C 的 SCRIPT 命令行。"""
     kp, kd = _make_kp_kd(PHASE_C_KP_BASE, PHASE_C_KD_RATIO)
-    cmd = [PYTHON_EXE, str(V11), "--serve-box",
+    cmd = [PYTHON_EXE, str(SCRIPT), "--serve-box",
            "--ball-speed", str(PHASE_C_BALL_SPEED), "--seed", str(seed),
            "--no-plot", "--replan-interval", "20",
            "--position-mode",

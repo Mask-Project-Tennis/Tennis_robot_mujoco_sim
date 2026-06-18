@@ -202,7 +202,15 @@ class ReplanConfig:
         do_replan 入口的兼容层会调用本方法，使 ReplanConfig 对象透明地
         适配旧 cfg["..."] 访问模式，无需改动核心规划循环。
 
+        ndarray 字段返回 .copy()，防止外部修改污染 ReplanConfig 实例。
+
         Returns:
             dict，键集与旧 ``_build_replan_cfg()`` 产出完全一致。
         """
-        return {f.name: getattr(self, f.name) for f in fields(self)}
+        result = {}
+        for f in fields(self):
+            val = getattr(self, f.name)
+            if isinstance(val, np.ndarray):
+                val = val.copy()
+            result[f.name] = val
+        return result

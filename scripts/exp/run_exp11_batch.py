@@ -16,7 +16,7 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 RAW_DIR = PROJECT_ROOT / "experiment_data" / "exp11_regression" / "raw"
-V11_SCRIPT = PROJECT_ROOT / "scripts" / "rm65_mpc_v12.py"
+SCRIPT = PROJECT_ROOT / "scripts" / "rm65_mpc_v12.py"
 PYTHON_EXE = str(Path(sys.executable))
 
 SPEEDS = [6, 7, 8, 9, 10]
@@ -41,7 +41,7 @@ def run_one(args: tuple[int, str, str, int]) -> tuple[str, bool]:
         return tag, True
 
     cmd = [
-        PYTHON_EXE, str(V11_SCRIPT),
+        PYTHON_EXE, str(SCRIPT),
         "--serve-box", "--ball-speed", str(speed),
         "--seed", str(seed), "--no-plot",
     ]

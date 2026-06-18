@@ -161,7 +161,7 @@ def _build_real_robot_mpc_config() -> "MPCConfig":
 
 
 def build_replan_cfg(
-    env: PlanningEnv,
+    _env: PlanningEnv,
     robot_limits: RobotLimits,
     solver: Any,
     d_hat: np.ndarray,
