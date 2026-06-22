@@ -51,7 +51,9 @@ def parse_log(log_path: Path) -> dict:
         result["hit_type"] = m_result.group(9)
         result["hit_pos_error"] = float(m_result.group(11))
         result["v_racket_at_hit"] = float(m_result.group(12))
-        result["hit"] = result["pos_error"] < 0.153
+        # hit 判定：基于真实物理接触（hit_type），不使用 pos_error 回退
+        from src.sim.hit_detection import determine_hit_from_type
+        result["hit"] = determine_hit_from_type(result["hit_type"])
     else:
         result.update({
             "pos_error": 0, "vel_error": 0, "min_dist": 0,

@@ -2557,61 +2557,16 @@ def main() -> None:
     if args.viewer:
         logger.info("MPC 计算完成，开始真实速度回放（含击打后球飞出）...")
 
-        X_arr = np.array(X_history)
         U_arr = np.array(U_history) if len(U_history) > 0 else np.zeros((0, env.NU))
 
-        env.reset(init_q)
-        env.data.qpos[env.NQ:env.NQ + env.LEFT_ARM_NQ] = init_q_left
-        env.data.qvel[env.NQ:env.NQ + env.LEFT_ARM_NQ] = 0.0
-        env.update_kinematics()
-        env.set_ball_state(p0, v0)
-
-        X_replay = [env.get_arm_state().copy()]
-        ball_replay = [env.get_ball_pos().copy()]
-        rebound_applied = False
-
-        for i, u_cmd in enumerate(U_arr):
-            # 回放碰撞窗口：与 MPC 执行完全相同的逻辑
-            # 用 hit_step - i 模拟 k_hit_new（剩余击球步数）
-            k_hit_remaining = max(0, hit_step - i) if hit_step >= 0 else 0
-            ball_pos_rp = env.get_ball_pos()
-            racket_pos_rp = env.get_ee_pos()
-            dist_rp = np.linalg.norm(racket_pos_rp - ball_pos_rp)
-            enable_collision_rp = False
-            if not rebound_applied and hit_step >= 0:
-                if k_hit_remaining <= 10:
-                    enable_collision_rp = True
-                elif k_hit_remaining <= 30 and dist_rp < 0.35:
-                    enable_collision_rp = True
-            if hasattr(env, "set_arm_collision"):
-                env.set_arm_collision(enable_collision_rp)
-            ball_vel_pre = env.get_ball_vel().copy() if enable_collision_rp else np.zeros(3)
-            env.step(u_cmd)
-            if enable_collision_rp and not rebound_applied and hit_step >= 0:
-                ncon = env.data.ncon
-                for ci in range(ncon):
-                    c = env.data.contact[ci]
-                    g1 = env.model.geom(c.geom1).name
-                    g2 = env.model.geom(c.geom2).name
-                    if ("ball" in g1 or "ball" in g2) and ("racket" in g1 or "racket" in g2):
-                        n_racket = env.get_ee_normal()
-                        n_hat = n_racket / (np.linalg.norm(n_racket) + 1e-8)
-                        v_ee = env.get_ee_vel()
-                        v_rel_n = np.dot(ball_vel_pre - v_ee, n_hat)
-                        e = 0.8
-                        v_ball_new = ball_vel_pre - (1 + e) * v_rel_n * n_hat
-                        env.set_ball_vel(v_ball_new)
-                        rebound_applied = True
-                        logger.info(
-                            f"  回放弹性反弹: 球速 {np.linalg.norm(ball_vel_pre):.2f}"
-                            f"->{np.linalg.norm(v_ball_new):.2f} m/s"
-                        )
-                        break
-            X_replay.append(env.get_arm_state().copy())
-            ball_replay.append(env.get_ball_pos().copy())
-
-        X_replay = np.array(X_replay)
-        ball_replay_arr = np.array(ball_replay)
+        from src.sim.replay import replay_trajectory
+        replay_result = replay_trajectory(
+            env, U_arr, init_q, init_q_left, p0, v0, hit_step,
+        )
+        X_replay = replay_result.X_replay
+        ball_replay_arr = replay_result.ball_replay
+        if replay_result.rebound_applied:
+            logger.info("  回放弹性反弹已触发")
 
         if hasattr(env, "set_arm_collision"):
             env.set_arm_collision(True)

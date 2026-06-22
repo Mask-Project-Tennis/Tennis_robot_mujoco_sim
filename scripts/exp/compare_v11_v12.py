@@ -94,10 +94,10 @@ def run_one(script: str, seed: int, extra_args: list[str], speed: int) -> dict:
     fields["wall_time"] = round(t_wall, 2)
     fields["seed"] = seed
 
-    # hit 判定（pos_error < 0.153m 且 hit_type != miss）
+    # hit 判定：基于真实物理接触（hit_type），不使用 pos_error 回退
+    from src.sim.hit_detection import determine_hit_from_type
     hit_type = fields.get("hit_type", "miss")
-    pos_err = fields.get("pos_error", 999)
-    fields["hit"] = (hit_type in ("active", "passive")) or (pos_err < 0.153)
+    fields["hit"] = determine_hit_from_type(hit_type)
 
     return fields
 

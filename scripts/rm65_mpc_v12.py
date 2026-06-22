@@ -990,16 +990,9 @@ def main() -> None:
     v_racket_at_hit_val = sim_component.v_ee_at_hit if sim_component.v_ee_at_hit is not None else 0.0
 
     # ---- 打印评估结果 ----
-    ball_racket_threshold = 0.033 + 0.12
+    from src.sim.hit_detection import classify_hit_result
     print("\n========================================")
-    if pos_error < 0.05:
-        print("  RM-65 击打成功！（球-拍距离 < 5cm，精准命中）")
-    elif pos_error < ball_racket_threshold:
-        print(f"  RM-65 击打命中！（球-拍距离 {pos_error:.4f}m < {ball_racket_threshold:.3f}m）")
-    elif pos_error < 0.1:
-        print("  RM-65 击打接近！（球-拍距离 < 10cm）")
-    else:
-        print("  RM-65 击打偏差较大，需要调整参数。")
+    print(f"  {classify_hit_result(active_contact, passive_contact, pos_error)}")
 
     print("  [V12 EpisodeRunner 管线架构]")
     print(f"  ablation: {ablation_mode}")
@@ -1094,25 +1087,13 @@ def main() -> None:
         try:
             visualize_fn, _ = _import_v11_visuals()
             U_arr = np.array(U_history) if len(U_history) > 0 else np.zeros((0, env.NU))
-            env.reset(init_q)
-            env.data.qpos[env.NQ:env.NQ + env.LEFT_ARM_NQ] = init_q_left
-            env.data.qvel[env.NQ:env.NQ + env.LEFT_ARM_NQ] = 0.0
-            env.update_kinematics()
-            env.set_ball_state(p0, v0)
-            # 禁用碰撞避免重新仿真时球拍提前碰球
-            # （原仿真按 k_hit 动态切换 set_arm_collision，前 ~199 步禁用碰撞让球拍就位）
-            if hasattr(env, "set_arm_collision"):
-                env.set_arm_collision(False)
-            X_replay = [env.get_arm_state().copy()]
-            for u_cmd in U_arr:
-                env.step(u_cmd)
-                X_replay.append(env.get_arm_state().copy())
-            if hasattr(env, "set_arm_collision"):
-                env.set_arm_collision(True)
-            # 球轨迹直接用原仿真保存的（含碰撞窗口管理+弹性反弹），避免重新仿真偏差
-            ball_replay = np.array(ball_pos_history)
+            from src.sim.replay import replay_trajectory
+            replay_result = replay_trajectory(
+                env, U_arr, init_q, init_q_left, p0, v0, hit_step,
+            )
             visualize_fn(
-                env, np.array(X_replay), U_arr, ball_replay, config_dict,
+                env, replay_result.X_replay, U_arr, replay_result.ball_replay,
+                config_dict,
                 init_q_left=init_q_left,
                 post_hit_steps=post_hit_steps,
             )
