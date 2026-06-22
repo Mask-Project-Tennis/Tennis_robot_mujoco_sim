@@ -99,7 +99,7 @@ mujoco_sim/
 │   │   ├── __init__.py
 │   │   ├── linearize.py               # 动力学线性化（fx, fu），供 iLQR 使用
 │   │   └── simulate.py                # 前向仿真 / rollout
-│   ├── ilqt/                          # iLQR 求解器核心
+│   ├── ilqt/                          # iLQR + MPC + 管线 + 策略 + 组件
 │   │   ├── __init__.py
 │   │   ├── solver.py                  # iLQR 后向-前向迭代主循环（solve / solve_few_iters）
 │   │   ├── cost.py                    # 代价函数（终端击打点代价 + 控制代价 + Tube 代价）
@@ -109,7 +109,30 @@ mujoco_sim/
 │   │   ├── async_replanner.py         # 异步重规划器（后台线程 iLQR）
 │   │   ├── jt_init.py                 # 位置模式 JT 初始控制 + 后摆 warm-start
 │   │   ├── robot_env_protocol.py      # RobotEnv Protocol（@runtime_checkable，RM65Env/PlanningEnv 共同接口）
-│   │   ├── planning_env.py            # MPC 规划计算环境（MuJoCo 纯计算，无球/无左臂/无碰撞，供真机 iLQR 规划）
+│   │   ├── planning_env.py            # MPC 规划计算环境（MuJoCo 纯计算，无球/无左臂/无碰撞）
+│   │   ├── mpc_controller.py          # ★ MPCController 可组合规划模块（策略注入）+ MPCConfig + MPCStepResult
+│   │   ├── episode_runner.py          # ★ EpisodeRunner 通用管线（4 组件 + 5 hook 插入点）
+│   │   ├── step_context.py            # StepContext 步骤上下文（hook 间数据传递容器）
+│   │   ├── strategy_config.py         # StrategyConfig 策略注入容器（None → 默认实现）
+│   │   ├── replan_config.py           # ReplanConfig 类型安全配置（替代 43-key dict）
+│   │   ├── replan_core.py             # do_replan 完整 MPC+iLQR 重规划核心编排
+│   │   ├── ball_predictor.py          # BallPredictor 解析抛物线预测（无 MuJoCo 依赖）
+│   │   ├── mpc_helpers.py             # JT 初始控制 + fix_joint5 + R 退火调度
+│   │   ├── tube_types.py              # TubeConfig / HittingTube / ReplanState 数据结构
+│   │   ├── tube_builder.py            # Tube 走廊构建
+│   │   ├── tube_cost.py               # Tube 走廊代价
+│   │   ├── strategies/                # ★ 可插拔策略模块（5 个 Protocol）
+│   │   │   ├── follow_through.py      # PlannedFollowThrough（kp/kd 可通过 MPCConfig 配置）
+│   │   │   ├── hit_point_refiner.py   # HybridRefiner（阈值可通过 MPCConfig 配置）
+│   │   │   ├── replan_mode.py         # Sync/Async 重规划模式
+│   │   │   ├── phase_schedule.py      # DefaultPhaseSchedule far/mid/near 阶段调度
+│   │   │   └── direction.py           # ReflectDirection 来球反方向
+│   │   ├── components/                # ★ 可组合管线组件（3 个 Protocol）
+│   │   │   ├── protocols.py           # Perception/Executor/Safety（@runtime_checkable，get_metrics 归入 Executor）
+│   │   │   ├── sim_component.py       # ★ SimComponent 仿真执行+诊断一体化（V11/V12 共享）
+│   │   │   ├── sim_perception.py      # SimPerception 读 MuJoCo 球状态
+│   │   │   ├── predictive_safety.py   # PredictiveSafetyFilter（beta 递降 + X 墙，X_WALL_BODY_NAMES 共享常量）
+│   │   │   └── basic_safety.py        # BasicSafetyFilter（仅限位检查，构造时 RuntimeWarning）
 │   │   └── costs/                     # 模块化代价函数
 │   │       ├── __init__.py
 │   │       ├── base.py                # BaseCost 基类
@@ -124,11 +147,13 @@ mujoco_sim/
 │   │   ├── linearize.cpp              # 解析动力学线性化（批量）
 │   │   ├── forward_pass.cpp           # 前向传递（含碰撞禁用+limits+check_step）
 │   │   └── backward_pass.cpp          # 后向传递（纯代数 Riccati，栈上小矩阵高斯消元）
-│   ├── sim/                           # MuJoCo 仿真封装
+│   ├── sim/                           # MuJoCo 仿真封装 + 回放 + 击打检测
 │   │   ├── __init__.py
 │   │   ├── env.py                     # MujocoEnv 基类
 │   │   ├── rm65_env.py                # RM65Env 双臂环境封装
-│   │   └── viewer.py                  # 可视化工具
+│   │   ├── viewer.py                  # 可视化工具
+│   │   ├── replay.py                  # 轨迹回放共享模块（replay_trajectory + 碰撞窗口 + 弹性反弹）
+│   │   └── hit_detection.py           # 击打检测共享模块（classify_hit_result + determine_hit_from_type）
 │   ├── perception/                    # 感知模块（噪声+滤波）
 │   │   ├── __init__.py
 │   │   └── ball_estimator.py          # 6D 卡尔曼滤波器（位置+速度，匀速+重力过程模型）
@@ -178,7 +203,7 @@ mujoco_sim/
 │   ├── tools/          # 独立工具 10 个（查看器·扫描·诊断·可视化）
 │   ├── test/           # 快速验证 10 个
 │   └── README.md       # 完整清单与说明
-├── tests/
+├── tests/                             # 单元测试（332 tests，30 个文件）
 │   ├── test_kinematics.py
 │   ├── test_linearize.py
 │   ├── test_mpc.py
@@ -189,7 +214,26 @@ mujoco_sim/
 │   ├── test_actuator_modes.py              # 双模式执行器测试（46 tests）
 │   ├── test_jacobian_cache.py              # 雅可比缓存回归测试（8 tests）
 │   ├── test_cpp_forward_pass.py            # C++ 前向传递等效性测试（14 tests）
-│   └── test_cpp_backward_pass.py           # C++ 后向传递等效性测试（4 tests）
+│   ├── test_cpp_backward_pass.py           # C++ 后向传递等效性测试（4 tests）
+│   ├── test_replay.py                      # 轨迹回放碰撞管理测试（14 tests）
+│   ├── test_hit_detection.py               # 击打检测判定测试（6 tests）
+│   ├── test_safety_contract.py             # 安全契约回归测试（4 tests）
+│   ├── test_episode_runner.py              # EpisodeRunner 管线 + hook + 策略 DI 测试（6 tests）
+│   ├── test_sim_components.py              # 管线组件测试
+│   ├── test_component_protocols.py         # Protocol 接口验证
+│   ├── test_mpc_controller.py              # MPCController 测试
+│   ├── test_strategies.py                  # 策略测试
+│   ├── test_follow_through.py              # 随挥策略测试
+│   ├── test_hit_point_refiner.py           # 击球点过滤策略测试
+│   ├── test_replan_mode.py                 # 重规划模式测试
+│   ├── test_replan_config.py               # ReplanConfig 测试
+│   ├── test_real_runner.py                 # RealRunner Mock 闭环测试
+│   ├── test_robot_interface.py             # RobotInterface SDK Mock 测试
+│   ├── test_safety_monitor.py              # SafetyMonitor 测试
+│   ├── test_fake_robot.py                  # FakeRobot Mock 测试
+│   ├── test_torque_to_position.py          # 力矩→位置积分器测试
+│   ├── test_planning_env.py                # PlanningEnv 测试
+│   └── ... （完整清单见 tests/ 目录）
 ├── experiment_data/                  # 实验数据（按 exp1~exp12 组织）
 │   └── README.md                     # 数据存储规范
 ├── paper/                            # 论文 LaTeX 工程

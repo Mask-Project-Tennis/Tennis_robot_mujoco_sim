@@ -123,6 +123,8 @@ src/dynamics/linearize.py         → tests/test_dynamics.py
 src/dynamics/simulate.py          → tests/test_dynamics.py
 src/sim/env.py                    → tests/test_sim.py
 src/sim/rm65_env.py               → tests/test_actuator_modes.py
+src/sim/replay.py                 → tests/test_replay.py
+src/sim/hit_detection.py          → tests/test_hit_detection.py
 src/utils/math_utils.py           → tests/test_math_utils.py
 
 # ── iLQR 核心 + 共享模块 ──
@@ -140,12 +142,13 @@ src/ilqt/replan_config.py         → tests/test_replan_config.py
 # ── 管线架构 ──
 src/ilqt/mpc_controller.py        → tests/test_mpc_controller.py
 src/ilqt/episode_runner.py        → tests/test_episode_runner.py
+src/ilqt/step_context.py          → tests/test_episode_runner.py (StepContext hook 验证)
+src/ilqt/strategy_config.py       → tests/test_episode_runner.py (StrategyConfig DI 验证)
 src/ilqt/components/protocols.py  → tests/test_component_protocols.py
-src/ilqt/components/sim_perception.py    → tests/test_sim_components.py
-src/ilqt/components/sim_executor.py      → tests/test_sim_components.py
-src/ilqt/components/predictive_safety.py → tests/test_sim_components.py
-src/ilqt/components/basic_safety.py      → tests/test_sim_components.py
-src/ilqt/components/sim_diagnostics.py   → tests/test_sim_components.py
+src/ilqt/components/sim_component.py      → tests/test_sim_components.py
+src/ilqt/components/sim_perception.py     → tests/test_sim_components.py
+src/ilqt/components/predictive_safety.py  → tests/test_sim_components.py + tests/test_safety_contract.py
+src/ilqt/components/basic_safety.py       → tests/test_sim_components.py
 
 # ── 策略模块 ──
 src/ilqt/strategies/follow_through.py    → tests/test_follow_through.py

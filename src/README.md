@@ -5,9 +5,9 @@
 | 模块 | 职责 | 关键文件 | 符号数 |
 |------|------|---------|--------|
 | `robot/` | 机器人模型定义（MuJoCo XML + 正运动学） | `rm65_model.xml`, `kinematics.py` | 9 |
-| `sim/` | MuJoCo 环境封装（状态读写、仿真步进、雅可比缓存） | `rm65_env.py`, `env.py`, `viewer.py` | 91 |
+| `sim/` | MuJoCo 环境封装 + 轨迹回放 + 击打检测 | `rm65_env.py`, `env.py`, `viewer.py`, `replay.py`, `hit_detection.py` | 91 |
 | `dynamics/` | 动力学线性化（解析/有限差分）+ 前向 rollout | `linearize.py`, `simulate.py` | 13 |
-| `ilqt/` | iLQR 求解器 + 代价函数 + 约束 + 异步重规划 + 规划计算环境 | `solver.py`, `cost.py`, `planning_env.py`, `robot_env_protocol.py` | 160 |
+| `ilqt/` | iLQR 求解器 + MPCController + EpisodeRunner + 可插拔策略 + 可组合组件 | `solver.py`, `mpc_controller.py`, `episode_runner.py`, `strategies/`, `components/` | 160 |
 | `cpp/` | C++ 加速模块（pybind11：线性化、前向传递、约束检查） | `solver_cpp.py`, `mujoco_utils.h`, `cost_params.h` | 91 |
 | `perception/` | 球状态估计（6D 卡尔曼滤波 + 观测门控） | `ball_estimator.py`, `ball_obs_gate.py` | 31 |
 | `tennis/` | 网球抛物线预测 + 击打点计算 + 球拍接触判断 | `ball.py`, `hitting.py` | 24 |
@@ -85,21 +85,22 @@ from src.utils.mujoco_loader import load_mujoco_model     # 跨平台模型加�
 - `replan_core.py`：`do_replan` 完整重规划编排（含 Tube 构建 + iLQR 求解 + warm-start）
 - `ball_predictor.py`：`BallPredictor` 解析抛物线预测（无 MuJoCo 依赖）
 - `mpc_controller.py`：★ `MPCController` 可组合规划模块（封装完整规划生命周期，含策略注入）+ `MPCConfig` + `MPCStepResult`
-- `episode_runner.py`：★ `EpisodeRunner` 通用管线编排器（感知→规划→安全→执行→诊断，仿真/真机共用）
+- `episode_runner.py`：★ `EpisodeRunner` 通用管线编排器（4 组件：mpc/perception/safety/executor + 5 hook 插入点，仿真/真机共用）
 - `replan_config.py`：★ `ReplanConfig` 类型安全配置（替代 43-key dict）
+- `step_context.py`：`StepContext` 步骤上下文（pre_plan/post_plan/post_exec/on_unsafe/on_done hook 间数据传递容器）
+- `strategy_config.py`：`StrategyConfig` 策略注入容器（聚合 follow_through/hit_refiner/phase_schedule/direction，None → 默认实现）
 - `strategies/`：★ 可插拔策略模块
-  - `follow_through.py`：`FollowThroughPolicy`（Planned/Contact/No 随挥策略）
-  - `hit_point_refiner.py`：`HitPointRefiner`（Hybrid/No 击球点后过滤）
+  - `follow_through.py`：`PlannedFollowThrough`（随挥策略，kp/kd 可通过 MPCConfig 配置）
+  - `hit_point_refiner.py`：`HybridRefiner`（击球点后过滤，阈值可通过 MPCConfig 配置）
   - `replan_mode.py`：`ReplanMode`（Sync/Async 重规划模式）
-  - `phase_schedule.py`：`PhaseSchedule`（far/mid/near 阶段调度）
-  - `direction.py`：`DirectionPolicy`（来球反方向计算）
+  - `phase_schedule.py`：`DefaultPhaseSchedule`（far/mid/near 阶段调度）
+  - `direction.py`：`ReflectDirection`（来球反方向计算）
 - `components/`：★ 可组合管线组件
-  - `protocols.py`：4 个 Protocol（Perception/Executor/Safety/Diagnostics）
-  - `sim_perception.py`：`SimPerception`（读 MuJoCo 球状态）
-  - `sim_executor.py`：`SimExecutor`（env.step_full 物理步进）
-  - `predictive_safety.py`：`PredictiveSafetyFilter`（beta 递降 + X 墙，用 RobotEnv 预测）
-  - `basic_safety.py`：`BasicSafetyFilter`（仅限位检查，无预测）
-  - `sim_diagnostics.py`：`SimDiagnostics`（tube 指标 + 碰撞检测 + history）
+  - `protocols.py`：3 个 Protocol（Perception/Executor/Safety，`@runtime_checkable`；`get_metrics` 归入 ExecutorComponent）
+  - `sim_component.py`：★ `SimComponent` 仿真执行+诊断一体化（共享模块，V11/V12 复用，实现 ExecutorComponent）
+  - `sim_perception.py`：`SimPerception`（读 MuJoCo 球状态，可选 obs_gate 噪声/KF）
+  - `predictive_safety.py`：`PredictiveSafetyFilter`（beta 递降 + X 墙，定义共享常量 `X_WALL_BODY_NAMES`）
+  - `basic_safety.py`：`BasicSafetyFilter`（仅限位检查，无预测；构造时 emit `RuntimeWarning`）
 
 ### cpp/ — C++ 加速
 

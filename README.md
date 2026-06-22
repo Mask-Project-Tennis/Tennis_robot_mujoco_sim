@@ -66,7 +66,7 @@ python scripts/tools/test_real_robot/04_send_zero_pose.py        # 回零位
 ### 测试
 
 ```bash
-# 运行全部测试（311 tests）
+# 运行全部测试（332 tests）
 pytest tests/
 
 # 代码检查
@@ -283,15 +283,23 @@ mujoco_sim/
 ├── src/
 │   ├── robot/
 │   │   └── rm65_model.xml                # MuJoCo 模型（双臂12DOF + 球拍 + 球）
-│   ├── sim/
-│   │   └── rm65_env.py                   # RM65Env 仿真环境（力矩/位置双模式）
-│   ├── ilqt/                             # iLQR 求解器 + 规划环境
+│   ├── sim/                               # MuJoCo 仿真 + 回放 + 击打检测
+│   │   ├── rm65_env.py                   # RM65Env 仿真环境（力矩/位置双模式）
+│   │   ├── replay.py                     # 轨迹回放共享模块（碰撞窗口 + 弹性反弹）
+│   │   └── hit_detection.py              # 击打检测共享模块
+│   ├── ilqt/                             # iLQR + MPC + 管线 + 策略 + 组件
 │   │   ├── solver.py                     # iLQR 后向-前向迭代
 │   │   ├── cost.py                       # 代价函数（Tube + Softmin）
-│   │   ├── planning_env.py               # PlanningEnv 规划计算环境（MuJoCo 纯计算）
+│   │   ├── planning_env.py               # PlanningEnv 规划计算环境
+│   │   ├── mpc_controller.py             # ★ MPCController（策略注入 + MPCConfig）
+│   │   ├── episode_runner.py             # ★ EpisodeRunner（4 组件 + 5 hook）
+│   │   ├── step_context.py               # StepContext hook 数据容器
+│   │   ├── strategy_config.py            # StrategyConfig 策略注入容器
 │   │   ├── robot_env_protocol.py         # RobotEnv Protocol
 │   │   ├── async_replanner.py            # 异步重规划器
-│   │   └── robot_limits.py               # 安全滤波
+│   │   ├── robot_limits.py               # 安全滤波
+│   │   ├── strategies/                   # 可插拔策略（5 个 Protocol）
+│   │   └── components/                   # 可组合组件（3 Protocol + SimComponent + Safety）
 │   ├── real/                             # 真机部署模块（纯真机接口，不含 MuJoCo）
 │   │   ├── config.py                     # RealRobotConfig
 │   │   ├── robot_interface.py            # Realman SDK 封装
@@ -306,7 +314,7 @@ mujoco_sim/
 │   ├── cpp/                              # C++ 加速（pybind11）
 │   └── utils/                            # 工具（模型加载/噪声注入/数学）
 │
-├── tests/                                # 单元测试（217 tests）
+├── tests/                                # 单元测试（332 tests）
 ├── docs/                                 # 技术文档
 └── paper/                                # 论文 LaTeX 工程
 ```
