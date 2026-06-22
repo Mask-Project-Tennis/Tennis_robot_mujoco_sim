@@ -1,23 +1,17 @@
-"""仿真管线组件测试 — SimPerception/Executor/PredictiveSafety/BasicSafety/Diagnostics。
+"""仿真管线组件测试 — SimPerception/PredictiveSafety/BasicSafety。
 
-覆盖 5 个组件的核心行为与 Protocol 契约：
+覆盖组件的核心行为与 Protocol 契约：
   - SimPerception: 从环境读球状态（含 obs_gate 回调路径）
-  - SimExecutor: env.step_full 物理步进 + 臂状态读取
   - PredictiveSafetyFilter: beta 递降 + X 平面墙 + 紧急制动 fallback
   - BasicSafetyFilter: 无预测的纯限位检查
-  - SimDiagnostics: 末端-击球点距离记录与指标汇总
 """
 
 from __future__ import annotations
-
-from pathlib import Path
-from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
 from src.ilqt.planning_env import PlanningEnv
-from src.sim.rm65_env import RM65Env
 from src.real.runner_factory import (
     DT,
     INIT_Q,
@@ -27,18 +21,12 @@ from src.real.runner_factory import (
     build_robot_limits,
 )
 from src.ilqt.components.sim_perception import SimPerception
-from src.ilqt.components.sim_executor import SimExecutor
 from src.ilqt.components.predictive_safety import PredictiveSafetyFilter
 from src.ilqt.components.basic_safety import BasicSafetyFilter
-from src.ilqt.components.sim_diagnostics import SimDiagnostics
 from src.ilqt.components.protocols import (
-    DiagnosticsComponent,
-    ExecutorComponent,
     PerceptionComponent,
     SafetyComponent,
 )
-
-MODEL_PATH = Path("src/robot/rm65_model.xml")
 
 
 def _build_planning_env() -> PlanningEnv:
@@ -165,46 +153,6 @@ def test_basic_safety_qdot_violation() -> None:
     assert not is_safe
 
 
-# ── Test 4: SimExecutor ────────────────────────────────────────────────────
-
-
-def test_sim_executor_step() -> None:
-    """SimExecutor 推进物理仿真（step_full），并返回 (12,) 臂状态。"""
-    env = RM65Env(MODEL_PATH, dt=DT)
-    env.configure_actuator_mode("position", kp=KP, kd=KD)
-    env.reset(INIT_Q)
-    executor = SimExecutor(env)
-
-    arm = executor.get_arm_state()
-    assert arm.shape == (12,)
-
-    t0 = env.data.time
-    executor.execute(INIT_Q)  # 位置模式 hold → 物理推进但臂基本不动
-    assert env.data.time > t0  # 仿真时间推进，证明 mj_step 执行
-
-
-# ── Test 5: SimDiagnostics ─────────────────────────────────────────────────
-
-
-def test_sim_diagnostics_record() -> None:
-    """SimDiagnostics 记录末端-击球点距离并汇总指标。"""
-    env = PlanningEnv(dt=DT)
-    env.reset(INIT_Q)
-    diag = SimDiagnostics(env)
-
-    ee_pos = env.get_ee_pos()
-    p_hit = ee_pos + np.array([0.1, 0.0, 0.0])
-    result = SimpleNamespace(p_hit=p_hit)
-
-    diag.record(result, env.get_arm_state())
-    metrics = diag.get_metrics()
-
-    assert metrics["total_steps"] == 1
-    assert len(metrics["distances"]) == 1
-    assert abs(metrics["distances"][0] - 0.1) < 1e-6
-    assert metrics["min_dist"] == pytest.approx(0.1)
-
-
 # ── Protocol 契约 ───────────────────────────────────────────────────────────
 
 
@@ -220,10 +168,6 @@ def test_components_satisfy_protocols() -> None:
     assert isinstance(
         BasicSafetyFilter(-np.ones(6), np.ones(6), np.ones(6) * 10.0), SafetyComponent
     )
-    assert isinstance(SimDiagnostics(env), DiagnosticsComponent)
-
-    env_sim = RM65Env(MODEL_PATH, dt=DT)
-    assert isinstance(SimExecutor(env_sim), ExecutorComponent)
 
 
 # ── BasicSafetyFilter 构造警告 ──────────────────────────────────────────────

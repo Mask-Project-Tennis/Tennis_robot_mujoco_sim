@@ -92,3 +92,19 @@ def test_runner_safety_stop():
     metrics = runner.run(max_steps=10)
     assert metrics["safe_steps"] == 0
     assert metrics["total_steps"] == 0
+
+
+def test_runner_returns_metrics_from_executor():
+    """EpisodeRunner 从 executor.get_metrics() 获取指标（不再需要 diagnostics）。"""
+    class ExecutorWithMetrics(FakeExecutor):
+        def get_metrics(self):
+            return {"custom_metric": 42}
+
+    runner = EpisodeRunner(
+        mpc=FakeMPC(),
+        perception=FakePerception(),
+        safety=FakeSafety(),
+        executor=ExecutorWithMetrics(),
+    )
+    metrics = runner.run(max_steps=10)
+    assert metrics.get("custom_metric") == 42

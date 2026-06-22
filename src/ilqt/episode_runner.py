@@ -1,4 +1,4 @@
-"""通用管线编排器 — 组合感知/规划/安全/执行/诊断组件。
+"""通用管线编排器 — 组合感知/规划/安全/执行组件。
 
 仿真和真机共用此类，差异仅在注入的组件不同。
 """
@@ -14,14 +14,13 @@ if TYPE_CHECKING:
         PerceptionComponent,
         ExecutorComponent,
         SafetyComponent,
-        DiagnosticsComponent,
     )
 
 logger = logging.getLogger(__name__)
 
 
 class EpisodeRunner:
-    """通用管线编排器 — 组合 5 个组件。
+    """通用管线编排器 — 组合 4 个组件。
 
     管线流程（每步）:
         1. perception.get_ball_state() → (ball_pos, ball_vel)
@@ -29,7 +28,6 @@ class EpisodeRunner:
         3. mpc.step(ball_pos, ball_vel, arm_state) → MPCStepResult
         4. safety.filter(u_cmd, arm_state) → (safe_u, is_safe)
         5. executor.execute(safe_u)
-        6. diagnostics.record(result, arm_state) [可选]
     """
 
     def __init__(
@@ -38,22 +36,19 @@ class EpisodeRunner:
         perception: "PerceptionComponent",
         safety: "SafetyComponent",
         executor: "ExecutorComponent",
-        diagnostics: "DiagnosticsComponent | None" = None,
     ) -> None:
-        """注入 5 个组件。
+        """注入 4 个组件。
 
         Args:
             mpc: MPC 规划控制器。
             perception: 球感知组件。
             safety: 安全滤波组件。
-            executor: 执行组件。
-            diagnostics: 可选诊断组件（仿真用，真机可省略）。
+            executor: 执行组件（含指标汇总）。
         """
         self._mpc = mpc
         self._perception = perception
         self._safety = safety
         self._executor = executor
-        self._diagnostics = diagnostics
 
     def run(self, max_steps: int = 500) -> dict:
         """运行完整 episode。
@@ -99,24 +94,20 @@ class EpisodeRunner:
             # 执行
             self._executor.execute(safe_u)
 
-            # 诊断（可选）
-            if self._diagnostics is not None:
-                self._diagnostics.record(result, arm_state)
-
             safe_steps += 1
             step_count += 1
 
         # 4. 清理
         self._mpc.stop()
 
-        # 5. 汇总指标
+        # 5. 汇总指标（从 executor 获取）
         metrics: dict = {
             "total_steps": step_count,
             "safe_steps": safe_steps,
             "mpc_done": self._mpc.done,
         }
-        if self._diagnostics is not None:
-            metrics.update(self._diagnostics.get_metrics())
+        if hasattr(self._executor, "get_metrics"):
+            metrics.update(self._executor.get_metrics())
 
         # 关键标量（INFO）+ 完整 metrics（DEBUG，避免大数组刷屏）
         logger.info(

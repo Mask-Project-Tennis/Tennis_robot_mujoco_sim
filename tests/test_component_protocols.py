@@ -5,7 +5,6 @@ from src.ilqt.components.protocols import (
     PerceptionComponent,
     ExecutorComponent,
     SafetyComponent,
-    DiagnosticsComponent,
 )
 
 
@@ -19,18 +18,13 @@ class FakeExecutor:
         return np.zeros(12)
     def execute(self, u_cmd):
         pass
+    def get_metrics(self):
+        return {}
 
 
 class FakeSafety:
     def filter(self, u_cmd, arm_state):
         return u_cmd, True
-
-
-class FakeDiagnostics:
-    def record(self, result, arm_state):
-        pass
-    def get_metrics(self):
-        return {}
 
 
 def test_perception_protocol():
@@ -41,6 +35,3 @@ def test_executor_protocol():
 
 def test_safety_protocol():
     assert isinstance(FakeSafety(), SafetyComponent)
-
-def test_diagnostics_protocol():
-    assert isinstance(FakeDiagnostics(), DiagnosticsComponent)

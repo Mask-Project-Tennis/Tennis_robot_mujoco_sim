@@ -25,7 +25,7 @@ class PerceptionComponent(Protocol):
 
 @runtime_checkable
 class ExecutorComponent(Protocol):
-    """执行组件接口 — 执行控制指令并提供臂状态。"""
+    """执行组件接口 — 执行控制指令、提供臂状态和指标。"""
 
     def get_arm_state(self) -> NDArray[np.floating]:
         """读取当前臂状态 [q(6), qdot(6)]，弧度，形状 (12,)。"""
@@ -33,6 +33,10 @@ class ExecutorComponent(Protocol):
 
     def execute(self, u_cmd: NDArray[np.floating]) -> None:
         """执行控制指令（力矩或 q_desired）。"""
+        ...
+
+    def get_metrics(self) -> dict:
+        """返回汇总指标（碰撞检测、history、安全统计等）。"""
         ...
 
 
@@ -49,17 +53,4 @@ class SafetyComponent(Protocol):
         self, u_cmd: NDArray[np.floating], arm_state: NDArray[np.floating]
     ) -> tuple[NDArray[np.floating], bool]:
         """安全滤波 → (safe_u, is_safe)。"""
-        ...
-
-
-@runtime_checkable
-class DiagnosticsComponent(Protocol):
-    """诊断组件接口 — 可选，记录指标和事件。"""
-
-    def record(self, result: object, arm_state: NDArray[np.floating]) -> None:
-        """记录一步的诊断数据。"""
-        ...
-
-    def get_metrics(self) -> dict:
-        """返回汇总指标。"""
         ...
