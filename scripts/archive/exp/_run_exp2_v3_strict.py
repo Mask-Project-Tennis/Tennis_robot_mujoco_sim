@@ -8,6 +8,7 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "root"))  # archive/root
 
 ball_speed = sys.argv[1]
 seed = sys.argv[2]
@@ -43,5 +44,5 @@ sys.argv = [
     "--no-plot",
 ]
 
-import scripts.rm65_mpc_tube_constraint as main_mod  # noqa: E402
+import rm65_mpc_tube_constraint as main_mod  # noqa: E402
 main_mod.main()

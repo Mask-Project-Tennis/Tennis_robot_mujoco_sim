@@ -1,8 +1,8 @@
-"""批量运行 exp1_v3_algorithm_capability 实验（多进程并行）。
+"""批量运行 exp2_strict_joint_v3 实验（多进程并行）。
 
 用法:
-    python scripts/run_exp1_v3_batch.py              # 默认 4 workers
-    python scripts/run_exp1_v3_batch.py --workers 2   # 2 workers
+    python scripts/exp/run_exp2_v3_batch.py              # 默认 4 workers
+    python scripts/exp/run_exp2_v3_batch.py --workers 2   # 2 workers
 """
 import argparse
 import os
@@ -13,11 +13,11 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-RAW_DIR = PROJECT_ROOT / "experiment_data" / "exp1_v3_algorithm_capability" / "raw"
-WRAPPER = PROJECT_ROOT / "scripts" / "exp" / "_run_exp1_v3_exempt.py"
+RAW_DIR = PROJECT_ROOT / "experiment_data" / "exp2_strict_joint_v3" / "raw"
+WRAPPER = PROJECT_ROOT / "scripts" / "archive" / "exp" / "_run_exp2_v3_strict.py"
 PYTHON_EXE = str(Path(sys.executable))
 
-SPEEDS = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 25, 26, 28, 30]
+SPEEDS = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]
 SEEDS = list(range(15))
 TUBE_MODES = ["true", "false"]
 
@@ -54,7 +54,7 @@ def main() -> None:
 
     tasks = [(s, d, t) for s in SPEEDS for t in TUBE_MODES for d in SEEDS]
     total = len(tasks)
-    print(f"exp1_v3 (no-bounce, 速度豁免): {len(SPEEDS)} 球速 × {len(TUBE_MODES)} tube × {len(SEEDS)} seeds = {total} runs")
+    print(f"exp2_v3 (严格关节约束, no-bounce): {len(SPEEDS)} 球速 × {len(TUBE_MODES)} tube × {len(SEEDS)} seeds = {total} runs")
     print(f"并行 workers: {args.workers}")
     print(f"日志目录: {RAW_DIR}\n")
     RAW_DIR.mkdir(parents=True, exist_ok=True)

@@ -13,6 +13,7 @@ import numpy as np
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "root"))  # archive/root
 
 # ===== 参数解析 =====
 parser = argparse.ArgumentParser(description="TCP+关节双硬约束实验")
@@ -112,7 +113,7 @@ if args.perturb_alpha_min > 0.001:
     sys.argv.extend(["--perturb-alpha-min", str(args.perturb_alpha_min)])
 
 # ===== 导入主脚本 =====
-import scripts.rm65_mpc_tube_constraint_realtime as main_mod
+import rm65_mpc_tube_constraint_realtime as main_mod
 
 # ===== Monkey-patch 3: RobotLimits.from_config 严格参数 =====
 _original_from_config = main_mod.RobotLimits.from_config

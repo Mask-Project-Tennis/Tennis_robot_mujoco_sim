@@ -26,6 +26,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "scripts" / "archive" / "root"))  # archive/root
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S")
 logger = logging.getLogger("render_video")
@@ -68,7 +69,7 @@ def run_one_and_dump(seed: int) -> dict | None:
         "--dump-trajectory", str(traj_path),
     ]
 
-    import scripts.rm65_mpc_tube_constraint_realtime_v2 as main_mod
+    import rm65_mpc_tube_constraint_realtime_v2 as main_mod
     try:
         main_mod.main()
     except SystemExit:

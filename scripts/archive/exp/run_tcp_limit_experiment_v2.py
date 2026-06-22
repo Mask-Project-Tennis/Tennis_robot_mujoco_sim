@@ -12,6 +12,7 @@ import argparse
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "root"))  # archive/root
 
 parser = argparse.ArgumentParser(description="TCP+关节双硬约束实验（兼容层）")
 parser.add_argument("--ball-speed", type=float, default=9)
@@ -66,5 +67,5 @@ if args.ablation == "sigma-only":
 print(f"[TCP_LIMIT EXPERIMENT] ball_speed={args.ball_speed} seed={args.seed} "
       f"max_tcp={args.max_tcp} m/s (built-in constraints)")
 
-import scripts.rm65_mpc_tube_constraint_realtime_v2 as main_mod
+import rm65_mpc_tube_constraint_realtime_v2 as main_mod
 main_mod.main()

@@ -13,6 +13,7 @@ import argparse
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "root"))  # archive/root
 
 parser = argparse.ArgumentParser(description="v3: 全程硬约束实验（无终段豁免）")
 parser.add_argument("--ball-speed", type=float, default=9)
@@ -94,5 +95,5 @@ print(f"[V3 全程硬约束] ball_speed={args.ball_speed} seed={args.seed} "
       f"max_tcp={args.max_tcp} m/s, serve_dist={serve_dist}m, 终段豁免=0步(全程硬限)"
       f"{', ball_speed_perturb=%+.1f%%' % args.ball_speed_perturb_pct if abs(args.ball_speed_perturb_pct) > 0.01 else ''}")
 
-import scripts.rm65_mpc_tube_constraint_realtime_v2 as main_mod
+import rm65_mpc_tube_constraint_realtime_v2 as main_mod
 main_mod.main()

@@ -15,7 +15,7 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 RAW_DIR = PROJECT_ROOT / "experiment_data" / "exp8_estimator_recovery" / "raw"
-WRAPPER = PROJECT_ROOT / "scripts" / "exp" / "_run_exp7_kf.py"
+WRAPPER = PROJECT_ROOT / "scripts" / "archive" / "exp" / "_run_exp7_kf.py"
 PYTHON_EXE = str(Path(sys.executable))
 
 SPEEDS = [6, 7, 8, 9, 10, 11, 12, 13, 14, 15]

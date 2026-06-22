@@ -7,6 +7,7 @@
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "root"))  # archive/root
 
 # ===== Monkey-patch: 取消安全滤波器的速度豁免 =====
 from src.ilqt import robot_limits as _rl
@@ -93,7 +94,7 @@ sys.argv = [
 
 # 导入主脚本并修改 forward_pass_margin
 # 通过修改默认配置实现
-import scripts.rm65_mpc_tube_constraint_realtime as main_mod
+import rm65_mpc_tube_constraint_realtime as main_mod
 
 # 拦截 RobotLimits.from_config，强制 forward_pass_margin=1.0
 _original_from_config = main_mod.RobotLimits.from_config

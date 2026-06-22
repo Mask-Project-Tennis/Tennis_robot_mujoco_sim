@@ -183,25 +183,19 @@ mujoco_sim/
 │   ├── v5_active_hit.yaml             # V5 主动击球配置
 │   └── real_robot.yaml                # 真实机器人配置（底座位姿、坐标系标定、控制频率）
 ├── scripts/
-│   ├── rm65_mpc_tube_constraint.py               # 离线仿真（根，被 exp/ 包装 import）
-│   ├── rm65_mpc_tube_constraint_realtime.py      # 实时 v1（根）
-│   ├── rm65_mpc_tube_constraint_realtime_v2.py   # 实时 v2（根）
-│   ├── rm65_mpc_tube.py / rm65_mpc_ilqr_5_5.py  # Tube/iLQR 基线（根）
-│   ├── rm65_evaluate.py                          # 评估脚本（根）
-│   ├── rm65_mpc_v6.py                            # V6 仿真主脚本（被 run_exp_* subprocess 调用）
-│   ├── rm65_mpc_v7.py                            # V7 仿真主脚本（被 run_exp_* subprocess 调用）
-│   ├── rm65_mpc_v8.py                            # V8 仿真主脚本（被 import + subprocess 调用）
-│   ├── rm65_mpc_v9.py                            # V9 仿真主脚本（解耦 Tube/Softmin + ablation 模式）
-│   ├── rm65_mpc_v10.py                           # V10 仿真主脚本（V9 去随挥 + 40cm 终端偏移）
 │   ├── rm65_mpc_v12.py                           # ★ V12 仿真主脚本（EpisodeRunner 管线架构 + MPCController 策略化）
-│   ├── rm65_mpc_v11.py                           # V11（保留对比基准，已废弃）
+│   ├── rm65_mpc_v11.py                           # V11 薄壳（29 行，委托到 V12 main）
+│   ├── rm65_mpc_ilqr_5_5.py                      # Tube/iLQR 基线（工具脚本依赖）
+│   ├── rm65_evaluate.py                          # 评估脚本
 │   ├── run_20hits_video.py                       # 连续 20 次击打视频生成脚本
-│   ├── sim/            # 独立仿真（v4/v5/v8v9变体/fast/ilqt/train）
-│   ├── exp/            # 实验设施 52 个（包装·批量·运行器）
+│   ├── run_real_robot.py                         # 真机入口
+│   ├── sim/            # 独立仿真（fast/ilqt/train 等工具）
+│   ├── exp/            # 实验设施（活跃: exp9-15 包装·批量·运行器）
 │   ├── extract/        # 结果提取 9 个（日志→CSV）
 │   ├── plot/           # 论文图表 14 个
 │   ├── tools/          # 独立工具 10 个（查看器·扫描·诊断·可视化）
 │   ├── test/           # 快速验证 10 个
+│   ├── archive/        # ★ 已归档脚本（V6-V10 + tube + 旧实验，详见 archive/README.md）
 │   └── README.md       # 完整清单与说明
 ├── tests/                             # 单元测试（332 tests，30 个文件）
 │   ├── test_kinematics.py
@@ -403,7 +397,7 @@ mujoco_sim/
 - Linux 设置 MuJoCo 库路径: `export LD_LIBRARY_PATH="$(python -c 'import mujoco, os; print(os.path.dirname(mujoco.__file__))'):$LD_LIBRARY_PATH"`
 - 运行 MPC 仿真（力矩模式，默认）: `python scripts/rm65_mpc_v12.py --serve-box --ball-speed 7`
 - 位置模式仿真: `python scripts/rm65_mpc_v12.py --serve-box --ball-speed 7 --position-mode`
-- 离线测试: `python scripts/rm65_mpc_tube_constraint.py --serve-box --ball-speed 9`
+- 离线测试: `python scripts/rm65_mpc_v12.py --serve-box --ball-speed 9`
 - 关节安全扫描: `python scripts/scan_joint_safety.py`
 - 运行测试: `pytest tests/`
 - 代码检查: `ruff check src/ tests/ scripts/`
@@ -484,21 +478,14 @@ mujoco_sim/
 
 | 脚本 | 用途 | 关键特性 |
 |------|------|---------|
-| `scripts/rm65_mpc_tube_constraint.py` | 离线仿真主脚本 | MPC+iLQR+Tube+硬约束+X平面墙 |
-| `scripts/rm65_mpc_v12.py` | ★ 最新版本（V12） | EpisodeRunner 管线架构 + MPCController 策略化 + 可组合组件，命中率 4/4 |
-| `scripts/rm65_mpc_v11.py` | V11（保留对比） | V9 + X平面墙 + sigmoid 权重 + 双模式，命中率 2/4 |
-| `scripts/rm65_mpc_v10.py` | V10 仿真主脚本 | V9 去随挥 + 40cm 终端偏移，用于消融对比 |
-| `scripts/rm65_mpc_v9.py` | V9 仿真主脚本 | 解耦 Tube 走廊 + Softmin 终端，`--ablation` 消融模式 |
-| `scripts/rm65_mpc_v8.py` | V8 仿真主脚本 | 解耦 Tube 走廊 + Softmin 终端，`--no-tube`/`--no-softmin` |
-| `scripts/rm65_mpc_v7.py` | V7 仿真主脚本 | V6 + 击球点终端 + TCP/关节硬约束 |
-| `scripts/rm65_mpc_v6.py` | V6 仿真主脚本 | 满秩 Q_v + 来球反方向 + softmin + PD 随挥 |
-| `scripts/rm65_mpc_tube_constraint_realtime_v5.py` | 实时 v5（sim/） | 主动击球+随挥+空间走廊Tube+多层安全滤波+异步重规划 |
-| `scripts/rm65_mpc_tube_constraint_realtime.py` | 实时仿真 v1 | 异步重规划+buffer机制 |
-| `scripts/exp/run_tcp_limit_experiment_v3.py` | TCP 限速实验 | monkey-patch 安全滤波器注入 TCP 检查 |
-| `scripts/exp/_run_exp7_kf.py` | exp8 KF 过滤包装 | estimator 模块级变量 + dt 强制修正 + 噪声互斥 assert |
+| `scripts/rm65_mpc_v12.py` | ★ 最新版本（V12） | EpisodeRunner 管线架构 + MPCController 策略化 + 可组合组件，命中率 85.7% |
+| `scripts/rm65_mpc_v11.py` | V11 薄壳（29 行） | 委托到 V12 main()，行为一致 |
+| `scripts/rm65_mpc_ilqr_5_5.py` | Tube/iLQR 基线 | 工具脚本依赖基类 |
 | `scripts/sim/rm65_mpc_ilqt.py` | 简化 MPC+iLQR | 无 Tube，基础两阶段 iLQR |
 | `scripts/sim/train_ilqt.py` | 离线训练入口 | 单次 iLQR 优化 + 保存轨迹 |
 | `scripts/tools/rm65_joint_viewer.py` | 关节调节查看器 | position 执行器，拖动滑条控制关节角 |
+
+> V6-V10 + tube 变体 + 旧实验脚本已归档至 `scripts/archive/`（详见 `archive/README.md`）
 
 ## 真实部署架构（Real Robot Deployment）
 

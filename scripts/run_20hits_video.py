@@ -24,6 +24,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts" / "archive" / "root"))  # archive/root
 
 from src.sim.rm65_env import RM65Env
 from src.tennis.ball import (
@@ -46,7 +47,7 @@ try:
 except ImportError:
     from src.ilqt.solver import ILQTSolver
 
-from scripts.rm65_mpc_v9 import (
+from rm65_mpc_v9 import (
     fix_joint5_control,
     fix_joint5_control_trajectory,
     load_config,
