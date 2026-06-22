@@ -1,6 +1,118 @@
 # RM-65 实时 MPC 击球系统：架构与算法详解
 
-## 概述
+## 0. V12 EpisodeRunner 管线架构（当前版本）
+
+> 本节描述 V12（`scripts/rm65_mpc_v12.py`）的当前架构。
+> 下方 §1-§12 描述旧版 `rm65_mpc_tube_constraint_realtime.py` 的架构，保留作历史参考。
+
+### 四层抽象架构
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     EpisodeRunner（管线编排器）                    │
+│  每 5ms 一步，循环驱动：感知 → 规划 → 安全 → 执行                    │
+│  src/ilqt/episode_runner.py                                      │
+│  4 个可组合组件 + 5 个 hook 插入点                                  │
+└──────┬──────────┬──────────────┬──────────────┬─────────────────┘
+       │          │              │              │
+       ▼          ▼              ▼              ▼
+┌──────────┐ ┌──────────┐ ┌────────────┐ ┌──────────────┐
+│ 感知组件  │ │ 规划组件  │ │ 安全滤波器  │ │ 仿真执行器    │
+│Perception│ │   MPC    │ │  Safety    │ │  Executor    │
+│          │ │Controller│ │  Filter    │ │  (SimComp)   │
+└──────────┘ └───┬──────┘ └────────────┘ └──────────────┘
+                 │
+                 ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    MPCController（MPC 外循环）                     │
+│  每 replan_interval 步（默认 20 步 = 100ms）触发一次重规划           │
+│  src/ilqt/mpc_controller.py                                      │
+│                                                                  │
+│  职责：                                                          │
+│  1. 判断阶段（far/mid/near）→ PhaseSchedule                       │
+│  2. 精化击球点 → HitPointRefiner                                 │
+│  3. 触发随挥 → FollowThroughPolicy                               │
+│  4. 调度重规划 → ReplanMode（同步/异步）                           │
+└──────────────────────┬──────────────────────────────────────────┘
+                       │ 每 100ms
+                       ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    do_replan（重规划核心）                         │
+│  src/ilqt/replan_core.py                                         │
+│                                                                  │
+│  步骤：                                                          │
+│  ① 预测球轨迹 → BallPredictor（解析抛物线）                        │
+│  ② 搜索候选击球窗口 → search_hit_window                           │
+│  ③ 构建击打走廊 → build_hitting_tube                             │
+│  ④ 构建代价函数 → HittingCost / TubeHittingCostWrapper（每次新建）│
+│  ⑤ warm-start 控制序列 → U_prev shift + JT init                  │
+│  ⑥ iLQR 求解 → solve_few_iters（3-30 次迭代）                     │
+│  ⑦ 构建 buffer → U_buffer（供下 20 步执行）                        │
+└──────────────────────┬──────────────────────────────────────────┘
+                       │
+                       ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                ILQTSolver（iLQR 内循环）                           │
+│  src/ilqt/solver.py（Python）/ src/cpp/（C++ 加速 1.50×）          │
+│                                                                  │
+│  每次迭代：                                                      │
+│  ① 线性化动力学：A_k, B_k = ∂f/∂x, ∂f/∂u                        │
+│     - 力矩模式：B = dt·M⁻¹                                     │
+│     - 位置模式：B = dt·M⁻¹·diag(Kp)  ← Kp 在这里进入            │
+│  ② 计算代价导数：l_x, l_u, l_xx, l_ux, l_uu                     │
+│  ③ 后向传递（Riccati）：→ 增益 K_k, k_k                         │
+│  ④ 前向传递（alpha=0.5）：→ 更新 X, U                            │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 核心模块职责矩阵
+
+| 模块（领域名） | 文件 | 调用者 | 职责 |
+|---------------|------|--------|------|
+| **EpisodeRunner** | `ilqt/episode_runner.py` | V12 main() | 管线编排：感知→规划→安全→执行，4 组件 + 5 hook |
+| **MPCController** | `ilqt/mpc_controller.py` | EpisodeRunner | MPC 外循环：阶段调度 / 击球点精化 / 随挥 / 重规划调度 |
+| **do_replan** | `ilqt/replan_core.py` | MPCController.step() | 单次重规划：球预测→代价构建→iLQR→buffer |
+| **ILQTSolver** | `ilqt/solver.py` / `cpp/` | do_replan | iLQR 内循环：线性化→代价导数→Riccati→线搜索 |
+| **HittingCost** | `ilqt/cost.py` / `costs/` | do_replan | 代价函数：终端(位置+速度+法向) + 运行(控制+平滑) |
+| **TubeHittingCostWrapper** | `ilqt/tube_cost.py` | do_replan | 走廊代价：在候选窗口施加空间约束 |
+| **PlanningEnv** | `ilqt/planning_env.py` | do_replan | MuJoCo 纯计算环境（FK / Jacobian / 前向仿真） |
+| **RobotLimits** | `ilqt/robot_limits.py` | do_replan, SafetyFilter | 关节约束 + 安全滤波（beta 递降） |
+| **BallPredictor** | `ilqt/ball_predictor.py` | do_replan | 解析抛物线轨迹预测（无 MuJoCo 依赖） |
+
+### 可插拔策略（5 个 Protocol）
+
+| 策略 | 接口文件 | 默认实现 | 可替换场景 |
+|------|---------|---------|-----------|
+| PhaseSchedule | `strategies/phase_schedule.py` | DefaultPhaseSchedule | 自定义 far/mid/near 阶段边界 |
+| DirectionPolicy | `strategies/direction.py` | ReflectDirection | 自定义击球方向计算 |
+| FollowThroughPolicy | `strategies/follow_through.py` | PlannedFollowThrough | 自定义随挥轨迹生成 |
+| HitPointRefiner | `strategies/hit_point_refiner.py` | HybridRefiner | 自定义击球点安全过滤 |
+| ReplanMode | `strategies/replan_mode.py` | SyncReplanMode | 异步重规划模式 |
+
+### 数据流（单步 5ms）
+
+```
+1. Perception.get_ball_state() → (ball_pos, ball_vel)
+2. MPCController.step(ball_pos, ball_vel, arm_state)
+   ├── [每 20 步] do_replan() → U_buffer（20 步控制序列）
+   └── U_buffer[buffer_idx] → u_cmd（单步控制）
+3. SafetyFilter.execute(u_cmd, arm_state) → u_safe（安全滤波后控制）
+4. Executor.execute(u_safe) → env.step()（MuJoCo 前进一步）
+```
+
+### 与旧版架构的关键差异
+
+| 维度 | 旧版（realtime 脚本） | V12（EpisodeRunner） |
+|------|---------------------|---------------------|
+| 主循环 | 脚本内联 2000+ 行 | EpisodeRunner.run() ~100 行 |
+| 代价函数 | 跨 replan 复用（**stale cost bug**） | 每次 replan 新建（无状态泄漏） |
+| 安全滤波 | 内联 beta 循环 | PredictiveSafetyFilter 组件 |
+| 策略 | 硬编码 | 5 个可插拔 Protocol |
+| 可测试性 | 单体脚本 | 332 个单元测试 |
+
+---
+
+## 概述（旧版架构 — 历史参考）
 
 `rm65_mpc_tube_constraint_realtime.py` 是一个基于 **iLQR（迭代线性二次调节器）** 的模型预测控制（MPC）系统，用于控制 RM-65B 六自由度机械臂在网球飞来时自动挥拍击球。系统采用**混合实时策略**：远段使用 Jacobian 转矩控制（快速粗略），近段使用 iLQR 精细规划，满足 200Hz 控制频率下的实时约束。
 
