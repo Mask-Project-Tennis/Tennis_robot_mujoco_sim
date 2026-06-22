@@ -37,6 +37,7 @@ from src.ilqt.strategies.replan_mode import (
     SyncReplanMode,
 )
 from src.ilqt.tube_types import ReplanState, TubeConfig
+from src.ilqt.strategy_config import StrategyConfig
 from src.real.runner_factory import build_robot_limits, build_solver
 
 logger = logging.getLogger(__name__)
@@ -181,12 +182,18 @@ class MPCController:
     - 随挥触发和控制计算在 ``step()`` 内部完成
     """
 
-    def __init__(self, env: PlanningEnv, config: MPCConfig) -> None:
+    def __init__(
+        self,
+        env: PlanningEnv,
+        config: MPCConfig,
+        strategies: "StrategyConfig | None" = None,
+    ) -> None:
         """初始化 solver/limits/replanner/state 构建。
 
         Args:
             env: 规划环境（PlanningEnv 或 RM65Env），用于主线程规划计算。
             config: MPC 配置（控制规划行为）。
+            strategies: 可选策略注入容器。None → 全部使用 MPCConfig 驱动的默认实现。
         """
         self._env = env
         self._config = config
@@ -229,33 +236,44 @@ class MPCController:
         # ── 异步状态 ──
         self._mpc_horizon: int = config.total_horizon
 
-        # ── 策略（A4/A1/A2 提取）──
-        self._phase_schedule: PhaseSchedule = DefaultPhaseSchedule(
-            far_threshold=config.far_threshold,
-            near_threshold=config.near_threshold,
+        # ── 策略（A4/A1/A2 提取 — 支持外部注入）──
+        strat = strategies  # 别名缩短
+        self._phase_schedule: PhaseSchedule = (
+            strat.phase_schedule if strat and strat.phase_schedule
+            else DefaultPhaseSchedule(
+                far_threshold=config.far_threshold,
+                near_threshold=config.near_threshold,
+            )
         )
-        self._direction_policy: DirectionPolicy = ReflectDirection(
-            target_speed=config.target_speed,
+        self._direction_policy: DirectionPolicy = (
+            strat.direction_policy if strat and strat.direction_policy
+            else ReflectDirection(target_speed=config.target_speed)
         )
         follow_steps = 0 if config.no_follow_through else config.follow_through_steps
-        self._follow_through: FollowThroughPolicy = PlannedFollowThrough(
-            follow_through_steps=follow_steps,
-            follow_trigger=config.follow_trigger,
-            dt=config.dt,
-            is_position_mode=config.is_position_mode,
-            NQ=self._NQ,
-            NU=self._NU,
-            kp=config.follow_kp,
-            kd=config.follow_kd,
+        self._follow_through: FollowThroughPolicy = (
+            strat.follow_through if strat and strat.follow_through
+            else PlannedFollowThrough(
+                follow_through_steps=follow_steps,
+                follow_trigger=config.follow_trigger,
+                dt=config.dt,
+                is_position_mode=config.is_position_mode,
+                NQ=self._NQ,
+                NU=self._NU,
+                kp=config.follow_kp,
+                kd=config.follow_kd,
+            )
         )
-        self._refiner: HitPointRefiner = HybridRefiner(
-            shoulder_pos=config.shoulder_pos,
-            workspace_radius=config.workspace_radius,
-            hit_lock_threshold=config.hit_lock_threshold,
-            hard_margin_deg=config.hard_margin_deg,
-            warn_margin_deg=config.warn_margin_deg,
-            j1_warn_margin_deg=config.j1_warn_margin_deg,
-            window_half_steps=config.refiner_window_half,
+        self._refiner: HitPointRefiner = (
+            strat.hit_point_refiner if strat and strat.hit_point_refiner
+            else HybridRefiner(
+                shoulder_pos=config.shoulder_pos,
+                workspace_radius=config.workspace_radius,
+                hit_lock_threshold=config.hit_lock_threshold,
+                hard_margin_deg=config.hard_margin_deg,
+                warn_margin_deg=config.warn_margin_deg,
+                j1_warn_margin_deg=config.j1_warn_margin_deg,
+                window_half_steps=config.refiner_window_half,
+            )
         )
 
         # ── 重规划模式（A3 提取：同步/异步统一）──

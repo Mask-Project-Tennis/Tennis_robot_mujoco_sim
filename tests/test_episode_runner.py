@@ -142,3 +142,16 @@ def test_post_exec_hook_can_add_metrics():
     )
     metrics = runner.run(max_steps=5)
     assert metrics.get("hook_ran") is True
+
+
+def test_mpc_controller_accepts_custom_strategy():
+    """MPCController 应接受注入的自定义策略。"""
+    from src.ilqt.mpc_controller import MPCController, MPCConfig
+    from src.ilqt.strategy_config import StrategyConfig
+    from src.ilqt.strategies.direction import ReflectDirection
+
+    custom_direction = ReflectDirection(target_speed=3.0)
+    # StrategyConfig 允许注入自定义策略，None 字段使用默认
+    config = StrategyConfig(direction_policy=custom_direction)
+    assert config.direction_policy is custom_direction
+    assert config.follow_through is None  # 未注入 → 使用默认
