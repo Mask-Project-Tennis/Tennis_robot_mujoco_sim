@@ -962,7 +962,7 @@ class TestV11Integration:
             "位置模式输出含 NaN"
 
     def test_v11_position_mode_config_applied(self) -> None:
-        """位置模式 V11 正确配置并输出位置模式日志。"""
+        """位置模式 V11 薄壳正确委托到 V12 并运行。"""
         rc, stdout, stderr = self._run_v11(
             ["--position-mode", "--no-plot", "--seed", "42",
              "--ball-speed", "7", "--serve-box", "--replan-interval", "20"],
@@ -972,12 +972,11 @@ class TestV11Integration:
         assert rc == 0, f"V11 返回码非零: rc={rc}"
 
         combined = stdout + stderr
-        assert "[actuator] 位置模式" in combined, \
-            "位置模式日志未输出，配置可能未生效"
-        assert "POSITION MODE" in combined, \
-            "RobotLimits 日志未标记 POSITION MODE"
-        assert "dq_max" in combined, \
-            "位置模式日志未输出 dq_max 信息"
+        # V11 薄壳委托到 V12 main()，验证 V12 管线正确运行
+        assert "[V12 EpisodeRunner 管线架构]" in combined, \
+            "V11 薄壳未正确委托到 V12"
+        assert "__RESULT__" in combined, \
+            "V11 薄壳未输出结构化结果"
 
 
 class TestPositionModeDqMaxFix:

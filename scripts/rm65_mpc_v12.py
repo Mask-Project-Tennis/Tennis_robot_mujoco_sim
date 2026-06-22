@@ -81,8 +81,8 @@ def merge_configs(base: dict, override: dict) -> dict:
 # ==============================================================================
 
 def _import_v11_visuals():
-    """惰性导入 V11 的可视化函数（避免无 --viewer/--plot 时的导入开销）。"""
-    from rm65_mpc_v11 import visualize_rm65_result, plot_tube_results
+    """惰性导入可视化函数（避免无 --viewer/--plot 时的导入开销）。"""
+    from src.sim.v11_visuals import visualize_rm65_result, plot_tube_results
     return visualize_rm65_result, plot_tube_results
 
 
