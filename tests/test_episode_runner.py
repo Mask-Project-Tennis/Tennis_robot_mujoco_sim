@@ -108,3 +108,37 @@ def test_runner_returns_metrics_from_executor():
     )
     metrics = runner.run(max_steps=10)
     assert metrics.get("custom_metric") == 42
+
+
+def test_pre_plan_hook_called_with_context():
+    """pre_plan hook 在规划前被调用，携带 StepContext。"""
+    from src.ilqt.step_context import StepContext
+    contexts = []
+    def hook(ctx: StepContext):
+        contexts.append(ctx.step_count)
+    runner = EpisodeRunner(
+        mpc=FakeMPC(),
+        perception=FakePerception(),
+        safety=FakeSafety(),
+        executor=FakeExecutor(),
+        pre_plan_hooks=[hook],
+    )
+    runner.run(max_steps=5)
+    assert len(contexts) == 5
+    assert contexts == [0, 1, 2, 3, 4]
+
+
+def test_post_exec_hook_can_add_metrics():
+    """post_exec hook 可向 metrics 字典追加自定义指标。"""
+    from src.ilqt.step_context import StepContext
+    def hook(ctx: StepContext):
+        ctx.metrics["hook_ran"] = True
+    runner = EpisodeRunner(
+        mpc=FakeMPC(),
+        perception=FakePerception(),
+        safety=FakeSafety(),
+        executor=FakeExecutor(),
+        post_exec_hooks=[hook],
+    )
+    metrics = runner.run(max_steps=5)
+    assert metrics.get("hook_ran") is True
