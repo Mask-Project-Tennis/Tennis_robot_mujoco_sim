@@ -160,6 +160,24 @@ def main() -> None:
     parser.add_argument("--kp", type=float, nargs='+', default=None, help="位置模式 PD Kp")
     parser.add_argument("--kd", type=float, nargs='+', default=None, help="位置模式 PD Kd")
     parser.add_argument("--dq-max-fraction", type=float, default=None, help="单步角度变化系数")
+    # ── 阶段调度参数（原硬编码）──
+    parser.add_argument("--far-threshold", type=int, default=None, help="far/mid 阶段边界步数")
+    parser.add_argument("--near-threshold", type=int, default=None, help="mid/near 阶段边界步数（0=自动）")
+    parser.add_argument("--first-plan-iters", type=int, default=None, help="首次规划 iLQR 迭代数")
+    # ── 代价阶段倍率（原硬编码）──
+    parser.add_argument("--Qp-scale-far", type=float, default=None, help="far 阶段位置代价倍率")
+    parser.add_argument("--Qv-scale-far", type=float, default=None, help="far 阶段速度代价倍率")
+    parser.add_argument("--Qp-scale-near", type=float, default=None, help="near 阶段位置代价倍率")
+    parser.add_argument("--Qv-scale-near", type=float, default=None, help="near 阶段速度代价倍率")
+    # ── 随挥 PD 增益（原硬编码在 follow_through.py）──
+    parser.add_argument("--follow-kp", type=float, default=None, help="随挥 PD 比例增益")
+    parser.add_argument("--follow-kd", type=float, default=None, help="随挥 PD 微分增益")
+    # ── HitPointRefiner 阈值（原硬编码在 hit_point_refiner.py）──
+    parser.add_argument("--hit-lock", type=int, default=None, help="击球点防抖锁定步数")
+    parser.add_argument("--hard-margin", type=float, default=None, help="IK 硬裕度 (度)")
+    parser.add_argument("--warn-margin", type=float, default=None, help="IK 警告裕度 (度)")
+    parser.add_argument("--j1-warn", type=float, default=None, help="关节1 警告裕度 (度)")
+    parser.add_argument("--refiner-window", type=int, default=None, help="Refiner 搜索窗口半宽 (步)")
     args = parser.parse_args()
 
     # ==========================================================================
@@ -234,12 +252,12 @@ def main() -> None:
     fixed_horizon = 40
     replan_interval = args.replan_interval if args.replan_interval is not None else 30
     max_iter_per_plan = 5
-    first_plan_iters = 15
+    first_plan_iters = args.first_plan_iters if args.first_plan_iters is not None else 15
     near_plan_iters = 20
-    Q_p_scale_far = 5.0
-    Q_v_scale_far = 3.0
-    Q_p_scale_near = 8.0
-    Q_v_scale_near = 120.0
+    Q_p_scale_far = args.Qp_scale_far if args.Qp_scale_far is not None else 5.0
+    Q_v_scale_far = args.Qv_scale_far if args.Qv_scale_far is not None else 3.0
+    Q_p_scale_near = args.Qp_scale_near if args.Qp_scale_near is not None else 8.0
+    Q_v_scale_near = args.Qv_scale_near if args.Qv_scale_near is not None else 120.0
 
     if args.near_iters is not None:
         near_plan_iters = args.near_iters
@@ -423,8 +441,8 @@ def main() -> None:
     if args.normal_flip:
         n_des_single = -n_des_single
 
-    near_threshold = max(50, k_hit_total // 3)
-    far_threshold = 50
+    near_threshold = args.near_threshold if args.near_threshold else max(50, k_hit_total // 3)
+    far_threshold = args.far_threshold if args.far_threshold is not None else 50
 
     hit_direction = np.array(config_dict["hitting"]["hit_direction"], dtype=np.float64)
     racket_speed = float(config_dict["hitting"]["racket_speed"])
@@ -566,6 +584,14 @@ def main() -> None:
         Q_qddot_base=float(config_dict["cost"].get("Q_qddot", 0.0)),
         Q_du_base=float(config_dict["cost"].get("Q_du", 0.0)),
         far_threshold=far_threshold,
+        # 策略内部参数（原硬编码，现可通过 CLI 调整）
+        follow_kp=args.follow_kp if args.follow_kp is not None else 200.0,
+        follow_kd=args.follow_kd if args.follow_kd is not None else 20.0,
+        hit_lock_threshold=args.hit_lock if args.hit_lock is not None else 60,
+        hard_margin_deg=args.hard_margin if args.hard_margin is not None else 2.0,
+        warn_margin_deg=args.warn_margin if args.warn_margin is not None else 5.0,
+        j1_warn_margin_deg=args.j1_warn if args.j1_warn is not None else 8.0,
+        refiner_window_half=args.refiner_window if args.refiner_window is not None else 15,
     )
 
     mpc = MPCController(env, mpc_config)

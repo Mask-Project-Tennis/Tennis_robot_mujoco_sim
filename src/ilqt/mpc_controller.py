@@ -140,6 +140,15 @@ class MPCConfig:
     # ── 远段阈值（V11 far_threshold：k_hit > 此值时用 JT 控制）──
     far_threshold: int = 50
 
+    # ── 策略内部参数（原硬编码在策略类中）──
+    follow_kp: float = 200.0             # 随挥 PD 比例增益
+    follow_kd: float = 20.0              # 随挥 PD 微分增益
+    hit_lock_threshold: int = 60         # 击球点防抖锁定步数
+    hard_margin_deg: float = 2.0         # IK 硬裕度（度）
+    warn_margin_deg: float = 5.0         # IK 警告裕度（度）
+    j1_warn_margin_deg: float = 8.0      # 关节1 警告裕度（度）
+    refiner_window_half: int = 15        # Refiner 搜索窗口半宽（步）
+
     # ── 异步重规划 ──
     async_mode: bool = False
 
@@ -223,6 +232,7 @@ class MPCController:
         # ── 策略（A4/A1/A2 提取）──
         self._phase_schedule: PhaseSchedule = DefaultPhaseSchedule(
             far_threshold=config.far_threshold,
+            near_threshold=config.near_threshold,
         )
         self._direction_policy: DirectionPolicy = ReflectDirection(
             target_speed=config.target_speed,
@@ -235,10 +245,17 @@ class MPCController:
             is_position_mode=config.is_position_mode,
             NQ=self._NQ,
             NU=self._NU,
+            kp=config.follow_kp,
+            kd=config.follow_kd,
         )
         self._refiner: HitPointRefiner = HybridRefiner(
             shoulder_pos=config.shoulder_pos,
             workspace_radius=config.workspace_radius,
+            hit_lock_threshold=config.hit_lock_threshold,
+            hard_margin_deg=config.hard_margin_deg,
+            warn_margin_deg=config.warn_margin_deg,
+            j1_warn_margin_deg=config.j1_warn_margin_deg,
+            window_half_steps=config.refiner_window_half,
         )
 
         # ── 重规划模式（A3 提取：同步/异步统一）──

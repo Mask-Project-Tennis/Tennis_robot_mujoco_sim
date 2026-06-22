@@ -110,9 +110,7 @@ class PlannedFollowThrough:
     - 力矩模式：``J_p.T @ (Kp*dp - Kd*v_ee)``
     """
 
-    # PD 增益（与 V11 行 2173-2174 一致）
-    _KP_FOLLOW: float = 200.0
-    _KD_FOLLOW: float = 20.0
+    # PD 增益默认值（可通过构造函数 kp/kd 参数覆盖）
 
     def __init__(
         self,
@@ -122,6 +120,8 @@ class PlannedFollowThrough:
         is_position_mode: bool,
         NQ: int,
         NU: int,
+        kp: float = 200.0,
+        kd: float = 20.0,
     ) -> None:
         """初始化随挥参数。
 
@@ -132,6 +132,8 @@ class PlannedFollowThrough:
             is_position_mode: 是否位置模式（True=IK，False=力矩 PD）。
             NQ: 关节数（位置向量维度）。
             NU: 控制维度（执行器数）。
+            kp: 随挥 PD 比例增益（默认 200.0）。
+            kd: 随挥 PD 微分增益（默认 20.0）。
         """
         self._follow_through_steps: int = follow_through_steps
         self._follow_trigger: str = follow_trigger
@@ -139,6 +141,8 @@ class PlannedFollowThrough:
         self._is_position_mode: bool = is_position_mode
         self._NQ: int = NQ
         self._NU: int = NU
+        self._kp_follow: float = kp
+        self._kd_follow: float = kd
 
         # ── 随挥状态（从 MPCController 移入）──
         self._follow_through_start: int = -1
@@ -226,7 +230,7 @@ class PlannedFollowThrough:
             p_ee_cur = ctx.env.get_ee_pos()
             J_p = ctx.env.get_ee_jacp()
             dp = p_des_follow - p_ee_cur
-            F_follow = self._KP_FOLLOW * dp - self._KD_FOLLOW * (
+            F_follow = self._kp_follow * dp - self._kd_follow * (
                 J_p @ ctx.arm_state[self._NQ:]
             )
             u_follow = J_p.T @ F_follow
