@@ -12,7 +12,6 @@ from src.ilqt.robot_limits import RobotLimits
 from src.ilqt.strategies.hit_point_refiner import (
     HitPointRefiner,
     HybridRefiner,
-    NoRefinement,
     RefineResult,
 )
 from src.real.runner_factory import DT, INIT_Q, INIT_Q_LEFT, KD, KP, build_robot_limits
@@ -33,41 +32,6 @@ def _build_env() -> PlanningEnv:
 def _build_limits(env: PlanningEnv) -> RobotLimits:
     """构建 RobotLimits。"""
     return build_robot_limits(env)
-
-
-# ──────────────────────────────────────────────────────────────────
-# A2 轮 1: NoRefinement 直通
-# ──────────────────────────────────────────────────────────────────
-
-
-class TestNoRefinement:
-    """NoRefinement 直通策略测试。"""
-
-    def test_no_refinement_passthrough(self) -> None:
-        """NoRefinement 返回原始 p_hit/k_hit，log='passthrough'。"""
-        env = _build_env()
-        limits = _build_limits(env)
-        refiner = NoRefinement()
-        p_hit = np.array([0.3, -0.5, 1.2])
-        arm_state = env.get_arm_state()
-        result = refiner.refine(
-            p_hit=p_hit, k_hit=100, remaining=150,
-            env=env, arm_state=arm_state, robot_limits=limits,
-        )
-        assert isinstance(result, RefineResult)
-        np.testing.assert_allclose(result.p_hit, p_hit)
-        assert result.k_hit == 100
-        assert result.log == "passthrough"
-
-    def test_no_refinement_reset(self) -> None:
-        """NoRefinement.reset() 无状态，不报错。"""
-        refiner = NoRefinement()
-        refiner.reset()  # 不应抛异常
-
-    def test_no_refinement_is_protocol(self) -> None:
-        """NoRefinement 实现 HitPointRefiner Protocol。"""
-        refiner = NoRefinement()
-        assert isinstance(refiner, HitPointRefiner)
 
 
 # ──────────────────────────────────────────────────────────────────

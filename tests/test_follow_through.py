@@ -11,7 +11,6 @@ from src.ilqt.planning_env import PlanningEnv
 from src.ilqt.strategies.follow_through import (
     FollowContext,
     FollowThroughPolicy,
-    NoFollowThrough,
     PlannedFollowThrough,
 )
 from src.real.runner_factory import DT, INIT_Q, INIT_Q_LEFT, KD, KP
@@ -171,27 +170,6 @@ class TestPlannedFollowThroughControl:
         u_cmd = policy.compute_control(ctx, step_in_follow=0)
         assert u_cmd.shape == (6,)
         assert np.all(np.isfinite(u_cmd))
-
-
-# ──────────────────────────────────────────────────────────────────
-# A1 轮 3: NoFollowThrough
-# ──────────────────────────────────────────────────────────────────
-
-
-class TestNoFollowThrough:
-    """禁用随挥策略测试。"""
-
-    def test_no_follow_never_triggers(self) -> None:
-        """NoFollowThrough.should_trigger 始终 False。"""
-        env = _build_env()
-        policy = NoFollowThrough()
-        ctx = _make_ctx(env, step_count=999, mpc_horizon=100, k_hit=0)
-        assert policy.should_trigger(ctx) is False
-
-    def test_no_follow_is_protocol(self) -> None:
-        """NoFollowThrough 实现 FollowThroughPolicy Protocol。"""
-        policy = NoFollowThrough()
-        assert isinstance(policy, FollowThroughPolicy)
 
 
 # ──────────────────────────────────────────────────────────────────

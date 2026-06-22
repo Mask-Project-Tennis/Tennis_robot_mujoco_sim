@@ -12,6 +12,8 @@
 
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 from numpy.typing import NDArray
 
@@ -44,6 +46,12 @@ class BasicSafetyFilter:
             max_qdot: 关节速度上限 (NU,)。
             max_tcp_speed: TCP 速度上限（预留，当前未检查）。
         """
+        warnings.warn(
+            "BasicSafetyFilter 缺少 TCP 速度检查，不应用于生产环境。"
+            "请使用 PredictiveSafetyFilter。",
+            RuntimeWarning,
+            stacklevel=2,
+        )
         self._q_lower = np.asarray(q_lower, dtype=np.float64)
         self._q_upper = np.asarray(q_upper, dtype=np.float64)
         self._max_qdot = np.asarray(max_qdot, dtype=np.float64)

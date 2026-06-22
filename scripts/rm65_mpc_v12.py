@@ -307,13 +307,11 @@ class _V12SimComponent:
             env.update_kinematics()
             self.p_ee_at_hit = env.get_ee_pos().copy()
             self.ball_pos_at_hit = ball_pos_new.copy()
+            # 反弹物理委托到 replay.py 共享函数（消除重复公式）
+            from src.sim.replay import compute_rebound_velocity
             n_racket = env.get_ee_normal()
-            n_hat = n_racket / (np.linalg.norm(n_racket) + 1e-8)
             v_ee = env.get_ee_vel()
-            v_ball_pre = ball_vel_before_step
-            v_rel_n = np.dot(v_ball_pre - v_ee, n_hat)
-            e = 0.8
-            v_ball_rebound = v_ball_pre - (1 + e) * v_rel_n * n_hat
+            v_ball_rebound = compute_rebound_velocity(ball_vel_before_step, v_ee, n_racket, e=0.8)
             env.set_ball_vel(v_ball_rebound)
 
         self._step_count += 1
@@ -583,12 +581,12 @@ def main() -> None:
         rl_cfg, dt=dt, ctrlrange=env.model.actuator_ctrlrange[:env.NU],
     )
 
-    # X 平面墙 body IDs 缓存
+    # X 平面墙 body IDs 缓存（引用共享常量，消除重复）
+    from src.ilqt.components.predictive_safety import X_WALL_BODY_NAMES
     import mujoco as _mj
     _hard_x_body_ids = [
         _mj.mj_name2id(env.model, _mj.mjtObj.mjOBJ_BODY, n)
-        for n in ("r_link1", "r_link2", "r_link3", "r_link4",
-                   "r_link5", "r_link6", "r_flange", "r_racket_body")
+        for n in X_WALL_BODY_NAMES
     ]
 
     # ==========================================================================

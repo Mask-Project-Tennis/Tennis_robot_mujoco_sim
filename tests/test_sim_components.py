@@ -224,3 +224,21 @@ def test_components_satisfy_protocols() -> None:
 
     env_sim = RM65Env(MODEL_PATH, dt=DT)
     assert isinstance(SimExecutor(env_sim), ExecutorComponent)
+
+
+# ── BasicSafetyFilter 构造警告 ──────────────────────────────────────────────
+
+
+class TestBasicSafetyFilterWarning:
+    """BasicSafetyFilter 构造时应发出 RuntimeWarning（标记为不完整）。"""
+
+    def test_construction_emits_warning(self):
+        """构造 BasicSafetyFilter 时触发 RuntimeWarning，警告缺少 TCP 检查。"""
+        import warnings
+        import numpy as np
+        from src.ilqt.components.basic_safety import BasicSafetyFilter
+        with pytest.warns(RuntimeWarning, match="TCP"):
+            BasicSafetyFilter(
+                q_lower=-np.ones(6), q_upper=np.ones(6),
+                max_qdot=np.ones(6) * 10,
+            )

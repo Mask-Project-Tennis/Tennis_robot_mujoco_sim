@@ -60,38 +60,6 @@ class HitPointRefiner(Protocol):
         ...
 
 
-class NoRefinement:
-    """直通策略 — 不做任何过滤，返回原始值。"""
-
-    def refine(
-        self,
-        p_hit: NDArray[np.floating],
-        k_hit: int,
-        remaining: int,
-        env: Any,
-        arm_state: NDArray[np.floating],
-        robot_limits: Any,
-    ) -> RefineResult:
-        """直通返回原始 p_hit/k_hit。
-
-        Args:
-            p_hit: 原始击球点。
-            k_hit: 原始击球步数。
-            remaining: 剩余步数（忽略）。
-            env: 规划环境（忽略）。
-            arm_state: 臂状态（忽略）。
-            robot_limits: 关节限位（忽略）。
-
-        Returns:
-            RefineResult（原始值，log='passthrough'）。
-        """
-        return RefineResult(p_hit=p_hit.copy(), k_hit=k_hit, log="passthrough")
-
-    def reset(self) -> None:
-        """无状态，空操作。"""
-        return None
-
-
 class HybridRefiner:
     """混合 refine 策略 — 与 V11 `_refine_hit_point` 完全一致。
 

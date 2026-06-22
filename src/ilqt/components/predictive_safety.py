@@ -31,8 +31,8 @@ logger = logging.getLogger(__name__)
 # X 平面墙：机械臂连杆不可越过的身体中线（世界坐标系 X 坐标上限）
 _X_WALL_LIMIT: float = -0.1
 
-# X 平面墙检查的刚体名（对齐 V11 ``_hard_x_body_ids``）
-_X_WALL_BODY_NAMES: tuple[str, ...] = (
+# X 平面墙检查的刚体名（公共常量 — V12 和 PredictiveSafetyFilter 共用）
+X_WALL_BODY_NAMES: tuple[str, ...] = (
     "r_link1",
     "r_link2",
     "r_link3",
@@ -123,7 +123,7 @@ class PredictiveSafetyFilter:
             model = self._env.model  # type: ignore[attr-defined]
             ids = [
                 mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, name)  # type: ignore[attr-defined]
-                for name in _X_WALL_BODY_NAMES
+                for name in X_WALL_BODY_NAMES
             ]
             self._x_wall_body_ids = [i for i in ids if i >= 0]
         return self._x_wall_body_ids
