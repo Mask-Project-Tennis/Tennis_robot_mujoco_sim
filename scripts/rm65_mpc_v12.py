@@ -81,13 +81,8 @@ def merge_configs(base: dict, override: dict) -> dict:
 
 def _import_v11_visuals():
     """惰性导入 V11 的可视化函数（避免无 --viewer/--plot 时的导入开销）。"""
-    v11_path = Path(__file__).resolve().parent / "rm65_mpc_v11.py"
-    import importlib.util
-    spec = importlib.util.spec_from_file_location("rm65_mpc_v11", v11_path)
-    assert spec is not None and spec.loader is not None, f"无法加载 V11 模块: {v11_path}"
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod.visualize_rm65_result, mod.plot_tube_results
+    from rm65_mpc_v11 import visualize_rm65_result, plot_tube_results
+    return visualize_rm65_result, plot_tube_results
 
 
 # ==============================================================================
@@ -162,8 +157,6 @@ class _V12SimComponent:
         self.max_tcp_speed: float = 0.0
         self.max_racket_face_speed: float = 0.0
         self.total_mpc_steps: int = 0
-        self.emergency_stop_count: int = 0
-        self.buffer_exhaustion_count: int = 0
 
         # 击球追踪
         self.ball_was_hit: bool = False
@@ -238,12 +231,10 @@ class _V12SimComponent:
                 enable_collision = True
             elif k_hit <= 10:
                 enable_collision = True
-        if hasattr(env, "set_arm_collision"):
-            env.set_arm_collision(enable_collision)
+        env.set_arm_collision(enable_collision)
 
-        # 记录碰撞前的球速度（用于弹性反弹计算）
-        ball_vel = env.get_ball_vel()
-        ball_vel_before_step = ball_vel.copy() if enable_collision else ball_vel
+        # 记录碰撞前的球速度（用于弹性反弹计算，get_ball_vel 已返回 copy）
+        ball_vel_before_step = env.get_ball_vel()
 
         # ---- 前向物理步进 ----
         x_new, ball_pos_new, ball_vel_new = env.step_full(u_cmd)
@@ -287,8 +278,7 @@ class _V12SimComponent:
                         break
 
         # ---- 碰撞恢复 ----
-        if hasattr(env, "set_arm_collision"):
-            env.set_arm_collision(True)
+        env.set_arm_collision(True)
 
         # ---- history 记录（V11 2067-2069）----
         self.X_history.append(x_new.copy())
@@ -349,8 +339,6 @@ class _V12SimComponent:
             "max_tcp_speed": self.max_tcp_speed,
             "max_racket_face_speed": self.max_racket_face_speed,
             "total_mpc_steps": self.total_mpc_steps,
-            "emergency_stop_count": self.emergency_stop_count,
-            "buffer_exhaustion_count": self.buffer_exhaustion_count,
             "ball_was_hit": self.ball_was_hit,
             "hit_step": self.hit_step,
             "p_ee_at_hit": self.p_ee_at_hit,
@@ -522,8 +510,6 @@ def main() -> None:
         fixed_horizon = args.horizon
     if args.iter is not None:
         max_iter_per_plan = args.iter
-    if args.replan_interval is not None:
-        replan_interval = args.replan_interval
 
     if args.serve_box:
         if args.horizon is None:
@@ -590,8 +576,7 @@ def main() -> None:
     rl_cfg = config_dict.get("robot_limits", {})
     if args.max_tcp is not None:
         rl_cfg["max_tcp_speed"] = float("inf") if args.max_tcp == 0 else args.max_tcp
-    if args.terminal_exempt_steps is not None:
-        rl_cfg["terminal_exempt_steps"] = args.terminal_exempt_steps
+    rl_cfg["terminal_exempt_steps"] = args.terminal_exempt_steps
     if args.dq_max_fraction is not None:
         rl_cfg["dq_max_fraction"] = args.dq_max_fraction
     robot_limits = RobotLimits.from_config(
@@ -711,7 +696,6 @@ def main() -> None:
         d_follow = hit_direction / (np.linalg.norm(hit_direction) + 1e-8)
     else:
         d_follow = -v_ball_hit / (np.linalg.norm(v_ball_hit) + 1e-8)
-    _d_hat = d_follow
     v_hit_at_contact = args.target_speed * d_follow
 
     if args.no_follow_through:
@@ -722,9 +706,6 @@ def main() -> None:
         follow_through_length = args.hit_shift
         follow_through_steps = int(config_dict["hitting"].get("follow_through_steps", 160))
         follow_through_v_terminal = float(config_dict["hitting"].get("follow_through_v_terminal", 0.3))
-
-    _hit_shift = follow_through_length
-    _v_hit_desired = v_hit_at_contact
 
     logger.info(f"击打步数: {k_hit_total}, 击打位置: {p_hit}")
     logger.info(f"随挥方向: {np.round(d_follow, 3)}, 随挥步数: {follow_through_steps}")
@@ -931,7 +912,6 @@ def main() -> None:
     # ==========================================================================
     t_total = time.perf_counter() - t_total_start
     t_mpc = t_mpc_end - t_total_start
-    _n_mpc_steps = len(sim_component.U_history) - post_hit_steps
 
     X_history = sim_component.X_history
     U_history = sim_component.U_history
@@ -959,11 +939,11 @@ def main() -> None:
     vel_error = float(np.linalg.norm(v_ee_final - v_hit_at_contact))
 
     # Tube 指标
-    d_arr = np.array(distances_history) if distances_history else np.array([float("inf")])
+    d_arr = np.array(distances_history)
     min_dist = float(np.min(d_arr))
-    ball_near_duration = int(np.sum(np.array(ball_near_history, dtype=bool))) if ball_near_history else 0
+    ball_near_duration = int(np.sum(np.array(ball_near_history, dtype=bool)))
     ball_near_ms = ball_near_duration * dt * 1000
-    tube_ready_duration = int(np.sum(np.array(tube_ready_history, dtype=bool))) if tube_ready_history else 0
+    tube_ready_duration = int(np.sum(np.array(tube_ready_history, dtype=bool)))
     tube_ready_ms = tube_ready_duration * dt * 1000
 
     # 命中时刻误差
@@ -1013,7 +993,6 @@ def main() -> None:
     hit_type = "主动击球" if active_contact else ("被动接触" if passive_contact else "未触球")
     print(f"  max_qdot={max_qdot:.2f}x, max_tcp={max_tcp:.1f}m/s, max_face={max_face:.1f}m/s")
     print(f"  击球类型: {hit_type}")
-    print(f"  emergency_stop={sim_component.emergency_stop_count}")
     print("========================================\n")
 
     # 结构化结果行
@@ -1065,8 +1044,7 @@ def main() -> None:
             env.data.qpos[env.NQ:env.NQ + env.LEFT_ARM_NQ] = init_q_left
             env.update_kinematics()
             for i in range(min(len(X_history), len(U_history) + 1)):
-                if i < len(X_history):
-                    env.set_arm_state(X_history[i])
+                env.set_arm_state(X_history[i])
                 racket_pos_list.append(env.get_ee_pos().copy())
             racket_pos_arr = np.array(racket_pos_list)
 
@@ -1080,13 +1058,13 @@ def main() -> None:
                 [],  # k_hit_steps_history（V12 未单独追踪）
                 pos_error_history,
             )
-        except Exception as e:
+        except (ImportError, OSError, RuntimeError, ValueError) as e:
             logger.warning(f"可视化失败: {e}")
 
     if args.viewer:
         try:
             visualize_fn, _ = _import_v11_visuals()
-            U_arr = np.array(U_history) if len(U_history) > 0 else np.zeros((0, env.NU))
+            U_arr = np.array(U_history)
             from src.sim.replay import replay_trajectory
             replay_result = replay_trajectory(
                 env, U_arr, init_q, init_q_left, p0, v0, hit_step,
@@ -1097,7 +1075,7 @@ def main() -> None:
                 init_q_left=init_q_left,
                 post_hit_steps=post_hit_steps,
             )
-        except Exception as e:
+        except (ImportError, OSError, RuntimeError, ValueError) as e:
             logger.warning(f"回放可视化失败: {e}")
 
 
