@@ -67,20 +67,18 @@
 
 ### 根目录（被引用的核心仿真脚本）
 
-**原则：被其他脚本通过 Python `import` 或 `subprocess` 调用的脚本留在根目录，不可移动。**
+**原则：被其他脚本通过 Python `import` 或 `subprocess` 调用的活跃脚本留在根目录。旧脚本归档至 `archive/`。**
 
 | 脚本 | 引用方式 |
 |------|---------|
-| `rm65_mpc_tube_constraint.py` | exp/ 包装脚本 Python import |
-| `rm65_mpc_tube_constraint_realtime.py` | TCP 限速实验 import |
-| `rm65_mpc_tube_constraint_realtime_v2.py` | 多个 exp/ 脚本 subprocess |
-| `rm65_mpc_tube.py` | scan_ball_params import |
+| `rm65_mpc_v12.py` | ★ 活跃主脚本，exp9-15 batch subprocess + _run_exp10 wrapper import |
+| `rm65_mpc_v11.py` | V11 薄壳（委托到 V12），compare_v11_v12 subprocess |
 | `rm65_mpc_ilqr_5_5.py` | realtime_batch import |
 | `rm65_evaluate.py` | realtime_batch import |
-| `rm65_mpc_v6.py` | 10+ 个 run_exp_* 脚本 subprocess |
-| `rm65_mpc_v7.py` | 4+ 个 run_exp_* 脚本 subprocess |
-| `rm65_mpc_v8.py` | run_20hits_video.py Python import + run_v8_exp.py subprocess |
-| `rm65_mpc_v9.py` | 最新迭代，与 v6/v7/v8 同类 |
+| `run_20hits_video.py` | 独立运行（import archive/root/rm65_mpc_v9） |
+| `run_real_robot.py` | 真机入口 |
+
+> V6-V10 + tube 变体已归档至 `scripts/archive/`（详见 `archive/README.md`）
 
 ### 子目录分类
 

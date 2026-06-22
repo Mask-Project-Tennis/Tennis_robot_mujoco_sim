@@ -178,7 +178,6 @@ mujoco_sim/
 ├── configs/
 │   ├── default.yaml                   # 默认超参数（时间步长、iLQR 参数、关节约束）
 │   ├── mpc.yaml                       # MPC 专用参数
-│   ├── cost_hitting.yaml              # 代价函数权重
 │   ├── v4_follow_through.yaml         # V4 随挥策略配置
 │   ├── v5_active_hit.yaml             # V5 主动击球配置
 │   └── real_robot.yaml                # 真实机器人配置（底座位姿、坐标系标定、控制频率）

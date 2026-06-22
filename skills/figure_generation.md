@@ -86,7 +86,7 @@ MuJoCo 渲染截图。
 ### 生成方法
 ```bash
 # 方法1：MuJoCo viewer 截图
-python scripts/rm65_mpc_tube_constraint.py --serve-box --ball-speed 9 --seed 0 --viewer
+python scripts/rm65_mpc_v12.py --serve-box --ball-speed 9 --seed 0 --viewer
 # 在 viewer 中按 Ctrl+S 保存截图
 
 # 方法2：离屏渲染（无头环境）
@@ -575,10 +575,10 @@ def generate_fig7(
 单次成功击球的详细诊断数据。
 
 ### 数据来源
-复用 `rm65_mpc_tube_constraint.py` 中已有的 `plot_tube_results` 函数，调整样式。
+复用 `src/sim/v11_visuals.py` 中已有的 `plot_tube_results` 函数，调整样式。
 
 ### 注意
-代码中已有 `plot_tube_results` 函数（`scripts/rm65_mpc_tube_constraint.py:1140-1259`），
+`plot_tube_results` 已从旧脚本提取到 `src/sim/v11_visuals.py`，
 直接调用即可。如需 IEEE 风格，调整 `figsize` 和 `dpi` 参数。
 
 ---

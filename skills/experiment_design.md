@@ -18,9 +18,9 @@
 | 脚本 | 用途 |
 |------|------|
 | `scripts/rm65_mpc_v12.py` | ★ 当前活跃仿真主脚本（V12, EpisodeRunner 架构） |
-| `scripts/rm65_mpc_tube_constraint.py` | 离线仿真（exp1-7 使用） |
-| `scripts/exp/_run_expN_*.py` | 实验包装脚本（monkey-patch 约束） |
-| `scripts/exp/run_expN_batch.py` | 批量运行器 |
+| `scripts/exp/_run_expN_*.py` | 实验包装脚本（monkey-patch 约束，如 `_run_exp10_pd_scan.py`） |
+| `scripts/exp/run_expN_batch.py` | 批量运行器（如 `run_exp10_batch.py` 多进程并行） |
+| `scripts/exp/run_expN_*.py` | 独立 runner（如 `run_exp14_v12_pd.py`，subprocess + CSV 一体化） |
 | `scripts/extract/extract_expN_results.py` | 日志→CSV 提取 |
 
 ## 数据存储规范
@@ -86,11 +86,11 @@ np.savez_compressed(
 
 | 用途 | 参考文件 |
 |------|---------|
-| 豁免约束包装 | `scripts/exp/_run_exp1_v3_exempt.py` |
-| 严格约束包装 | `scripts/exp/_run_exp2_v3_strict.py` |
-| 批量运行器 | `scripts/exp/run_exp2_v3_batch.py` |
+| Wrapper（V12 + monkey-patch） | `scripts/exp/_run_exp10_pd_scan.py` |
+| Batch 运行器（多进程并行） | `scripts/exp/run_exp10_batch.py` |
+| 独立 Runner（subprocess + CSV） | `scripts/exp/run_exp14_v12_pd.py` |
 | 提取脚本（离线） | `scripts/extract/extract_exp2_v3_results.py` |
-| 提取脚本（实时 V12） | `scripts/extract/extract_exp1_results.py` |
+| 提取脚本（实时 V12） | `scripts/extract/extract_exp11_results.py` |
 | 默认约束参数 | `configs/default.yaml` |
 
 ### 包装脚本模板

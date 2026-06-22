@@ -44,7 +44,7 @@ python scripts/rm65_mpc_v12.py --serve-box --ball-speed 7 --position-mode --view
 python scripts/rm65_mpc_v12.py --serve-box --ball-speed 7 --seed 42 --viewer
 
 # 离线仿真（无渲染，更快）
-python scripts/rm65_mpc_tube_constraint.py --serve-box --ball-speed 9 --no-plot
+python scripts/rm65_mpc_v12.py --serve-box --ball-speed 9 --no-plot
 
 # 关节调节查看器（拖动滑条控制关节）
 python scripts/tools/rm65_joint_viewer.py
@@ -262,13 +262,13 @@ mujoco_sim/
 ├── configs/
 │   ├── default.yaml                      # 基础仿真参数
 │   ├── mpc.yaml                          # MPC 专用参数
-│   ├── cost_hitting.yaml                 # 代价函数权重
+│   ├── v5_active_hit.yaml                # V5 主动击球配置
 │   └── real_robot.yaml                   # 真机配置（7节+丰富注释）
 │
 ├── scripts/
 │   ├── rm65_mpc_v12.py                   # ★ V12 最新仿真主脚本（EpisodeRunner 管线架构）
-│   ├── rm65_mpc_v11.py                   # V11（保留对比基准）
-│   ├── rm65_mpc_tube_constraint.py       # 离线仿真
+│   ├── rm65_mpc_v11.py                   # V11 薄壳（委托到 V12）
+│   ├── archive/                          # 已归档脚本（V6-V10 + tube + 旧实验）
 │   ├── tools/
 │   │   ├── rm65_joint_viewer.py          # 关节调节查看器
 │   │   ├── test_real_robot/              # 真机接口测试工具（01-08）
