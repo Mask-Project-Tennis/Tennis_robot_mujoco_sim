@@ -45,3 +45,7 @@ class RobotExecutor:
             u_cmd: 控制指令 (6,)。位置模式下为期望关节角度，力矩模式下为力矩。
         """
         self._robot.send_joint_command(np.asarray(u_cmd, dtype=np.float64))
+
+    def get_metrics(self) -> dict:
+        """返回空指标字典（真机执行器不收集仿真诊断数据）。"""
+        return {}
