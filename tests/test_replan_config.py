@@ -13,7 +13,10 @@ import numpy as np
 from src.ilqt.mpc_controller import MPCConfig
 from src.ilqt.planning_env import PlanningEnv
 from src.ilqt.replan_config import ReplanConfig
+from src.real.config import RealRobotConfig
 from src.real.runner_factory import build_replan_cfg, build_robot_limits, build_solver
+
+_CFG = RealRobotConfig()
 
 
 def _build_env() -> PlanningEnv:
@@ -60,7 +63,7 @@ def _build_replan_config() -> ReplanConfig:
     """构建 ReplanConfig 实例（复用 env / limits / solver）。"""
     env = _build_env()
     config = _build_config()
-    robot_limits = build_robot_limits(env)
+    robot_limits = build_robot_limits(env, _CFG)
     solver = build_solver()
     d_hat = np.array([0.0, -1.0, -0.5])
     d_hat /= float(np.linalg.norm(d_hat))
@@ -139,7 +142,7 @@ class TestFromMpcConfig:
         config = _build_config()
         rc = ReplanConfig.from_mpc_config(
             config,
-            robot_limits=build_robot_limits(env),
+            robot_limits=build_robot_limits(env, _CFG),
             solver=build_solver(),
             d_hat=d_hat,
             v_hit_desired=v_hit_desired,
@@ -157,7 +160,7 @@ class TestFromMpcConfig:
         d_follow_custom = np.array([1.0, 0.0, 0.0])
         rc = ReplanConfig.from_mpc_config(
             config,
-            robot_limits=build_robot_limits(env),
+            robot_limits=build_robot_limits(env, _CFG),
             solver=build_solver(),
             d_hat=d_hat,
             v_hit_desired=1.8 * d_hat,
@@ -249,7 +252,7 @@ class TestRoundtrip:
         """
         env = _build_env()
         config = _build_config()
-        robot_limits = build_robot_limits(env)
+        robot_limits = build_robot_limits(env, _CFG)
         solver = build_solver()
         d_hat = np.array([0.0, -1.0, -0.5])
         d_hat /= float(np.linalg.norm(d_hat))
@@ -348,13 +351,13 @@ class TestRunnerFactoryUnification:
     def test_build_replan_cfg_legacy_values_preserved(self) -> None:
         """旧 build_replan_cfg 的 42 个键值在统一后完全不变。"""
         env = _build_env()
-        robot_limits = build_robot_limits(env)
+        robot_limits = build_robot_limits(env, _CFG)
         solver = build_solver()
         d_hat = np.array([0.0, -1.0, -0.5])
         d_hat /= float(np.linalg.norm(d_hat))
         v_hit_desired = 1.8 * d_hat
 
-        d = build_replan_cfg(env, robot_limits, solver, d_hat, v_hit_desired)
+        d = build_replan_cfg(env, robot_limits, solver, d_hat, v_hit_desired, _CFG)
 
         # 旧路径硬编码值（runner_factory.build_replan_cfg 原始 42 键）
         assert d["dt"] == 0.005
@@ -371,8 +374,8 @@ class TestRunnerFactoryUnification:
         assert d["Q_p_scale_near"] == 8.0
         assert d["Q_v_scale_near"] == 120.0
         assert d["normal_weight"] == 500000.0
-        assert d["racket_speed"] == 5.0
-        assert d["max_tcp_speed"] == 1.8
+        assert d["racket_speed"] == 1.8  # config.target_hit_speed 默认值
+        assert d["max_tcp_speed"] == 1.0  # config.max_tcp_speed 默认值
         assert d["ablation_mode"] == "full"
         assert d["is_position_mode"] is True
         assert d["use_backswing"] is False
@@ -402,12 +405,12 @@ class TestRunnerFactoryUnification:
     def test_build_replan_cfg_new_keys_behavior_preserving(self) -> None:
         """统一后新增的 9 个键值与 do_replan .get() 默认等价（行为不变）。"""
         env = _build_env()
-        robot_limits = build_robot_limits(env)
+        robot_limits = build_robot_limits(env, _CFG)
         solver = build_solver()
         d_hat = np.array([0.0, 1.0, 0.0])
         v_hit_desired = 1.8 * d_hat
 
-        d = build_replan_cfg(env, robot_limits, solver, d_hat, v_hit_desired)
+        d = build_replan_cfg(env, robot_limits, solver, d_hat, v_hit_desired, _CFG)
 
         # do_replan 用 .get("Q_p_base", None) — 显式 None 等价于键缺失
         assert d["Q_p_base"] is None
@@ -426,12 +429,12 @@ class TestRunnerFactoryUnification:
     def test_build_replan_cfg_returns_full_key_set(self) -> None:
         """build_replan_cfg 产出与 ReplanConfig.to_dict() 相同的 51-key 集合。"""
         env = _build_env()
-        robot_limits = build_robot_limits(env)
+        robot_limits = build_robot_limits(env, _CFG)
         solver = build_solver()
         d_hat = np.array([0.0, 1.0, 0.0])
         v_hit_desired = 1.8 * d_hat
 
-        d = build_replan_cfg(env, robot_limits, solver, d_hat, v_hit_desired)
+        d = build_replan_cfg(env, robot_limits, solver, d_hat, v_hit_desired, _CFG)
 
         rc = ReplanConfig.from_mpc_config(
             _build_config(),

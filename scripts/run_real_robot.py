@@ -34,11 +34,8 @@ from src.real.config import RealRobotConfig
 from src.real.fake_robot import FakeRobot
 from src.real.real_runner import RealRunner
 from src.real.runner_factory import (
-    DT,
     INIT_Q,
     INIT_Q_LEFT,
-    KD,
-    KP,
     build_replan_cfg,
     build_robot_limits,
     build_solver,
@@ -48,25 +45,24 @@ from src.real.safety_monitor import SafetyMonitor
 logger = logging.getLogger(__name__)
 
 # Mock 球初始位置 + 来球方向单位向量（[0,2,1] 归一化）
-# 注：共享常量（DT/INIT_Q/KP/KD 等）已迁移至 src/real/runner_factory.py
 _DEFAULT_BALL_POS = np.array([0.0, -1.5, 1.8], dtype=np.float64)
 _BALL_VEL_DIR = np.array([0.0, 2.0, 1.0], dtype=np.float64)
 _BALL_VEL_DIR /= float(np.linalg.norm(_BALL_VEL_DIR))
+_DEFAULT_CONFIG_PATH = Path(__file__).resolve().parent.parent / "configs" / "real_robot.yaml"
 
 
 def create_runner(
+    config: RealRobotConfig,
     mock: bool = True,
     ball_pos: np.ndarray | None = None,
     ball_vel: np.ndarray | None = None,
 ) -> RealRunner:
-    """组装 RealRunner 的全部 8 个依赖组件并返回。
+    """组装 RealRunner 的全部依赖组件并返回。
 
-    Mock 模式使用 FakeRobot + SimulatedBallSensor 构建闭环测试环境；
-    真机模式待硬件就绪后实现。规划时长 total_horizon 固定 200 步（对齐
-    tests/test_real_runner.py），episode 的实际运行步数由 main() 主循环
-    的 --max-steps 参数控制，二者解耦。
+    所有可调参数从 config（YAML 加载）读取，不使用硬编码常量。
 
     Args:
+        config: 真机配置（YAML 为唯一真相源）。
         mock: True 使用 FakeRobot；False 使用真机接口（未实现）。
         ball_pos: 初始球位置，默认 [0, -1.5, 1.8]（可达候选点）。
         ball_vel: 初始球速度，默认 ball_speed=3.0 m/s 沿 [0,2,1] 方向。
@@ -83,43 +79,37 @@ def create_runner(
     if ball_pos is None:
         ball_pos = _DEFAULT_BALL_POS.copy()
     if ball_vel is None:
-        # 默认 ball_speed=3.0 m/s 沿 [0,2,1] 方向
         ball_vel = 3.0 * _BALL_VEL_DIR.copy()
     ball_pos = np.asarray(ball_pos, dtype=np.float64)
     ball_vel = np.asarray(ball_vel, dtype=np.float64)
 
-    # 1. 规划环境（位置模式）
-    env = PlanningEnv(dt=DT)
-    env.init_q_left = INIT_Q_LEFT.copy()  # 维持左臂位姿（C++ 线性化需要）
-    env.configure_actuator_mode("position", kp=KP, kd=KD)
+    # 1. 规划环境（位置模式）— dt/kp/kd 从 config 读取
+    env = PlanningEnv(dt=config.dt)
+    env.init_q_left = INIT_Q_LEFT.copy()
+    env.configure_actuator_mode("position", kp=config.kp, kd=config.kd)
     env.configure_feedforward(True)
     env.reset(INIT_Q)
     env.data.qpos[env.NQ : env.NQ + env.LEFT_ARM_NQ] = env.init_q_left
 
     # 2. 假机器人
-    robot = FakeRobot(init_q=INIT_Q, dt=DT)
+    robot = FakeRobot(init_q=INIT_Q, dt=config.dt)
 
     # 3. 球传感器 + 启动
     sensor = SimulatedBallSensor()
     sensor.start()
 
     # 4. 球感知器（bootstrap：推两次观测 + 两次 update，使有限差分速度可用）
-    perceiver = BallPerceiver(sensor, estimator_config=None, dt=DT)
+    perceiver = BallPerceiver(sensor, estimator_config=None, dt=config.dt)
     sensor.push(ball_pos, 0.0)
-    perceiver.update()  # 第一次：_last_pos=None → vel=0，存储基准点
-    t_obs = 0.02  # 模拟传感器 50Hz 间隔
+    perceiver.update()
+    t_obs = 0.02
     p_obs = ball_pos + ball_vel * t_obs
     sensor.push(p_obs, t_obs)
-    perceiver.update()  # 第二次：有限差分得真实速度，KF 滤波
+    perceiver.update()
 
-    # 5. 安全监控（限位与规划器 RobotLimits 含裕度一致，避免边界抖动误判）
-    robot_limits = build_robot_limits(env)
-    safety_cfg = RealRobotConfig()
-    safety_cfg.q_lower = robot_limits.q_lower.copy()
-    safety_cfg.q_upper = robot_limits.q_upper.copy()
-    safety_cfg.max_qdot = robot_limits.qdot_max.copy()
-    safety_cfg.max_tcp_speed = float(robot_limits.max_tcp_speed)
-    safety = SafetyMonitor(safety_cfg, robot=robot)
+    # 5. 安全监控 — 直接用 config（config 即真相源）
+    robot_limits = build_robot_limits(env, config)
+    safety = SafetyMonitor(config, robot=robot)
 
     # 6. 规划方向（来球反方向）
     ball_vel_norm = float(np.linalg.norm(ball_vel))
@@ -127,11 +117,11 @@ def create_runner(
         d_hat = -ball_vel / ball_vel_norm
     else:
         d_hat = np.array([0.0, 1.0, 0.0])
-    v_hit_desired = 1.8 * d_hat
+    v_hit_desired = config.target_hit_speed * d_hat
 
-    # 7. 规划配置（total_horizon=200 为规划时长预算，对齐 test_real_runner.py）
+    # 7. 规划配置
     solver = build_solver()
-    replan_cfg = build_replan_cfg(env, robot_limits, solver, d_hat, v_hit_desired)
+    replan_cfg = build_replan_cfg(env, robot_limits, solver, d_hat, v_hit_desired, config)
 
     # 8. 重规划状态
     replan_state = ReplanState(
@@ -169,6 +159,12 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="RM-65B 真机部署入口 — MPC+iLQR+Tube 网球击打主循环",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument(
+        "--config",
+        type=str,
+        default=str(_DEFAULT_CONFIG_PATH),
+        help="真机配置 YAML 路径",
     )
     parser.add_argument(
         "--mock",
@@ -211,11 +207,17 @@ def main() -> None:
         args.mock, args.max_steps, args.ball_speed,
     )
 
+    # 加载配置
+    config = RealRobotConfig.from_yaml(args.config)
+    logger.info("配置已加载: %s (dt=%.3f tcp=%.1f hit=%.1f)",
+                args.config, config.dt, config.max_tcp_speed, config.target_hit_speed)
+
     # 根据 ball_speed 生成初始球速度（方向固定 [0,2,1] 归一化）
     ball_vel = args.ball_speed * _BALL_VEL_DIR
 
     # 构建 runner
     runner = create_runner(
+        config=config,
         mock=args.mock,
         ball_vel=ball_vel,
     )

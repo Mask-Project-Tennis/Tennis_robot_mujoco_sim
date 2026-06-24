@@ -38,6 +38,7 @@ from src.ilqt.strategies.replan_mode import (
 )
 from src.ilqt.tube_types import ReplanState, TubeConfig
 from src.ilqt.strategy_config import StrategyConfig
+from src.real.config import RealRobotConfig
 from src.real.runner_factory import build_robot_limits, build_solver
 
 logger = logging.getLogger(__name__)
@@ -201,7 +202,7 @@ class MPCController:
         self._NQ: int = env.NQ
 
         # ── 构建 RobotLimits + solver（复用 runner_factory）──
-        self._robot_limits = build_robot_limits(env)
+        self._robot_limits = build_robot_limits(env, RealRobotConfig())
         self._solver: Any = build_solver()
 
         # ── AsyncReplanner（独立 env_plan）──

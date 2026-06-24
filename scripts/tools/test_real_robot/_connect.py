@@ -18,19 +18,39 @@ from src.real.config import RealRobotConfig
 from src.real.robot_interface import RobotInterface
 from src.real.safety_monitor import SafetyMonitor
 
+# 测试默认配置路径（保守参数）
+_TEST_CONFIG = _PROJECT_ROOT / "configs" / "real_robot_test.yaml"
+# 生产配置路径（回退用）
+_PROD_CONFIG = _PROJECT_ROOT / "configs" / "real_robot.yaml"
+
 
 def add_config_arg(parser: argparse.ArgumentParser) -> None:
-    """为 argparse 添加 --config 参数。"""
+    """为 argparse 添加 --config 参数。
+
+    默认路径: configs/real_robot_test.yaml（测试保守参数）。
+    若测试配置不存在则回退到 configs/real_robot.yaml。
+
+    Args:
+        parser: argparse.ArgumentParser 实例。
+    """
+    default_path = str(_TEST_CONFIG) if _TEST_CONFIG.exists() else str(_PROD_CONFIG)
     parser.add_argument(
         "--config",
         type=str,
-        default=str(_PROJECT_ROOT / "configs" / "real_robot.yaml"),
-        help="真机配置 YAML 路径（默认: configs/real_robot.yaml）",
+        default=default_path,
+        help=(
+            "真机配置 YAML 路径（默认: configs/real_robot_test.yaml，"
+            "不存在时回退 real_robot.yaml）"
+        ),
     )
 
 
 def add_algo_check_arg(parser: argparse.ArgumentParser) -> None:
-    """为 argparse 添加 --no-algo-check 参数。"""
+    """为 argparse 添加 --no-algo-check 参数。
+
+    Args:
+        parser: argparse.ArgumentParser 实例。
+    """
     parser.add_argument(
         "--no-algo-check",
         action="store_true",
@@ -61,13 +81,16 @@ def load_and_connect(config_path: str = None) -> tuple[RobotInterface, RealRobot
     连接失败时打印错误并退出（不返回 None）。
 
     Args:
-        config_path: YAML 路径。None 时用默认路径。
+        config_path: YAML 路径。None 时用默认测试配置（回退生产配置）。
 
     Returns:
         (RobotInterface, RealRobotConfig)
     """
     if config_path is None:
-        config_path = str(_PROJECT_ROOT / "configs" / "real_robot.yaml")
+        if _TEST_CONFIG.exists():
+            config_path = str(_TEST_CONFIG)
+        else:
+            config_path = str(_PROD_CONFIG)
 
     config = load_config(config_path)
     print(f"正在连接 {config.robot_ip}:{config.robot_port} ...")
@@ -136,16 +159,18 @@ def pre_motion_check(
     """运动前安全预检。
 
     检查项（按顺序）:
-      1. SafetyMonitor 关节位置限位
-      2. SafetyMonitor 关节速度限位
-      3. SDK Algo 自碰撞检测（algo 非 None 时）
-      4. SDK Algo 奇异性检测（algo 非 None 时）
+      1. SafetyMonitor 限位检查（关节位置 + 关节速度）
+      2. SDK Algo 自碰撞检测（algo 非 None 时）
+      3. SDK Algo 奇异性检测（algo 非 None 时）
+
+    TCP 速度限制由控制器固件 Layer 1（rm_set_arm_max_line_speed）强制执行，
+    不在预检中重复检查。
 
     Args:
         ri: RobotInterface 实例。
         monitor: SafetyMonitor 实例。
         q_desired: (6,) 目标关节角度，弧度。
-        arm_state: (12,) 当前臂状态。None 时从 ri 读取。
+        arm_state: (12,) 当前臂状态 [q, qdot]。None 时从 ri 读取。
         algo: Algo 实例。None 时跳过碰撞/奇异性检查。
 
     Returns:
@@ -154,9 +179,9 @@ def pre_motion_check(
     if arm_state is None:
         arm_state = ri.get_arm_state()
 
-    # 1. SafetyMonitor 限位检查
+    # 1. SafetyMonitor 限位检查（关节位置 + 关节速度）
     if not monitor.is_safe(arm_state, q_desired):
-        return False, "❌ 限位检查未通过（关节位置/速度/TCP 超限）"
+        return False, "❌ 限位检查未通过（关节位置/速度超限）"
 
     # 2. SDK Algo 自碰撞检测
     if algo is not None:

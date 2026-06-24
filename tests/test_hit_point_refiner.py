@@ -14,7 +14,10 @@ from src.ilqt.strategies.hit_point_refiner import (
     HybridRefiner,
     RefineResult,
 )
+from src.real.config import RealRobotConfig
 from src.real.runner_factory import DT, INIT_Q, INIT_Q_LEFT, KD, KP, build_robot_limits
+
+_CFG = RealRobotConfig()
 
 
 def _build_env() -> PlanningEnv:
@@ -31,7 +34,7 @@ def _build_env() -> PlanningEnv:
 
 def _build_limits(env: PlanningEnv) -> RobotLimits:
     """构建 RobotLimits。"""
-    return build_robot_limits(env)
+    return build_robot_limits(env, _CFG)
 
 
 # ──────────────────────────────────────────────────────────────────

@@ -22,6 +22,7 @@ from src.ilqt.planning_env import PlanningEnv
 from src.ilqt.replan_config import ReplanConfig
 from src.ilqt.robot_limits import RobotLimits
 from src.ilqt.tube_types import TubeConfig
+from src.real.config import RealRobotConfig
 
 if TYPE_CHECKING:
     # 仅类型检查期导入 MPCConfig，运行期用延迟导入打破与 mpc_controller 的循环依赖
@@ -29,7 +30,7 @@ if TYPE_CHECKING:
 
 # ── 共享常量（对齐 V11 真机配置）──
 DT: float = 0.005
-INIT_Q = np.array([-1.5, 1.57, -0.236, 0.404, 0.446, 2.45], dtype=np.float64)
+INIT_Q = np.array([-1.5, 1.40, -0.236, 0.404, 0.446, 2.45], dtype=np.float64)
 INIT_Q_LEFT = np.array([-0.373, -1.57, 0.236, -0.404, -0.446, -2.45], dtype=np.float64)
 SHOULDER_POS = np.array([-0.1, -0.22693, 1.302645], dtype=np.float64)
 WORKSPACE_RADIUS = 0.90
@@ -37,29 +38,33 @@ KP = np.array([200.0, 200.0, 100.0, 50.0, 50.0, 20.0], dtype=np.float64)
 KD = np.array([20.0, 20.0, 10.0, 5.0, 5.0, 2.0], dtype=np.float64)
 
 
-def build_robot_limits(env: PlanningEnv) -> RobotLimits:
-    """从 default.yaml 风格配置构建 RobotLimits。
+def build_robot_limits(env: PlanningEnv, config: RealRobotConfig) -> RobotLimits:
+    """从 RealRobotConfig 构建 RobotLimits。
+
+    关节限位、TCP 速度、关节速度上限、dt 均从 config 读取。
+    q_margin_deg / qddot 等规划层参数保持为模块常量。
 
     Args:
         env: 规划环境，用于读取 actuator_ctrlrange。
+        config: 真机配置（YAML 为唯一真相源）。
 
     Returns:
         RobotLimits 实例（含位置/速度/加速度/TCP 限速约束）。
     """
     rl_cfg = {
-        "q_min_deg": [-178, -130, -135, -178, -128, -360],
-        "q_max_deg": [178, 130, 135, 178, 128, 360],
+        "q_min_deg": np.degrees(config.q_lower).tolist(),
+        "q_max_deg": np.degrees(config.q_upper).tolist(),
         "q_margin_deg": [2, 1, 3, 3, 3, 3],
-        "qdot_max_deg_s": [180, 180, 225, 225, 225, 225],
+        "qdot_max_deg_s": np.degrees(config.max_qdot).tolist(),
         "qdot_scale": 1.0,
         "qddot_max_deg_s2": [400, 400, 500, 500, 500, 500],
         "qddot_scale": 0.85,
-        "max_tcp_speed": 1.8,
+        "max_tcp_speed": config.max_tcp_speed,
         "terminal_exempt_steps": 20,
         "dq_max_fraction": 0.5,
     }
     return RobotLimits.from_config(
-        rl_cfg, dt=DT, ctrlrange=env.model.actuator_ctrlrange[: env.NU]
+        rl_cfg, dt=config.dt, ctrlrange=env.model.actuator_ctrlrange[: env.NU]
     )
 
 
@@ -88,21 +93,14 @@ def build_solver() -> Any:
     )
 
 
-def _build_real_robot_mpc_config() -> "MPCConfig":
-    """构建真机专用 MPCConfig（对齐旧 build_replan_cfg 硬编码值）。
+def _build_real_robot_mpc_config(config: RealRobotConfig) -> "MPCConfig":
+    """构建真机专用 MPCConfig（从 RealRobotConfig 读取可调参数）。
 
-    旧 build_replan_cfg 内联 42 个键值；本函数将这些值映射到 MPCConfig 字段，
-    再由 ReplanConfig.from_mpc_config().to_dict() 统一产出 51-key dict。
+    dt / max_tcp_speed / racket_speed 从 config 读取，
+    其余 MPC 参数保持为真机对齐常量。
 
-    关键差异（vs MPCConfig 默认）：
-    - total_horizon=200, fixed_horizon=60（短 horizon 加速真机响应）
-    - max_iter_per_plan=3, first_plan_iters=5, near_plan_iters=2（少迭代减延迟）
-    - is_position_mode=True（真机位置控制）
-    - racket_speed=5.0, backswing_offset=0.0, backswing_ratio=0.3, r_decay_ratio=0.3
-    - smooth_far/mid/near 真机专用权重
-
-    行为保留：Q_p_base/Q_v_base/Q_qdot_base/Q_qddot_base/Q_du_base 显式置空/零，
-    使 do_replan 的 .get() 默认路径（eye(3) / 0.0）与旧路径（键缺失）等价。
+    Args:
+        config: 真机配置（YAML 为唯一真相源）。
 
     Returns:
         MPCConfig 实例（真机专用参数集）。
@@ -112,7 +110,7 @@ def _build_real_robot_mpc_config() -> "MPCConfig":
     from src.ilqt.mpc_controller import MPCConfig
 
     return MPCConfig(
-        dt=DT,
+        dt=config.dt,
         total_horizon=200,
         fixed_horizon=60,
         replan_interval=20,
@@ -126,8 +124,8 @@ def _build_real_robot_mpc_config() -> "MPCConfig":
         Q_p_scale_near=8.0,
         Q_v_scale_near=120.0,
         normal_weight=500000.0,
-        racket_speed=5.0,
-        max_tcp_speed=1.8,
+        racket_speed=config.target_hit_speed,
+        max_tcp_speed=config.max_tcp_speed,
         is_position_mode=True,
         ablation_mode="full",
         use_backswing=False,
@@ -166,6 +164,7 @@ def build_replan_cfg(
     solver: Any,
     d_hat: np.ndarray,
     v_hit_desired: np.ndarray,
+    config: RealRobotConfig,
 ) -> dict:
     """构建 do_replan 所需的完整配置字典（51 键）。
 
@@ -181,13 +180,14 @@ def build_replan_cfg(
         solver: ILQTSolver 实例。
         d_hat: 期望击球方向单位向量（来球反方向）。
         v_hit_desired: 期望击球时刻末端速度。
+        config: 真机配置（YAML 为唯一真相源）。
 
     Returns:
         replan_cfg dict，可直接传给 AsyncReplanner / do_replan / RealRunner。
     """
-    config = _build_real_robot_mpc_config()
+    mpc_config = _build_real_robot_mpc_config(config)
     replan_cfg = ReplanConfig.from_mpc_config(
-        config,
+        mpc_config,
         robot_limits=robot_limits,
         solver=solver,
         d_hat=d_hat,

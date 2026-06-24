@@ -1,23 +1,32 @@
 # ═══════════════════════════════════════════════════════════════
-# RM-65B 真机部署配置
+# RM-65B 真机测试配置（test_real_robot 脚本专用）
 # ═══════════════════════════════════════════════════════════════
 #
-# 实验时最常调整（按优先级）:
-#   1. [3] safety.collision_stage  — 碰撞灵敏度，首次 5，稳定后降低
-#   2. [3] safety.max_tcp_speed    — TCP 速度限制，0.5→1.0 逐步提高
-#   3. [2] control.control_mode     — "ip"(稳) vs "canfd"(高跟随)
-#   4. [4] position_mode.kp / kd   — PD 增益，跟踪精度
-#   5. [7] perception pos/vel_std  — KF 滤波强度
+# 本文件供 scripts/tools/test_real_robot/ 下的测试脚本使用。
+# 参数全面保守化，适合首次连接、接口验证、安全测试等场景。
 #
-# 标记: ✅=默认可用 | ⚠️=需真机标定 | 📋=参考SDK默认
+# 与生产配置 (real_robot.yaml) 的关键区别:
+#   - max_tcp_speed: 0.3 (生产 1.0) — 测试运动慢，严格限制
+#   - max_qdot:      1.0 (生产 3.14) — 降关节速度上限
+#   - torque_limit:  更低 — 碰撞更软，减少硬件损伤风险
+#   - kp:            更低 — 降刚度，减少冲击
+#   - kd:            更高 — 升阻尼，抑制震荡
+#
+# 测试时最常调整（按优先级）:
+#   1. [1] robot.ip            — 机械臂 IP 地址（左臂/右臂不同）
+#   2. [3] safety.collision_stage — 碰撞误触发频繁时降低
+#   3. [3] safety.max_tcp_speed — 需要更快运动时提高（逐步！）
+#
+# 标记: ✅=默认可用 | ⚠️=需真机标定 | 📋=测试保守值
 # 单位约定: YAML 中关节角度用「度」(与SDK一致)，config.py 自动转弧度
 
 
 # ── [1] 机器人连接 ──────────────────────────────────────────────
 # RM-65B 网口连接，控制器默认 IP:
 #   左臂 192.168.1.18 / 右臂 192.168.1.19 / 端口固定 8080
+# ⚠️ 首次使用必须确认 IP 与实际机械臂一致,先默认使用右臂
 robot:
-  ip: "192.168.1.18"
+  ip: "192.168.1.19"
   port: 8080
 
 
@@ -25,10 +34,11 @@ robot:
 # 真机只支持角度控制（无力矩API）。两种通信方式:
 #   "ip"    → rm_movej_follow()，控制器内部规划，简单稳定
 #   "canfd" → rm_movej_canfd()，透传高跟随，周期须 ≤10ms
+# 📋 测试默认 "ip"（最稳定），验证通信后再试 "canfd"
 control:
   control_mode: "ip"
   dt: 0.005                     # MPC 规划步长（秒），5ms=200Hz
-  target_hit_speed: 1.8         # ⚠️ 期望击球速度 m/s（RealRunner 的 cap 值）
+  target_hit_speed: 1.8         # 📋 期望击球速度 m/s（RealRunner 的 cap 值）
   canfd_trajectory_mode: 1      # canfd专用: 0=透传 1=曲线拟合 2=滤波
   canfd_smooth_radio: 50        # canfd专用: 平滑系数 0-100
 
@@ -38,25 +48,31 @@ control:
 # 三层安全: Layer1=控制器固件 / Layer2=SafetyMonitor软件 / Layer3=急停
 safety:
   # 碰撞检测: 0=关(危险!) ~ 8=最灵敏(易误触发)
-  # 建议: 首次 5，确认无误触发后降至 3-4
-  collision_stage: 5            # ⚠️ 外部碰撞灵敏度 0-8
+  # 📋 测试默认 5（平衡灵敏度与误触发）
+  # 调参: 误触发频繁 → 降至 3-4；需更灵敏 → 升至 6-7
+  collision_stage: 5
   enable_self_collision: true   # ✅ 自碰撞检测（臂段间）
   enable_singularity_avoidance: true  # ✅ 奇异性规避
 
   # 力矩硬限制: 超限时控制器立即停关节
+  # 📋 测试值比生产更低，碰撞更软，减少硬件损伤
   # [关节1~3 肩肘] 力矩大, [关节4~6 腕部] 力矩小
-  torque_limit: [50, 50, 50, 30, 30, 30]  # ⚠️ N·m
+  torque_limit: [30, 30, 30, 20, 20, 20]  # 📋 N·m（生产: 50/50/50/30/30/30）
 
   # TCP 速度/加速度限制（控制器固件 + SafetyMonitor 软件双重检查）
-  max_tcp_speed: 1.0            # ⚠️ 末端最大线速度 m/s
-  max_line_acc: 0.5             # 📋 末端最大线加速度 m/s²
-  max_angular_speed: 0.2        # 📋 末端最大角速度 rad/s
-  max_angular_acc: 1.0          # 📋 末端最大角加速度 rad/s²
+  # 📋 测试默认 0.3 m/s，非常保守
+  # 调参: 先 0.3 验证 → 0.5 → 0.8 逐步提高，切勿直接跳到 1.0+
+  max_tcp_speed: 0.3            # 📋 末端最大线速度 m/s（生产: 1.0）
+  max_line_acc: 0.3             # 📋 末端最大线加速度 m/s²（生产: 0.5）
+  max_angular_speed: 0.1        # 📋 末端最大角速度 rad/s
+  max_angular_acc: 0.5          # 📋 末端最大角加速度 rad/s²
 
-  # 关节速度限制（SafetyMonitor 软件检查）
-  max_qdot: [3.14, 3.14, 3.14, 3.14, 3.14, 3.14]  # ✅ rad/s
+  # 关节速度限制（SafetyMonitor 软件检查 + pre_motion_check 预检）
+  # 📋 测试值 1.0 rad/s ≈ 57°/s，远低于生产 3.14
+  max_qdot: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]  # 📋 rad/s（生产: 3.14）
 
   # 关节位置限制（RM-65B 出厂范围，度）
+  # ⚠️ 此处与生产配置一致（出厂硬限位，不建议修改）
   q_lower: [-180, -270, -150, -180, -115, -180]
   q_upper: [ 180,   90,  150,  180,  115,  180]
 
@@ -64,10 +80,11 @@ safety:
 # ── [4] 位置模式 PD 参数 ──────────────────────────────────────
 # MuJoCo 规划模型用 PD 执行器模拟真机控制器，iLQR 规划 q_desired。
 # kp=刚度(大→准但易震) / kd=阻尼(大→抑震但慢)
+# 📋 测试用更低刚度 + 更高阻尼，运动更柔和
 # 调参: 先调 kd 消除震荡，再调 kp 提高精度
 position_mode:
-  kp: [200, 200, 100, 50, 50, 20]   # ⚠️ N·m/rad
-  kd: [20, 20, 10, 5, 5, 2]         # ⚠️ N·m·s/rad
+  kp: [100, 100, 50, 30, 30, 10]   # 📋 N·m/rad（生产: 200/200/100/50/50/20）
+  kd: [30, 30, 15, 8, 8, 3]         # 📋 N·m·s/rad（生产: 20/20/10/5/5/2）
   enable_feedforward: true           # ✅ 重力+科氏力前馈补偿
 
 
@@ -82,8 +99,9 @@ joint_zero_offset: [0, 0, 0, 0, 0, 0]  # ⚠️ 弧度
 
 
 # ── [7] 感知配置 ─────────────────────────────────────────────
+# ⚠️ 测试脚本不涉及感知（仅 01~08 接口验证），此节保留用于兼容
 # BallPerceiver: BallSensor → 卡尔曼滤波 → (pos, vel) → MPC
 perception:
   sensor_type: "simulated"      # "simulated" / "optitrack" / "realsense"
-  pos_noise_std: 0.005          # ⚠️ 位置噪声 m（动捕5mm / 深度相机20-50mm）
+  pos_noise_std: 0.005          # ⚠️ 位置噪声 m
   vel_noise_std: 0.1            # ⚠️ 速度噪声 m/s

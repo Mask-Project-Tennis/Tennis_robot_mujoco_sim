@@ -12,6 +12,7 @@ import numpy as np
 import pytest
 
 from src.ilqt.planning_env import PlanningEnv
+from src.real.config import RealRobotConfig
 from src.real.runner_factory import (
     DT,
     INIT_Q,
@@ -27,6 +28,8 @@ from src.ilqt.components.protocols import (
     PerceptionComponent,
     SafetyComponent,
 )
+
+_CFG = RealRobotConfig()
 
 
 def _build_planning_env() -> PlanningEnv:
@@ -79,7 +82,7 @@ def test_sim_perception_obs_gate() -> None:
 def test_predictive_safety_beta_descent() -> None:
     """INIT_Q 位姿 + 限位内 u → 通过安全检查（无需 beta 递降）。"""
     env = _build_planning_env()
-    limits = build_robot_limits(env)
+    limits = build_robot_limits(env, _CFG)
     safety = PredictiveSafetyFilter(env, limits, is_position_mode=True)
     safety.k_hit_remaining = 99  # 无终段豁免，全程施加 qdot/TCP 检查
 
@@ -99,7 +102,7 @@ def test_predictive_safety_emergency_fallback() -> None:
     本测试人为收紧 q_upper 至当前位姿之下，使任何预测都超上限。
     """
     env = _build_planning_env()
-    limits = build_robot_limits(env)
+    limits = build_robot_limits(env, _CFG)
     # 收紧 q 上限：使 INIT_Q 各关节 q 均超出上限 → 任何预测都违反 q upper
     limits.q_upper = np.array([-10.0] * 6)
     safety = PredictiveSafetyFilter(env, limits, is_position_mode=True)
@@ -159,7 +162,7 @@ def test_basic_safety_qdot_violation() -> None:
 def test_components_satisfy_protocols() -> None:
     """所有组件满足对应的 @runtime_checkable Protocol。"""
     env = _build_planning_env()
-    limits = build_robot_limits(env)
+    limits = build_robot_limits(env, _CFG)
 
     assert isinstance(SimPerception(env), PerceptionComponent)
     assert isinstance(

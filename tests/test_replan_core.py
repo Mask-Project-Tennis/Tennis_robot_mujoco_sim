@@ -17,6 +17,7 @@ from src.ilqt.async_replanner import AsyncReplanner, PlanRequest
 from src.ilqt.planning_env import PlanningEnv
 from src.ilqt.replan_core import do_replan
 from src.ilqt.tube_types import ReplanState
+from src.real.config import RealRobotConfig
 from src.real.runner_factory import (
     DT,
     INIT_Q,
@@ -27,6 +28,9 @@ from src.real.runner_factory import (
     build_robot_limits,
     build_solver,
 )
+
+_CFG = RealRobotConfig()
+
 
 def _build_env() -> PlanningEnv:
     """构建位置模式 PlanningEnv（左臂位姿已设置）。"""
@@ -60,9 +64,9 @@ def _build_planning_setup(
     )
     v_hit_desired = 1.8 * d_hat
 
-    robot_limits = build_robot_limits(env)
+    robot_limits = build_robot_limits(env, _CFG)
     solver = build_solver()
-    cfg = build_replan_cfg(env, robot_limits, solver, d_hat, v_hit_desired)
+    cfg = build_replan_cfg(env, robot_limits, solver, d_hat, v_hit_desired, _CFG)
 
     # 创建 env_plan（独立 MjData，由 AsyncReplanner 延迟构建）
     model_path = Path(__file__).resolve().parent.parent / "src" / "robot" / "rm65_model.xml"

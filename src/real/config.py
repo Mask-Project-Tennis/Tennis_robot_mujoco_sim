@@ -26,6 +26,7 @@ class RealRobotConfig:
     # ── [2] 控制模式 ──
     control_mode: str = "ip"
     dt: float = 0.005
+    target_hit_speed: float = 1.8
     canfd_trajectory_mode: int = 1
     canfd_smooth_radio: int = 50
 

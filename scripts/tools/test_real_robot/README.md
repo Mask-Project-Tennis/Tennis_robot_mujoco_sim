@@ -8,14 +8,17 @@
 2. **运动脚本**（04+）：物理急停按钮必须**在手边**
 3. **Ctrl+C**：所有运动脚本中 `Ctrl+C` = **缓停**（`rm_set_arm_slow_stop`），不是直接退出
 4. **确认机制**：运动类脚本需要手动输入 `YES` 才会执行
-5. **安全预检**：默认启用限位+自碰撞+奇异性检查，`--no-algo-check` 可跳过
+5. **安全预检**：默认启用限位+自碰撞+奇异性检查，`--no-algo-check` 可跳过后两项。TCP 速度由控制器固件强制限制
 6. **渐进步进**：先低速验证 → 再逐步提高
 
 ## 快速开始
 
 ```bash
-# 0. 修改配置文件中的 IP 地址
-vim configs/real_robot.yaml
+# 0. 配置文件（二选一）
+#    测试专用（保守参数，推荐首次使用）: configs/real_robot_test.yaml
+#    生产参数: configs/real_robot.yaml
+#    详细说明见 CONFIG.md
+vim configs/real_robot_test.yaml   # 至少修改 robot.ip 为你的机械臂 IP
 
 # 1. 验证连接（零风险）
 python scripts/tools/test_real_robot/01_connect_disconnect.py
@@ -42,16 +45,31 @@ python scripts/tools/test_real_robot/07_emergency_stop.py
 python scripts/tools/test_real_robot/08_full_motion_test.py --joint 1 --amplitude 5
 ```
 
+## 配置文件
+
+测试脚本默认加载 `configs/real_robot_test.yaml`（保守参数）。
+完整字段说明和调参建议见 **[CONFIG.md](./CONFIG.md)**。
+
+| 文件 | 用途 | `max_tcp_speed` | `max_qdot` | `torque_limit` |
+|------|------|-----------------|------------|-----------------|
+| `real_robot_test.yaml` | 测试默认（保守） | 0.3 m/s | 1.0 rad/s | 30/30/30/20/20/20 |
+| `real_robot.yaml` | MPC 生产部署 | 1.0 m/s | 3.14 rad/s | 50/50/50/30/30/30 |
+
+通过 `--config` 参数可切换配置文件：
+```bash
+python scripts/tools/test_real_robot/04_send_zero_pose.py --config configs/real_robot.yaml
+```
+
 ## 脚本清单
 
 ### 只读测试（零风险）
 
 | 脚本 | 说明 | 关键 SDK API |
 |------|------|-------------|
-| `01_connect_disconnect.py` | 连接→安全配置→读角度→断开 | `rm_create_robot_arm` / `rm_get_joint_degree` / `rm_delete_robot_arm` |
+| `01_connect_disconnect.py` | 连接→安全配置→读角度→读固件版本→断开 | `rm_create_robot_arm` / `rm_get_joint_degree` / `rm_get_arm_software_info` / `rm_delete_robot_arm` |
 | `02_read_joints.py` | 持续表格显示角度/速度（20Hz） | `rm_get_joint_degree`（数值微分速度） |
 | `03_read_temperature.py` | 持续表格显示温度/电压/电流 | `rm_get_current_joint_temperature` / `_voltage` / `_current` |
-| `06_safety_config_verify.py` | 读回安全参数，验证 `_configure_safety()` 是否生效 | `rm_get_collision_stage` / `rm_get_self_collision_enable` / ... |
+| `06_safety_config_verify.py` | 读回安全参数，验证 `_configure_safety()` 是否生效 | `rm_get_collision_stage` / `rm_get_self_collision_enable` / `rm_get_avoid_singularity_mode` / `rm_get_controller_torque_limit` |
 
 ### 运动测试
 
@@ -62,34 +80,57 @@ python scripts/tools/test_real_robot/08_full_motion_test.py --joint 1 --amplitud
 | `07_emergency_stop.py` | 中 | 缓停+急停测试 | `rm_set_arm_slow_stop` / `rm_set_arm_stop` |
 | `08_full_motion_test.py` | 中 | 小幅正弦波运动（可配置关节/幅度/周期） | `rm_movej_follow` 连续发送 |
 
+### 公共参数
+
+所有脚本通过 `_connect.py` 共享以下 CLI 参数：
+
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `--config PATH` | 配置文件路径 | `configs/real_robot_test.yaml`（不存在时回退 `real_robot.yaml`） |
+| `--no-algo-check` | 跳过 SDK Algo 自碰撞/奇异性检查 | False |
+| `--hz FLOAT` | 发送/刷新频率 | 脚本特定（见下文） |
+
 ### 运动脚本参数详解
+
+#### 04_send_zero_pose.py
+
+```bash
+python scripts/tools/test_real_robot/04_send_zero_pose.py                          # 默认 1s 到达
+python scripts/tools/test_real_robot/04_send_zero_pose.py --duration 2.0           # 2秒到达
+python scripts/tools/test_real_robot/04_send_zero_pose.py --hz 50                  # 50Hz 发送
+python scripts/tools/test_real_robot/04_send_zero_pose.py --no-algo-check          # 跳过碰撞检查
+```
 
 #### 05_send_joint_command.py
 
 ```bash
 # 方式 1: 度数（推荐日常使用）
-python 05_send_joint_command.py --deg 0 30 -15 0 5 0
+python scripts/tools/test_real_robot/05_send_joint_command.py --deg 0 30 -15 0 5 0
 
 # 方式 2: 弧度
-python 05_send_joint_command.py --rad 0.0 0.524 -0.262 0 0.087 0
+python scripts/tools/test_real_robot/05_send_joint_command.py --rad 0.0 0.524 -0.262 0 0.087 0
 
 # 方式 3: 交互式（不传参数）
-python 05_send_joint_command.py
+python scripts/tools/test_real_robot/05_send_joint_command.py
 # 逐个输入 J1~J6 角度（度），回车保持当前值
 
 # 可选参数
-python 05_send_joint_command.py --deg 0 30 0 0 0 0 --duration 2.0  # 2秒到达
-python 05_send_joint_command.py --deg 0 30 0 0 0 0 --no-algo-check  # 跳过碰撞检查
+python scripts/tools/test_real_robot/05_send_joint_command.py --deg 0 30 0 0 0 0 --duration 2.0  # 2秒到达
+python scripts/tools/test_real_robot/05_send_joint_command.py --deg 0 30 0 0 0 0 --hz 50         # 50Hz 发送
+python scripts/tools/test_real_robot/05_send_joint_command.py --deg 0 30 0 0 0 0 --no-algo-check # 跳过碰撞检查
 ```
 
 #### 08_full_motion_test.py
 
 ```bash
-# 默认: J1 ±5°, 周期2s, 持续10s
-python 08_full_motion_test.py
+# 默认: J1 ±5°, 周期2s, 持续10s, 100Hz
+python scripts/tools/test_real_robot/08_full_motion_test.py
 
 # J2 ±10°, 周期3s, 持续20s
-python 08_full_motion_test.py --joint 2 --amplitude 10 --period 3 --duration 20
+python scripts/tools/test_real_robot/08_full_motion_test.py --joint 2 --amplitude 10 --period 3 --duration 20
+
+# 跳过碰撞检查
+python scripts/tools/test_real_robot/08_full_motion_test.py --no-algo-check
 ```
 
 ## 公共模块
@@ -99,7 +140,8 @@ python 08_full_motion_test.py --joint 2 --amplitude 10 --period 3 --duration 20
 | 函数 | 功能 |
 |------|------|
 | `load_and_connect(config_path)` | 加载 YAML → 创建 RobotInterface → 连接 → 配置安全参数 |
-| `pre_motion_check(ri, monitor, q_desired, algo)` | 限位+自碰撞+奇异性预检 |
+| `load_config(config_path)` | 加载 YAML → 返回 RealRobotConfig |
+| `pre_motion_check(ri, monitor, q_desired, arm_state, algo)` | 限位+自碰撞+奇异性预检 |
 | `init_algo()` | SDK Algo 类初始化（球拍包络球配置） |
 | `safe_disconnect(ri)` | 缓停 + 断开连接 |
 | `add_config_arg(parser)` | argparse 添加 `--config` 参数 |
@@ -111,10 +153,11 @@ python 08_full_motion_test.py --joint 2 --amplitude 10 --period 3 --duration 20
 
 | # | 检查项 | 来源 | 可跳过 |
 |---|--------|------|--------|
-| 1 | 关节位置限位 `q_lower ≤ q ≤ q_upper` | SafetyMonitor | ❌ 不可跳过 |
-| 2 | 关节速度限位 `\|qdot\| ≤ max_qdot` | SafetyMonitor | ❌ 不可跳过 |
-| 3 | 自碰撞检测 | SDK Algo (`rm_algo_safety_robot_self_collision_detection`) | ✅ `--no-algo-check` |
-| 4 | 奇异性检测 | SDK Algo (`rm_algo_kin_robot_singularity_analyse`) | ✅ `--no-algo-check` |
+| 1 | SafetyMonitor 限位检查（关节位置 + 关节速度） | `safety_monitor.py` `is_safe()` | ❌ 不可跳过 |
+| 2 | 自碰撞检测 | SDK Algo (`rm_algo_safety_robot_self_collision_detection`) | ✅ `--no-algo-check` |
+| 3 | 奇异性检测 | SDK Algo (`rm_algo_kin_robot_singularity_analyse`) | ✅ `--no-algo-check` |
+
+> TCP 速度由控制器固件 Layer 1（`rm_set_arm_max_line_speed`，连接时 `_configure_safety()` 下发）强制限制，不在 `pre_motion_check` 中重复检查。
 
 ## 常见问题
 
@@ -125,7 +168,8 @@ python 08_full_motion_test.py --joint 2 --amplitude 10 --period 3 --duration 20
 ```
 
 **排查**：
-- 机械臂 IP 是否正确？检查 `configs/real_robot.yaml` 中 `robot.ip`
+- 机械臂 IP 是否正确？检查 `configs/real_robot_test.yaml` 中 `robot.ip`
+  - 左臂 `192.168.1.18` / 右臂 `192.168.1.19`
 - 网线是否连接？`ping 192.168.1.18`
 - Realman SDK 是否安装？`pip install Robotic_Arm`
 - 机械臂是否已开机？控制器指示灯应为绿色

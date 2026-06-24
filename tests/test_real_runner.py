@@ -35,6 +35,9 @@ from src.real.safety_monitor import SafetyMonitor
 
 logger = logging.getLogger(__name__)
 
+_CFG = RealRobotConfig()
+_CFG.max_tcp_speed = 10.0  # 测试用宽松 TCP（安全测试走 _force_unsafe）
+
 
 def _build_test_runner(
     ball_pos: np.ndarray | None = None,
@@ -82,7 +85,7 @@ def _build_test_runner(
     perceiver.update()  # 第二次：有限差分得真实速度，KF 滤波
 
     # 5. 安全监控（限位与规划器 RobotLimits 含裕度一致，避免边界抖动误判）
-    robot_limits_pre = build_robot_limits(env)
+    robot_limits_pre = build_robot_limits(env, _CFG)
     safety_cfg = RealRobotConfig()
     safety_cfg.q_lower = robot_limits_pre.q_lower.copy()
     safety_cfg.q_upper = robot_limits_pre.q_upper.copy()
@@ -101,7 +104,7 @@ def _build_test_runner(
     # 7. 规划配置
     robot_limits = robot_limits_pre
     solver = build_solver()
-    replan_cfg = build_replan_cfg(env, robot_limits, solver, d_hat, v_hit_desired)
+    replan_cfg = build_replan_cfg(env, robot_limits, solver, d_hat, v_hit_desired, _CFG)
 
     # 8. 重规划状态
     replan_state = ReplanState(
