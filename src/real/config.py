@@ -98,11 +98,18 @@ class RealRobotConfig:
 
         return cls(**cls._flatten(data))
 
+    # YAML section 内短键名 → dataclass 字段名的映射
+    _YAML_ALIASES = {"ip": "robot_ip", "port": "robot_port"}
+
     @staticmethod
     def _flatten(data: dict[str, Any]) -> dict[str, Any]:
         """将嵌套 YAML 展平为 dataclass kwargs。
 
-        仅保留 dataclass 已定义的字段名，忽略未知键。
+        处理三种 YAML 结构:
+        1. 嵌套 section（dict）: 内层 key 经 _YAML_ALIASES 映射后匹配字段名
+        2. 顶层标量/列表: 若 key 本身（或经别名映射）匹配字段名则直接采用
+        3. 忽略所有不匹配的键
+
         q_lower/q_upper 在 YAML 中为度，此处自动转弧度。
 
         Args:
@@ -114,16 +121,30 @@ class RealRobotConfig:
         valid_names = {f.name for f in fields(RealRobotConfig)}
         ndarray_keys = {"max_qdot", "M_diag", "joint_zero_offset"}
         degree_keys = {"q_lower", "q_upper"}
+
+        def _map_key(k: str) -> str:
+            """YAML 短键名 → dataclass 字段名（无别名则原样返回）。"""
+            return RealRobotConfig._YAML_ALIASES.get(k, k)
+
+        def _store(kwargs: dict[str, Any], raw_key: str, value: Any) -> None:
+            """尝试将 (raw_key, value) 存入 kwargs，处理别名/类型转换。"""
+            k = _map_key(raw_key)
+            if k not in valid_names:
+                return
+            if k in degree_keys and isinstance(value, list):
+                kwargs[k] = np.radians(np.array(value, dtype=np.float64))
+            elif k in ndarray_keys and isinstance(value, list):
+                kwargs[k] = np.array(value, dtype=np.float64)
+            else:
+                kwargs[k] = value
+
         kwargs: dict[str, Any] = {}
-        for section in data.values():
-            if isinstance(section, dict):
-                for k, v in section.items():
-                    if k not in valid_names:
-                        continue
-                    if k in degree_keys and isinstance(v, list):
-                        kwargs[k] = np.radians(np.array(v, dtype=np.float64))
-                    elif k in ndarray_keys and isinstance(v, list):
-                        kwargs[k] = np.array(v, dtype=np.float64)
-                    else:
-                        kwargs[k] = v
+        for top_key, top_value in data.items():
+            if isinstance(top_value, dict):
+                # 嵌套 section: 遍历内层 key-value
+                for k, v in top_value.items():
+                    _store(kwargs, k, v)
+            else:
+                # 顶层标量/列表: key 本身可能匹配字段名
+                _store(kwargs, top_key, top_value)
         return kwargs

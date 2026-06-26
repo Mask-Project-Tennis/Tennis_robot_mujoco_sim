@@ -15,7 +15,7 @@ build/
 experiment_data/
 figures/
 paper/
-reference/
+/reference/
 plans/
 .codegraph/
 MJMODEL.TXT

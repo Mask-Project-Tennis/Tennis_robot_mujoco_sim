@@ -23,6 +23,9 @@ vim configs/real_robot_test.yaml   # 至少修改 robot.ip 为你的机械臂 IP
 # 1. 验证连接（零风险）
 python scripts/tools/test_real_robot/01_connect_disconnect.py
 
+# 1b. 验证固件版本 + 查询 API 可靠性（零风险，固件升级后必跑）
+python scripts/tools/test_real_robot/01b_firmware_api_verify.py
+
 # 2. 持续读关节角度（零风险）
 python scripts/tools/test_real_robot/02_read_joints.py
 
