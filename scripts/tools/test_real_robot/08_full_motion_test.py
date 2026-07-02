@@ -84,7 +84,7 @@ def main():
 
     # 3. YES 确认
     confirm = input("\n即将开始正弦波运动，输入 YES 确认: ")
-    if confirm != "YES":
+    if confirm.strip().upper() != "YES":
         print("已取消")
         safe_disconnect(ri)
         return

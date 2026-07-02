@@ -129,15 +129,16 @@ def init_algo():
 
         algo = Algo(rm_robot_arm_model_e.RM_MODEL_RM_65_E, rm_force_type_e.RM_MODEL_RM_B_E)
 
-        # 配置球拍工具包络球（粗略估计）
+        # 配置球拍工具包络球
         # 球拍: 手柄长 25cm + 拍面 12cm，沿 Z 轴
         # 球 0: 法兰中心，球 1: 手柄中部，球 2: 拍面中心
+        # ponytail: radius 0.07 ≈ 拍面半宽，包络略保守但不至于 2x 过大导致误报
         try:
             from Robotic_Arm.rm_robot_interface import rm_tool_sphere_t
             spheres = [
                 rm_tool_sphere_t(x=0, y=0, z=0.0, radius=0.03),
                 rm_tool_sphere_t(x=0, y=0, z=0.12, radius=0.02),
-                rm_tool_sphere_t(x=0, y=0, z=0.25, radius=0.13),
+                rm_tool_sphere_t(x=0, y=0, z=0.25, radius=0.07),
             ]
             for i, s in enumerate(spheres):
                 algo.rm_algo_set_tool_envelope(i, s)
@@ -155,13 +156,22 @@ def pre_motion_check(
     q_desired: np.ndarray,
     arm_state: np.ndarray = None,
     algo=None,
+    n_path_samples: int = 15,
+    check_singularity: bool = False,
 ) -> tuple[bool, str]:
     """运动前安全预检。
 
     检查项（按顺序）:
       1. SafetyMonitor 限位检查（关节位置 + 关节速度）
-      2. SDK Algo 自碰撞检测（algo 非 None 时）
-      3. SDK Algo 奇异性检测（algo 非 None 时）
+      2. SDK Algo 自碰撞检测（沿插值路径采样 n_path_samples 个点）
+      3. SDK Algo 奇异性检测（仅 check_singularity=True 时）
+
+    采样策略：从当前位姿到目标位姿均匀插值（含两端），
+    任一采样点触发碰撞即拒绝。避免只查终点导致误判。
+
+    奇异性默认关闭的原因：测试脚本使用 rm_movej_follow（关节空间运动），
+    不经过逆运动学，奇异性不影响控制。控制器固件 Layer 1 的奇异性规避
+    （rm_set_avoid_singularity_mode）始终独立生效，与预检无关。
 
     TCP 速度限制由控制器固件 Layer 1（rm_set_arm_max_line_speed）强制执行，
     不在预检中重复检查。
@@ -172,6 +182,8 @@ def pre_motion_check(
         q_desired: (6,) 目标关节角度，弧度。
         arm_state: (12,) 当前臂状态 [q, qdot]。None 时从 ri 读取。
         algo: Algo 实例。None 时跳过碰撞/奇异性检查。
+        n_path_samples: 路径采样点数（含两端，默认 15）。
+        check_singularity: 是否检测奇异性（默认 False，仅笛卡尔空间运动需要）。
 
     Returns:
         (is_safe, message) — 是否通过，原因说明。
@@ -183,24 +195,32 @@ def pre_motion_check(
     if not monitor.is_safe(arm_state, q_desired):
         return False, "❌ 限位检查未通过（关节位置/速度超限）"
 
-    # 2. SDK Algo 自碰撞检测
+    # 2. SDK Algo 自碰撞检测（路径采样）；奇异性仅按需检查
     if algo is not None:
-        q_deg = np.degrees(q_desired).tolist()
-        try:
-            ret = algo.rm_algo_safety_robot_self_collision_detection(q_deg)
-            if ret == 1:
-                return False, "❌ 自碰撞风险"
-        except Exception:
-            pass
+        q_current = arm_state[:6]
+        for alpha in np.linspace(0.0, 1.0, n_path_samples):
+            q_sample = q_current * (1 - alpha) + q_desired * alpha
+            q_deg = np.degrees(q_sample).tolist()
 
-        # 3. SDK Algo 奇异性检测
-        try:
-            ret, dist = algo.rm_algo_kin_robot_singularity_analyse(q_deg)
-            if ret != 0:
-                codes = {0: "正常", -1: "肩部奇异", -2: "肘部奇异", -3: "腕部奇异"}
-                return False, f"❌ 奇异性风险 ({codes.get(ret, f'code={ret}')}, dist={dist:.3f}m)"
-        except Exception:
-            pass
+            # 自碰撞检测（始终执行）
+            try:
+                ret = algo.rm_algo_safety_robot_self_collision_detection(q_deg)
+                if ret == 1:
+                    pct = alpha * 100
+                    return False, f"❌ 自碰撞风险（路径 {pct:.0f}% 处）"
+            except Exception:
+                pass
+
+            # 奇异性检测（仅笛卡尔空间运动需要）
+            if check_singularity:
+                try:
+                    ret, dist = algo.rm_algo_kin_robot_singularity_analyse(q_deg)
+                    if ret != 0:
+                        codes = {0: "正常", -1: "肩部奇异", -2: "肘部奇异", -3: "腕部奇异"}
+                        pct = alpha * 100
+                        return False, f"❌ 奇异性风险 ({codes.get(ret, f'code={ret}')}, 路径 {pct:.0f}% 处)"
+                except Exception:
+                    pass
 
     return True, "✅ 预检通过"
 

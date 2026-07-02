@@ -102,7 +102,7 @@ def main():
 
     # 4. YES 确认
     confirm = input("\n即将发送关节角度，输入 YES 确认: ")
-    if confirm != "YES":
+    if confirm.strip().upper() != "YES":
         print("已取消")
         safe_disconnect(ri)
         return

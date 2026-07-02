@@ -3,15 +3,14 @@
 
 流程:
   1. 连接 + 回零位（小幅运动到测试起点）
-  2. 发送缓慢运动（关节1 匀速旋转）
+  2. 发送缓慢运动（关节6 匀速旋转）
   3. 运动中按 Ctrl+C 触发缓停 → 验证机械臂平滑停止
-  4. 重新连接后测试急停（rm_set_arm_stop，不可恢复）
+  4. 缓停测试后交互式询问是否继续急停测试（rm_set_arm_stop，不可恢复）
 
 ⚠️ 急停测试后机械臂需要手动复位（重新上电或软件复位）。
 
 用法:
-    python 07_emergency_stop.py                    # 仅缓停测试（推荐首次）
-    python 07_emergency_stop.py --test-estop       # 包含急停测试（需确认）
+    python 07_emergency_stop.py                    # 缓停测试 + 交互式询问急停
 
 中风险: 有实际运动。Ctrl+C 缓停。
 """
@@ -39,7 +38,7 @@ def test_slow_stop(ri):
     print("也可以随时按 Ctrl+C 提前缓停。")
 
     confirm = input("\n输入 YES 开始缓停测试: ")
-    if confirm != "YES":
+    if confirm.strip().upper() != "YES":
         print("已跳过缓停测试")
         return
 
@@ -57,7 +56,7 @@ def test_slow_stop(ri):
         while time.time() - t0 < t_max:
             t = time.time() - t0
             q = q_start.copy()
-            q[0] += np.radians(5.0) * np.sin(2 * np.pi * 0.2 * t)
+            q[5] += np.radians(5.0) * np.sin(2 * np.pi * 0.2 * t)
             ri.send_joint_command(q)
             time.sleep(dt)
 
@@ -85,7 +84,7 @@ def test_slow_stop(ri):
         time.sleep(0.01)
 
 
-def test_emergency_stop(ri, config):
+def test_emergency_stop(ri):
     """测试急停：rm_set_arm_stop。
 
     ⚠️ 急停后机械臂不可软件恢复，需要重新连接或手动复位。
@@ -93,15 +92,6 @@ def test_emergency_stop(ri, config):
     print("\n" + "=" * 50)
     print("测试 2: 急停 (rm_set_arm_stop)")
     print("=" * 50)
-    print("\n⚠️ 警告: 急停后机械臂不可软件恢复!")
-    print("  - rm_set_arm_stop 会立即停止所有关节")
-    print("  - 测试后需要重新连接或手动复位")
-    print("  - 确保物理急停按钮在手边")
-
-    confirm = input("\n⚠️ 确认要测试急停？输入 YES: ")
-    if confirm != "YES":
-        print("已跳过急停测试")
-        return
 
     # 缓慢运动
     state = ri.get_arm_state()
@@ -114,7 +104,7 @@ def test_emergency_stop(ri, config):
         while time.time() - t0 < 3.0:
             t = time.time() - t0
             q = q_start.copy()
-            q[0] += np.radians(5.0) * np.sin(2 * np.pi * 0.2 * t)
+            q[5] += np.radians(5.0) * np.sin(2 * np.pi * 0.2 * t)
             ri.send_joint_command(q)
             time.sleep(dt)
     except KeyboardInterrupt:
@@ -133,24 +123,32 @@ def main():
 
     parser = argparse.ArgumentParser(description="RM-65B 缓停/急停测试（中风险）")
     add_config_arg(parser)
-    parser.add_argument("--test-estop", action="store_true",
-                        help="包含急停测试（rm_set_arm_stop，不可恢复）")
     args = parser.parse_args()
 
     ri, config = load_and_connect(args.config)
 
-    # 缓停测试
-    test_slow_stop(ri)
+    try:
+        # 缓停测试
+        test_slow_stop(ri)
 
-    # 急停测试（可选）
-    if args.test_estop:
-        test_emergency_stop(ri, config)
+        # 急停测试（交互式确认）
+        print("\n" + "=" * 50)
+        print("缓停测试完成，是否继续急停测试？")
+        print("=" * 50)
+        print("\n⚠️ 警告: 急停 (rm_set_arm_stop) 后机械臂不可软件恢复!")
+        print("  - rm_set_arm_stop 会立即停止所有关节")
+        print("  - 测试后需要重新连接或手动复位")
+        print("  - 确保物理急停按钮在手边")
 
-    print("\n" + "=" * 50)
-    print("测试完成")
-    print("=" * 50)
+        confirm = input("\n输入 YES 继续急停测试，回车或其他跳过: ")
+        if confirm.strip().upper() == "YES":
+            test_emergency_stop(ri)
 
-    safe_disconnect(ri)
+        print("\n" + "=" * 50)
+        print("测试完成")
+        print("=" * 50)
+    finally:
+        safe_disconnect(ri)
 
 
 if __name__ == "__main__":
