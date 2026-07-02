@@ -73,6 +73,10 @@ python scripts/tools/test_real_robot/04_send_zero_pose.py --config configs/real_
 | `02_read_joints.py` | 持续表格显示角度/速度（20Hz） | `rm_get_joint_degree`（数值微分速度） |
 | `03_read_temperature.py` | 持续表格显示温度/电压/电流 | `rm_get_current_joint_temperature` / `_voltage` / `_current` |
 | `06_safety_config_verify.py` | 读回安全参数，验证 `_configure_safety()` 是否生效 | `rm_get_collision_stage` / `rm_get_self_collision_enable` / `rm_get_avoid_singularity_mode` / `rm_get_controller_torque_limit` |
+| `09_algo_fk_ik_verify.py` | Algo FK/IK 与 MuJoCo PlanningEnv 对比 | `rm_algo_forward_kinematics` / `inverse_kinematics` / DH 参数 |
+| `10_algo_safety_verify.py` | Algo 自碰撞/奇异检测验证 | `rm_algo_safety_robot_self_collision_detection` / `rm_algo_kin_robot_singularity_analyse` |
+| `11_joint_config_query.py` | 关节级/驱动级限位 + 使能/错误/里程计 | `rm_get_joint_max_pos/speed/acc` / `rm_get_joint_drive_max_*` / `rm_get_joint_en_state` / `rm_get_joint_err_flag` / `rm_get_joint_odom` |
+| `12_system_info_query.py` | 运行模式/控制器/电源/安装姿态/版本 | `rm_get_arm_run_mode` / `rm_get_controller_state` / `rm_get_robot_info` / `rm_get_install_pose` |
 
 ### 运动测试
 
@@ -82,6 +86,7 @@ python scripts/tools/test_real_robot/04_send_zero_pose.py --config configs/real_
 | `05_send_joint_command.py` | 中 | 发送任意角度（`--deg`/`--rad`/交互式） | `rm_movej_follow` |
 | `07_emergency_stop.py` | 中 | 缓停+急停测试 | `rm_set_arm_slow_stop` / `rm_set_arm_stop` |
 | `08_full_motion_test.py` | 中 | 小幅正弦波运动（可配置关节/幅度/周期） | `rm_movej_follow` 连续发送 |
+| `13_plan_speed_test.py` | 微 | 规划速度缩放测试 | `rm_set_plan_speed` / `rm_movej` |
 
 ### 公共参数
 
