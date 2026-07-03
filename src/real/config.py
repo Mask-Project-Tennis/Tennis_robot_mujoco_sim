@@ -48,12 +48,12 @@ class RealRobotConfig:
     )
     q_lower: np.ndarray = field(
         default_factory=lambda: np.radians(
-            np.array([-180.0, -270.0, -150.0, -180.0, -115.0, -180.0])
+            np.array([-175.0, -270.0, -130.0, -175.0, -115.0, -180.0])
         )
     )
     q_upper: np.ndarray = field(
         default_factory=lambda: np.radians(
-            np.array([180.0, 90.0, 150.0, 180.0, 115.0, 180.0])
+            np.array([175.0, 90.0, 130.0, 175.0, 115.0, 180.0])
         )
     )
 

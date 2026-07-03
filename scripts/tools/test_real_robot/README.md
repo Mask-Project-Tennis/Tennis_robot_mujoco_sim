@@ -87,6 +87,8 @@ python scripts/tools/test_real_robot/04_send_zero_pose.py --config configs/real_
 | `07_emergency_stop.py` | 中 | 缓停+急停测试 | `rm_set_arm_slow_stop` / `rm_set_arm_stop` |
 | `08_full_motion_test.py` | 中 | 小幅正弦波运动（可配置关节/幅度/周期） | `rm_movej_follow` 连续发送 |
 | `13_plan_speed_test.py` | 微 | 规划速度缩放测试 | `rm_set_plan_speed` / `rm_movej` |
+| `14_velocity_passthrough.py` | 中 | 速度透传方向/停止延迟测试（⚠️ 已排除，方向偏移 ~77°） | `rm_movev_canfd` |
+| `15_joint_management_write.py` | 中 | 关节管理写操作（⏭️ 跳过测试，MPC 不需要） | `rm_set_joint_clear_err` / `rm_clear_joint_odom` / `rm_set_install_pose` |
 
 ### 公共参数
 

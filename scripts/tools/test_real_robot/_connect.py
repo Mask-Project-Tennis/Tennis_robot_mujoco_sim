@@ -4,6 +4,7 @@
 """
 
 import argparse
+import logging
 import sys
 from pathlib import Path
 
@@ -136,14 +137,14 @@ def init_algo():
         try:
             from Robotic_Arm.rm_robot_interface import rm_tool_sphere_t
             spheres = [
-                rm_tool_sphere_t(x=0, y=0, z=0.0, radius=0.03),
-                rm_tool_sphere_t(x=0, y=0, z=0.12, radius=0.02),
-                rm_tool_sphere_t(x=0, y=0, z=0.25, radius=0.07),
+                rm_tool_sphere_t(centrePoint=(0, 0, 0.0), radius=0.03),
+                rm_tool_sphere_t(centrePoint=(0, 0, 0.12), radius=0.02),
+                rm_tool_sphere_t(centrePoint=(0, 0, 0.25), radius=0.07),
             ]
             for i, s in enumerate(spheres):
                 algo.rm_algo_set_tool_envelope(i, s)
-        except Exception:
-            pass
+        except Exception as e:
+            logging.warning("包络球配置失败（自碰撞检测将仅保护法兰区域）: %s", e)
 
         return algo
     except ImportError:
