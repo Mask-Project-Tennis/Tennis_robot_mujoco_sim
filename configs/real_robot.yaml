@@ -22,16 +22,11 @@ robot:
   port: 8080
 
 
-# ── [2] 控制模式 ───────────────────────────────────────────────
-# 真机只支持角度控制（无力矩API）。两种通信方式:
-#   "ip"    → rm_movej_follow()，控制器内部规划，简单稳定
-#   "canfd" → rm_movej_canfd()，透传高跟随，周期须 ≤10ms
+# ── [2] 控制参数 ───────────────────────────────────────────────
+# 真机使用 rm_movej_follow() 关节跟随控制（canfd 速度透传已排除）
 control:
-  control_mode: "ip"
   dt: 0.005                     # MPC 规划步长（秒），5ms=200Hz
   target_hit_speed: 1.8         # ⚠️ 期望击球速度 m/s（RealRunner 的 cap 值）
-  canfd_trajectory_mode: 1      # canfd专用: 0=透传 1=曲线拟合 2=滤波
-  canfd_smooth_radio: 50        # canfd专用: 平滑系数 0-100
 
 
 # ── [3] 控制器安全配置（Layer 1，连接时自动下发）─────────────

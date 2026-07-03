@@ -22,6 +22,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -232,6 +233,9 @@ class RealRunner:
                 "reason": "already_done",
             }
 
+        # 0. 节奏控制：记录 tick 起始时间
+        self._timer.tick_start()
+
         # 1. 读球
         self._perceiver.update()
         filtered = self._perceiver.get_latest_filtered()
@@ -337,6 +341,11 @@ class RealRunner:
         if self._step_count >= self._max_steps:
             self._done = True
             logger.info("RealRunner: 达到最大步数 %d，结束 episode", self._max_steps)
+
+        # 8. 节奏控制：sleep 补偿至目标 dt
+        sleep_dt = self._timer.tick_end()
+        if sleep_dt > 0:
+            time.sleep(sleep_dt)
 
         return {
             "u_cmd": u_cmd,

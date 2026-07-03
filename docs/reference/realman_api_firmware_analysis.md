@@ -786,3 +786,44 @@ Script 15 (`15_joint_management_write.py`) 测试 6 个关节管理写操作：
 
 **跳过理由**：全部为维护/恢复类接口，不在 MPC 控制回路中。需要时可用示教器手动操作，
 无需代码层面验证。脚本已归档至 main 分支供未来参考。
+
+---
+
+## 14. MuJoCo `racket_center` 25mm FK 偏差标定（待修复）
+
+> 日期：2026-07-03 · 来源：脚本 09 Algo FK/IK 验证（§8）
+
+### 14.1 问题
+
+脚本 09 发现 Algo SDK FK 参考点比 MuJoCo `r_flange` 沿法兰 Z 轴多 25mm。
+这意味着 `PlanningEnv.get_ee_pos()`（MuJoCo `site_xpos[racket_center]`）
+与真机实际拍面中心存在 25mm 系统偏差。
+
+### 14.2 影响链
+
+```
+MPC 代价函数用 MuJoCo FK 评估 "拍面是否对准球"
+→ MuJoCo 认为拍面在 A 点
+→ 真机执行同样关节角，实际拍面在 A+25mm 点
+→ 系统性偏差 25mm，占网球有效接触区 60~80% → 可能漏球
+```
+
+### 14.3 推荐修复方案
+
+**方案 A（推荐）**：修改 MuJoCo XML `rm65_model.xml` 中 `racket_center` site
+的 `pos` 属性，沿 Z 轴 +25mm，使模型与真机一致。一次性修复，零代码改动。
+
+**方案 B**：`PlanningEnv.get_ee_pos()` 返回值 +offset。侵入式但精确。
+
+**方案 C**：PlanningEnv 改用 `rm_algo_forward_kinematics`。最准确但破坏
+Jacobian 计算链路，不推荐。
+
+### 14.4 前置条件
+
+标定前需要真机实测数据：
+1. 示教机械臂到已知关节角（如零位）
+2. 用直尺/标定板测量球拍面中心实际位置
+3. 对比 MuJoCo FK 在相同关节角下的世界坐标
+4. 确认偏差方向和精确数值
+
+**状态：⏳ 待真机标定后修复**

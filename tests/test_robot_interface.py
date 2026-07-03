@@ -4,11 +4,10 @@
 - 连接管理
 - 关节角度读取（度→弧度转换）
 - 关节速度数值微分
-- 多模式控制（IP/CANFD）
+- 关节位置指令（rm_movej_follow）
 - 急停/缓停
 """
 
-import time
 from typing import Any
 
 import numpy as np
@@ -34,19 +33,6 @@ class MockRoboticArm:
 
     def rm_movej_follow(self, joint: list[float]) -> int:
         self.calls.append(("movej_follow", list(joint)))
-        self._joint_deg = list(joint)
-        return 0
-
-    def rm_movej_canfd(
-        self,
-        joint: list[float],
-        follow: bool,
-        expand: float = 0,
-        trajectory_mode: int = 0,
-        radio: int = 0,
-    ) -> int:
-        self.calls.append(("movej_canfd", list(joint), follow,
-                           trajectory_mode, radio))
         self._joint_deg = list(joint)
         return 0
 
@@ -162,13 +148,12 @@ class TestRobotInterfaceState:
 
 
 class TestRobotInterfaceControl:
-    """多模式控制测试。"""
+    """关节位置指令测试。"""
 
-    def test_ip_mode_calls_movej_follow(
+    def test_send_joint_command_calls_movej_follow(
         self, mock_arm: MockRoboticArm, config: RealRobotConfig
     ):
-        """IP 模式（默认）下发指令 → 调用 rm_movej_follow，参数为度。"""
-        config.control_mode = "ip"
+        """下发关节指令 → 调用 rm_movej_follow，参数为度。"""
         ri = RobotInterface(config, arm=mock_arm)
         ri.connect()
         q_desired_rad = np.array([0.0, 0.5, -0.3, 0.0, 0.1, 0.0])
@@ -179,24 +164,6 @@ class TestRobotInterfaceControl:
         np.testing.assert_allclose(
             movej_calls[0][1], np.degrees(q_desired_rad), atol=1e-6
         )
-
-    def test_canfd_mode_calls_movej_canfd(
-        self, mock_arm: MockRoboticArm, config: RealRobotConfig
-    ):
-        """CANFD 模式下发指令 → 调用 rm_movej_canfd，follow=True。"""
-        config.control_mode = "canfd"
-        config.canfd_trajectory_mode = 1
-        config.canfd_smooth_radio = 50
-        ri = RobotInterface(config, arm=mock_arm)
-        ri.connect()
-        q_desired_rad = np.array([0.0, 0.5, -0.3, 0.0, 0.1, 0.0])
-        ri.send_joint_command(q_desired_rad)
-
-        canfd_calls = [c for c in mock_arm.calls if c[0] == "movej_canfd"]
-        assert len(canfd_calls) == 1
-        assert canfd_calls[0][2] is True  # follow=True
-        assert canfd_calls[0][3] == 1     # trajectory_mode
-        assert canfd_calls[0][4] == 50    # radio
 
 
 class TestRobotInterfaceSafety:

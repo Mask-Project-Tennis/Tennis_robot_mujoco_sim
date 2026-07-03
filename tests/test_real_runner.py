@@ -10,6 +10,7 @@ import logging
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from src.ilqt.async_replanner import AsyncReplanner
 from src.ilqt.planning_env import PlanningEnv
@@ -123,7 +124,7 @@ def _build_test_runner(
     )
 
     # 10. 自适应定时器
-    timer = AdaptiveTimer(target_hz=200.0)
+    timer = AdaptiveTimer(target_hz=100.0)
 
     return RealRunner(
         env=env,
@@ -217,3 +218,58 @@ class TestRealRunnerEpisodeMode:
         assert isinstance(metrics, dict)
         assert "total_steps" in metrics
         assert "safe_steps" in metrics
+
+
+class TestRealRunnerTimerPacing:
+    """轮 6：step() 通过 AdaptiveTimer 控制节奏。"""
+
+    def test_step_calls_timer_tick_start_and_end(self) -> None:
+        """step() 调用 timer.tick_start() 和 tick_end() 各一次。"""
+        runner = _build_test_runner()
+        runner.start()
+
+        calls: list[str] = []
+        runner._timer.tick_start = lambda: calls.append("start")
+        runner._timer.tick_end = lambda: (calls.append("end"), 0.0)[1]
+
+        runner.step()
+
+        assert calls == ["start", "end"]
+        runner.stop()
+
+    def test_step_sleeps_when_timer_returns_positive(
+        self, monkeypatch
+    ) -> None:
+        """tick_end 返回正值 → time.sleep 被调用一次。"""
+        runner = _build_test_runner()
+        runner.start()
+        runner._timer.tick_end = lambda: 0.002
+
+        sleeps: list[float] = []
+        monkeypatch.setattr(
+            "src.real.real_runner.time.sleep",
+            lambda dt: sleeps.append(dt),
+        )
+        runner.step()
+
+        assert len(sleeps) == 1
+        assert sleeps[0] == pytest.approx(0.002)
+        runner.stop()
+
+    def test_step_no_sleep_when_timer_returns_zero(
+        self, monkeypatch
+    ) -> None:
+        """tick_end 返回 0.0 → time.sleep 不被调用。"""
+        runner = _build_test_runner()
+        runner.start()
+        runner._timer.tick_end = lambda: 0.0
+
+        sleeps: list[float] = []
+        monkeypatch.setattr(
+            "src.real.real_runner.time.sleep",
+            lambda dt: sleeps.append(dt),
+        )
+        runner.step()
+
+        assert len(sleeps) == 0
+        runner.stop()

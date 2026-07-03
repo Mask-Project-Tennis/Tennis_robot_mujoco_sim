@@ -3,7 +3,6 @@
 测试自适应频率控制器的时序逻辑。
 """
 
-import pytest
 
 from src.real.adaptive_timer import AdaptiveTimer
 

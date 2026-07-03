@@ -23,12 +23,9 @@ class RealRobotConfig:
     robot_ip: str = "192.168.1.18"
     robot_port: int = 8080
 
-    # ── [2] 控制模式 ──
-    control_mode: str = "ip"
+    # ── [2] 控制参数 ──
     dt: float = 0.005
     target_hit_speed: float = 1.8
-    canfd_trajectory_mode: int = 1
-    canfd_smooth_radio: int = 50
 
     # ── [3] 控制器安全配置（Layer 1，连接时下发控制器固件）──
     collision_stage: int = 5

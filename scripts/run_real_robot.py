@@ -63,19 +63,13 @@ def create_runner(
 
     Args:
         config: 真机配置（YAML 为唯一真相源）。
-        mock: True 使用 FakeRobot；False 使用真机接口（未实现）。
+        mock: True 使用 FakeRobot；False 使用 RobotInterface（真机 SDK）。
         ball_pos: 初始球位置，默认 [0, -1.5, 1.8]（可达候选点）。
         ball_vel: 初始球速度，默认 ball_speed=3.0 m/s 沿 [0,2,1] 方向。
 
     Returns:
         已组装但尚未 start 的 RealRunner 实例。
-
-    Raises:
-        NotImplementedError: mock=False 时（真机模式待实现）。
     """
-    if not mock:
-        raise NotImplementedError("真机模式待硬件就绪后实现")
-
     if ball_pos is None:
         ball_pos = _DEFAULT_BALL_POS.copy()
     if ball_vel is None:
@@ -91,8 +85,14 @@ def create_runner(
     env.reset(INIT_Q)
     env.data.qpos[env.NQ : env.NQ + env.LEFT_ARM_NQ] = env.init_q_left
 
-    # 2. 假机器人
-    robot = FakeRobot(init_q=INIT_Q, dt=config.dt)
+    # 2. 机器人接口
+    if mock:
+        robot = FakeRobot(init_q=INIT_Q, dt=config.dt)
+    else:
+        from src.real.robot_interface import RobotInterface
+
+        robot = RobotInterface(config)
+        logger.info("create_runner: 使用真机接口 RobotInterface (mock=False)")
 
     # 3. 球传感器 + 启动
     sensor = SimulatedBallSensor()
@@ -139,8 +139,8 @@ def create_runner(
         env, do_replan, replan_cfg, state=replan_state, model_path=model_path
     )
 
-    # 10. 自适应定时器（200Hz 目标频率）
-    timer = AdaptiveTimer(target_hz=200.0)
+    # 10. 自适应定时器（100Hz 目标频率，匹配 SDK 实测吞吐上限）
+    timer = AdaptiveTimer(target_hz=100.0)
 
     return RealRunner(
         env=env,

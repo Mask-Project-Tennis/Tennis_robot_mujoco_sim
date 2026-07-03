@@ -37,7 +37,7 @@ class TestFromYamlAlias:
         """不指定 ip 时使用 dataclass 默认值。"""
         yaml_path = _write_tmp_yaml(tmp_path, """
             control:
-              control_mode: "ip"
+              dt: 0.005
         """)
         cfg = RealRobotConfig.from_yaml(yaml_path)
         assert cfg.robot_ip == "192.168.1.18"
@@ -113,3 +113,16 @@ class TestFromYamlRealConfig:
         assert cfg.robot_ip == "192.168.1.19", (
             f"期望 192.168.1.19（YAML robot.ip），实际 {cfg.robot_ip}（别名映射未生效）"
         )
+
+
+class TestConfigNoCanfdFields:
+    """canfd 相关字段已从 RealRobotConfig 移除。"""
+
+    def test_config_has_no_canfd_fields(self) -> None:
+        """RealRobotConfig 不含 control_mode/canfd_* 字段（速度透传已排除）。"""
+        from dataclasses import fields as dc_fields
+
+        names = {f.name for f in dc_fields(RealRobotConfig)}
+        assert "control_mode" not in names
+        assert "canfd_trajectory_mode" not in names
+        assert "canfd_smooth_radio" not in names

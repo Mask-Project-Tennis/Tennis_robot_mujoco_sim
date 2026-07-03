@@ -1,9 +1,7 @@
 """Realman RM-65B SDK 封装。
 
 内部处理弧度↔角度转换，对外统一弧度制。
-支持两种控制模式：
-  - "ip"（默认）：rm_movej_follow，IP 通信关节跟随
-  - "canfd"：rm_movej_canfd，CANFD 透传高跟随
+控制接口：rm_movej_follow（IP 通信关节跟随）。
 
 SDK 条件导入：仿真环境无 SDK 时不报错。
 """
@@ -139,9 +137,7 @@ class RobotInterface:
     def send_joint_command(self, q_desired: np.ndarray) -> int:
         """发送关节位置指令（弧度制）。
 
-        内部转换为度，根据 control_mode 调用不同 SDK 接口：
-          - "ip"：rm_movej_follow（默认）
-          - "canfd"：rm_movej_canfd（高跟随透传）
+        内部转换为度，调用 rm_movej_follow 下发。
 
         Args:
             q_desired: (6,) 目标关节角度，弧度。
@@ -150,16 +146,7 @@ class RobotInterface:
             SDK 状态码（0=成功）。
         """
         q_deg = np.degrees(q_desired).tolist()
-
-        if self._config.control_mode == "canfd":
-            ret = self._arm.rm_movej_canfd(
-                q_deg,
-                follow=True,
-                trajectory_mode=self._config.canfd_trajectory_mode,
-                radio=self._config.canfd_smooth_radio,
-            )
-        else:
-            ret = self._arm.rm_movej_follow(q_deg)
+        ret = self._arm.rm_movej_follow(q_deg)
 
         if ret != 0:
             logger.warning("send_joint_command 返回错误码 %d", ret)
