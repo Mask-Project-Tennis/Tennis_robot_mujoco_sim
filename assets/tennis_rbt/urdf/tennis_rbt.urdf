@@ -1,0 +1,487 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  tennis_rbt 自制双臂网球机器人 URDF — canonical 机器人描述
+  ════════════════════════════════════════════════════════════════
+  用途：ROS / RViz / MoveIt / tf2 的标准机器人描述（人类可读事实来源）。
+        MuJoCo 规划管线使用派生的 MJCF（src/robot/tennis_rbt.xml），
+        二者运动学等价，需保持同步（修改其一须同步另一）。
+
+  关系：URDF（本文件）= links/joints/inertial 的 canonical 描述
+        MJCF（src/robot/tennis_rbt.xml）= MuJoCo 优化版（额外含 contact/exclude/actuator/site）
+        rpy 已由 MJCF quaternion 精确转换（脚本 scipy as_euler('xyz')），保证等价。
+
+  填写指引：见 docs/tennis_rbt_modeling_guide.md
+  实测数据：见 assets/tennis_rbt/robot_measurements.yaml
+  关节名（与 MJCF / 代码硬耦合一致）：r_joint1~6, l_joint1~6
+  单位：米 / 弧度 / kg / kg·m²（URDF 标准）
+-->
+<robot name="tennis_rbt_robot">
+
+  <!-- ================================================================ -->
+  <!-- ===== 世界基座（虚拟 link） ===== -->
+  <!-- ================================================================ -->
+  <link name="base_link">
+    <inertial>
+      <mass value="0.001"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <inertia ixx="0.001" ixy="0" ixz="0" iyy="0.001" iyz="0" izz="0.001"/>
+    </inertial>
+  </link>
+
+  <!-- ================================================================ -->
+  <!-- ===== 自制底盘（box primitive，TODO_DIY 待实测） ===== -->
+  <!-- ================================================================ -->
+  <joint name="chassis_joint" type="fixed">
+    <!-- 底盘 link 帧在 box 中心（世界 z=0.335），底面贴地 z=0 -->
+    <origin xyz="0 0 0.335" rpy="0 0 0"/>
+    <parent link="base_link"/>
+    <child link="chassis_base"/>
+  </joint>
+  <link name="chassis_base">
+    <!-- 落地长方体 0.45×0.45×0.67m，深灰承重感 -->
+    <inertial>
+      <mass value="30.0"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <inertia ixx="1.629" ixy="0" ixz="0" iyy="1.629" iyz="0" izz="1.013"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.45 0.45 0.67"/>
+      </geometry>
+      <material name="chassis_grey"><color rgba="0.18 0.18 0.22 1"/></material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.45 0.45 0.67"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <!-- ===== 立柱（圆柱 ⌀0.2×0.415m，底盘顶 z=0.67 到平台 z=1.085） ===== -->
+  <joint name="pillar_joint" type="fixed">
+    <!-- 立柱底面在底盘顶面 z=0.67 -->
+    <origin xyz="0 0 0.335" rpy="0 0 0"/>
+    <parent link="chassis_base"/>
+    <child link="pillar_base"/>
+  </joint>
+  <link name="pillar_base">
+    <inertial>
+      <mass value="10.0"/>
+      <origin xyz="0 0 0.2075" rpy="0 0 0"/>
+      <inertia ixx="0.169" ixy="0" ixz="0" iyy="0.169" iyz="0" izz="0.05"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0.2075" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.415" radius="0.10"/>
+      </geometry>
+      <material name="pillar_dark"><color rgba="0.28 0.30 0.35 1"/></material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.2075" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.415" radius="0.10"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <!-- ===== 平台（双臂安装基座，前置悬挑，世界 z=1.085） ===== -->
+  <joint name="platform_joint" type="fixed">
+    <!-- 平台前置 y=-0.11，世界 y=-0.11，使双臂悬挑在立柱前方 -->
+    <origin xyz="0 -0.11 0.415" rpy="0 0 0"/>
+    <parent link="pillar_base"/>
+    <child link="platform_base_link"/>
+  </joint>
+  <link name="platform_base_link">
+    <inertial>
+      <mass value="3.0"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <inertia ixx="0.017" ixy="0" ixz="0" iyy="0.058" iyz="0" izz="0.075"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><box size="0.48 0.30 0.03"/></geometry>
+      <material name="platform_grey"><color rgba="0.25 0.27 0.32 1"/></material>
+    </visual>
+  </link>
+
+  <!-- ================================================================ -->
+  <!-- ===== 右臂（6-DOF + 网球拍）— 整段复用 RM-65B ===== -->
+  <!-- ================================================================ -->
+  <joint name="r_base_joint" type="fixed">
+    <!-- 右臂底座：x=-0.17, y=-0.11（前置悬挑，世界 y=-0.22 避开立柱），rpy 不变 -->
+    <origin xyz="-0.17 -0.11 0" rpy="0 -0.7854 0"/>
+    <parent link="platform_base_link"/>
+    <child link="r_base_link1"/>
+  </joint>
+  <link name="r_base_link1">
+    <inertial>
+      <mass value="0.234"/>
+      <origin xyz="0 0.006 0.025" rpy="0 0 0"/>
+      <inertia ixx="0.000274" ixy="0" ixz="0" iyy="0.000264" iyz="0" izz="0.000367"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0.0935" rpy="0 0 0"/>
+      <geometry><cylinder length="0.187" radius="0.045"/></geometry>
+      <material name="arm_blue"><color rgba="0.2 0.5 0.8 1"/></material>
+    </visual>
+  </link>
+
+  <!-- r_joint1: 肩关节偏航 -->
+  <joint name="r_joint1" type="revolute">
+    <origin xyz="0 0 0.187" rpy="0 0 0"/>
+    <parent link="r_base_link1"/>
+    <child link="r_link1"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-3.10669" upper="3.10669" effort="60" velocity="3.14"/>
+    <dynamics damping="2.0"/>
+  </joint>
+  <link name="r_link1">
+    <inertial>
+      <mass value="0.594"/>
+      <origin xyz="0 0.021 -0.025" rpy="0 0 0"/>
+      <inertia ixx="0.00127" ixy="0" ixz="0" iyy="0.00118" iyz="0" izz="0.000561"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><sphere radius="0.05"/></geometry>
+      <material name="arm_joint"><color rgba="0.13 0.38 0.62 1"/></material>
+    </visual>
+  </link>
+
+  <!-- r_joint2: 肩关节俯仰 -->
+  <joint name="r_joint2" type="revolute">
+    <origin xyz="0 0 0" rpy="-1.5708 1.5708 0"/>
+    <parent link="r_link1"/>
+    <child link="r_link2"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-2.26893" upper="2.26893" effort="60" velocity="3.14"/>
+    <dynamics damping="2.0"/>
+  </joint>
+  <link name="r_link2">
+    <inertial>
+      <mass value="0.864"/>
+      <origin xyz="0.152 0 -0.006" rpy="0 0 0"/>
+      <inertia ixx="0.000633" ixy="0" ixz="0" iyy="0.00205" iyz="0" izz="0.00195"/>
+    </inertial>
+    <visual>
+      <origin xyz="0.128 0 0" rpy="0 1.5708 0"/>
+      <geometry><cylinder length="0.256" radius="0.04"/></geometry>
+      <material name="arm_blue"/>
+    </visual>
+  </link>
+
+  <!-- r_joint3: 肘关节 -->
+  <joint name="r_joint3" type="revolute">
+    <origin xyz="0.256 0 0" rpy="0 0 1.5708"/>
+    <parent link="r_link2"/>
+    <child link="r_link3"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-2.35619" upper="2.35619" effort="30" velocity="3.14"/>
+    <dynamics damping="1.0"/>
+  </joint>
+  <link name="r_link3">
+    <inertial>
+      <mass value="0.290"/>
+      <origin xyz="0 -0.060 0.010" rpy="0 0 0"/>
+      <inertia ixx="0.000637" ixy="0" ixz="0" iyy="0.000156" iyz="0" izz="0.000614"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><sphere radius="0.045"/></geometry>
+      <material name="arm_joint"/>
+    </visual>
+    <visual>
+      <origin xyz="0 -0.105 0" rpy="1.5708 0 0"/>
+      <geometry><cylinder length="0.21" radius="0.035"/></geometry>
+      <material name="arm_blue"/>
+    </visual>
+  </link>
+
+  <!-- r_joint4: 腕关节1 -->
+  <joint name="r_joint4" type="revolute">
+    <origin xyz="0 -0.21 0" rpy="1.5708 0 0"/>
+    <parent link="r_link3"/>
+    <child link="r_link4"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-3.10669" upper="3.10669" effort="10" velocity="3.14"/>
+    <dynamics damping="0.5"/>
+  </joint>
+  <link name="r_link4">
+    <inertial>
+      <mass value="0.239"/>
+      <origin xyz="0 -0.018 -0.022" rpy="0 0 0"/>
+      <inertia ixx="0.000286" ixy="0" ixz="0" iyy="0.000263" iyz="0" izz="0.000120"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><sphere radius="0.04"/></geometry>
+      <material name="arm_joint"/>
+    </visual>
+  </link>
+
+  <!-- r_joint5: 腕关节2 -->
+  <joint name="r_joint5" type="revolute">
+    <origin xyz="0 0 0" rpy="-1.5708 0 0"/>
+    <parent link="r_link4"/>
+    <child link="r_link5"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-2.23402" upper="2.23402" effort="10" velocity="3.14"/>
+    <dynamics damping="0.3"/>
+  </joint>
+  <link name="r_link5">
+    <inertial>
+      <mass value="0.219"/>
+      <origin xyz="0 -0.059 0.007" rpy="0 0 0"/>
+      <inertia ixx="0.000351" ixy="0" ixz="0" iyy="0.000105" iyz="0" izz="0.000334"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 -0.056 0" rpy="1.5708 0 0"/>
+      <geometry><cylinder length="0.112" radius="0.03"/></geometry>
+      <material name="arm_blue"/>
+    </visual>
+  </link>
+
+  <!-- r_joint6: 腕关节3（法兰旋转） -->
+  <joint name="r_joint6" type="revolute">
+    <origin xyz="0 -0.112 0" rpy="1.5708 0 0"/>
+    <parent link="r_link5"/>
+    <child link="r_link6"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-6.28319" upper="6.28319" effort="10" velocity="3.14"/>
+    <dynamics damping="0.2"/>
+  </joint>
+  <link name="r_link6">
+    <inertial>
+      <mass value="0.221"/>
+      <origin xyz="-0.029 0 0.028" rpy="0 0 0"/>
+      <inertia ixx="0.000138" ixy="0" ixz="0" iyy="0.000269" iyz="0" izz="0.000353"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><sphere radius="0.035"/></geometry>
+      <material name="arm_joint"/>
+    </visual>
+  </link>
+
+  <!-- ===== 法兰 ===== -->
+  <joint name="r_flange_joint" type="fixed">
+    <origin xyz="0 0 0.0445" rpy="0 0 0"/>
+    <parent link="r_link6"/>
+    <child link="r_flange"/>
+  </joint>
+  <link name="r_flange">
+    <inertial>
+      <mass value="0.05"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <inertia ixx="0.00002" ixy="0" ixz="0" iyy="0.00002" iyz="0" izz="0.00002"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><cylinder length="0.01" radius="0.03"/></geometry>
+      <material name="flange_grey"><color rgba="0.3 0.3 0.35 1"/></material>
+    </visual>
+  </link>
+
+  <!-- ===== 网球拍（末端执行器） ===== -->
+  <!-- TODO_DIY: 若球拍安装方式与 RM-65B 不同，改这里的 origin（见 [A].racket） -->
+  <joint name="r_racket_joint" type="fixed">
+    <origin xyz="0 0 0" rpy="0 0 1.5708"/>
+    <parent link="r_flange"/>
+    <child link="r_racket_body"/>
+  </joint>
+  <link name="r_racket_body">
+    <inertial>
+      <mass value="0.35"/>
+      <origin xyz="0 0 0.13" rpy="0 0 0"/>
+      <inertia ixx="0.003" ixy="0" ixz="0" iyy="0.001" iyz="0" izz="0.003"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0.125" rpy="0 0 0"/>
+      <geometry><cylinder length="0.19" radius="0.012"/></geometry>
+      <material name="handle_brown"><color rgba="0.5 0.3 0.1 1"/></material>
+    </visual>
+    <visual>
+      <origin xyz="0 0 0.25" rpy="0 1.5708 0"/>
+      <geometry><sphere radius="0.08"/></geometry>
+      <material name="face_green"><color rgba="0.2 0.7 0.2 0.6"/></material>
+    </visual>
+  </link>
+  <!-- 拍面中心标记（对应 MJCF 的 racket_center site） -->
+  <link name="racket_center"/>
+  <joint name="racket_center_joint" type="fixed">
+    <origin xyz="0 0 0.25" rpy="0 0 0"/>
+    <parent link="r_racket_body"/>
+    <child link="racket_center"/>
+  </joint>
+
+  <!-- ================================================================ -->
+  <!-- ===== 左臂（不驱动，仅视觉）— 整段复用 RM-65B ===== -->
+  <!-- ================================================================ -->
+  <joint name="l_base_joint" type="fixed">
+    <!-- 左臂底座：x=+0.17, y=-0.11（前置悬挑），与右臂镜像 -->
+    <origin xyz="0.17 -0.11 0" rpy="0 -0.7854 3.14159"/>
+    <parent link="platform_base_link"/>
+    <child link="l_base_link1"/>
+  </joint>
+  <link name="l_base_link1">
+    <inertial>
+      <mass value="0.234"/>
+      <origin xyz="0 0.006 0.025" rpy="0 0 0"/>
+      <inertia ixx="0.000274" ixy="0" ixz="0" iyy="0.000264" iyz="0" izz="0.000367"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0.0935" rpy="0 0 0"/>
+      <geometry><cylinder length="0.187" radius="0.045"/></geometry>
+      <material name="arm_grey"><color rgba="0.2 0.5 0.8 1"/></material>
+    </visual>
+  </link>
+
+  <!-- l_joint1 -->
+  <joint name="l_joint1" type="revolute">
+    <origin xyz="0 0 0.187" rpy="0 0 0"/>
+    <parent link="l_base_link1"/>
+    <child link="l_link1"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-3.10669" upper="3.10669" effort="60" velocity="3.14"/>
+    <dynamics damping="2.0"/>
+  </joint>
+  <link name="l_link1">
+    <inertial>
+      <mass value="0.594"/>
+      <origin xyz="0 0.021 -0.025" rpy="0 0 0"/>
+      <inertia ixx="0.00127" ixy="0" ixz="0" iyy="0.00118" iyz="0" izz="0.000561"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><sphere radius="0.05"/></geometry>
+      <material name="arm_joint"/>
+    </visual>
+  </link>
+
+  <!-- l_joint2 -->
+  <joint name="l_joint2" type="revolute">
+    <origin xyz="0 0 0" rpy="-1.5708 1.5708 0"/>
+    <parent link="l_link1"/>
+    <child link="l_link2"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-2.26893" upper="2.26893" effort="60" velocity="3.14"/>
+    <dynamics damping="2.0"/>
+  </joint>
+  <link name="l_link2">
+    <inertial>
+      <mass value="0.864"/>
+      <origin xyz="0.152 0 -0.006" rpy="0 0 0"/>
+      <inertia ixx="0.000633" ixy="0" ixz="0" iyy="0.00205" iyz="0" izz="0.00195"/>
+    </inertial>
+    <visual>
+      <origin xyz="0.128 0 0" rpy="0 1.5708 0"/>
+      <geometry><cylinder length="0.256" radius="0.04"/></geometry>
+      <material name="arm_grey"/>
+    </visual>
+  </link>
+
+  <!-- l_joint3 -->
+  <joint name="l_joint3" type="revolute">
+    <origin xyz="0.256 0 0" rpy="0 0 1.5708"/>
+    <parent link="l_link2"/>
+    <child link="l_link3"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-2.35619" upper="2.35619" effort="30" velocity="3.14"/>
+    <dynamics damping="1.0"/>
+  </joint>
+  <link name="l_link3">
+    <inertial>
+      <mass value="0.290"/>
+      <origin xyz="0 -0.060 0.010" rpy="0 0 0"/>
+      <inertia ixx="0.000637" ixy="0" ixz="0" iyy="0.000156" iyz="0" izz="0.000614"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><sphere radius="0.045"/></geometry>
+      <material name="arm_joint"/>
+    </visual>
+    <visual>
+      <origin xyz="0 -0.105 0" rpy="1.5708 0 0"/>
+      <geometry><cylinder length="0.21" radius="0.035"/></geometry>
+      <material name="arm_grey"/>
+    </visual>
+  </link>
+
+  <!-- l_joint4 -->
+  <joint name="l_joint4" type="revolute">
+    <origin xyz="0 -0.21 0" rpy="1.5708 0 0"/>
+    <parent link="l_link3"/>
+    <child link="l_link4"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-3.10669" upper="3.10669" effort="10" velocity="3.14"/>
+    <dynamics damping="0.5"/>
+  </joint>
+  <link name="l_link4">
+    <inertial>
+      <mass value="0.239"/>
+      <origin xyz="0 -0.018 -0.022" rpy="0 0 0"/>
+      <inertia ixx="0.000286" ixy="0" ixz="0" iyy="0.000263" iyz="0" izz="0.000120"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><sphere radius="0.04"/></geometry>
+      <material name="arm_joint"/>
+    </visual>
+  </link>
+
+  <!-- l_joint5 -->
+  <joint name="l_joint5" type="revolute">
+    <origin xyz="0 0 0" rpy="-1.5708 0 0"/>
+    <parent link="l_link4"/>
+    <child link="l_link5"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-2.23402" upper="2.23402" effort="10" velocity="3.14"/>
+    <dynamics damping="0.3"/>
+  </joint>
+  <link name="l_link5">
+    <inertial>
+      <mass value="0.219"/>
+      <origin xyz="0 -0.059 0.007" rpy="0 0 0"/>
+      <inertia ixx="0.000351" ixy="0" ixz="0" iyy="0.000105" iyz="0" izz="0.000334"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 -0.0575 0" rpy="1.5708 0 0"/>
+      <geometry><cylinder length="0.115" radius="0.03"/></geometry>
+      <material name="arm_grey"/>
+    </visual>
+  </link>
+
+  <!-- l_joint6 -->
+  <joint name="l_joint6" type="revolute">
+    <origin xyz="0 -0.115 0" rpy="1.5708 0 0"/>
+    <parent link="l_link5"/>
+    <child link="l_link6"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-6.28319" upper="6.28319" effort="10" velocity="3.14"/>
+    <dynamics damping="0.2"/>
+  </joint>
+  <link name="l_link6">
+    <inertial>
+      <mass value="0.221"/>
+      <origin xyz="0.029 0 0.025" rpy="0 0 0"/>
+      <inertia ixx="0.000138" ixy="0" ixz="0" iyy="0.000269" iyz="0" izz="0.000353"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><sphere radius="0.035"/></geometry>
+      <material name="arm_joint"/>
+    </visual>
+  </link>
+
+  <!-- ===== 传动（ros2_control 用，可选） =====
+  <transmission name="r_joint1_trans">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="r_joint1"><hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface></joint>
+    <actuator name="r_joint1_motor"><mechanicalReduction>1</mechanicalReduction></actuator>
+  </transmission>
+  -->
+
+</robot>
