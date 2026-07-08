@@ -29,3 +29,4 @@ src/cpp/*.so
 memory.md
 scripts/test/test_noise_integration.py
 .opencode/
+.superpowers/

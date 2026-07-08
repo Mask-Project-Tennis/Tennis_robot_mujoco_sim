@@ -135,7 +135,6 @@ src/ilqt/tube_cost.py             → (通过 test_replan_core 间接覆盖)
 src/ilqt/mpc_helpers.py           → tests/test_mpc_helpers.py
 src/ilqt/replan_core.py           → tests/test_replan_core.py
 src/ilqt/ball_predictor.py        → tests/test_ball_predictor.py
-src/ilqt/replan_config.py         → tests/test_replan_config.py
 
 # ── 管线架构 ──
 src/ilqt/mpc_controller.py        → tests/test_mpc_controller.py

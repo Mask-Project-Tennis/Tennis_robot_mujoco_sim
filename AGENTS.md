@@ -101,8 +101,8 @@ mujoco_sim/
 │   │   └── simulate.py                # 前向仿真 / rollout
 │   ├── ilqt/                          # iLQR + MPC + 管线 + 策略 + 组件
 │   │   ├── __init__.py
-│   │   ├── solver.py                  # iLQR 后向-前向迭代主循环（solve / solve_few_iters）
-│   │   ├── cost.py                    # 代价函数（终端击打点代价 + 控制代价 + Tube 代价）
+│   │   ├── solver.py                  # iLQR 后向-前向迭代主循环（solve / solve_few_iters）+ build_solver 工厂函数
+│   │   ├── cost.py                    # 代价函数（终端击打点代价 + 控制代价 + Tube 代价，max_tcp_speed 已移除）
 │   │   ├── utils.py                   # 增益计算、线搜索、正则化辅助函数
 │   │   ├── robot_limits.py            # 关节约束 + 安全滤波（RobotLimits, strict_braking_check）
 │   │   ├── retiming.py                # 时间重映射工具
@@ -110,12 +110,11 @@ mujoco_sim/
 │   │   ├── jt_init.py                 # 位置模式 JT 初始控制 + 后摆 warm-start
 │   │   ├── robot_env_protocol.py      # RobotEnv Protocol（@runtime_checkable，RM65Env/PlanningEnv 共同接口）
 │   │   ├── planning_env.py            # MPC 规划计算环境（MuJoCo 纯计算，无球/无左臂/无碰撞）
-│   │   ├── mpc_controller.py          # ★ MPCController 可组合规划模块（策略注入）+ MPCConfig + MPCStepResult
+│   │   ├── mpc_controller.py          # ★ MPCController 可组合规划模块（策略注入）+ MPCConfig + MPCStepResult（robot_limits 必传参数）
 │   │   ├── episode_runner.py          # ★ EpisodeRunner 通用管线（4 组件 + 5 hook 插入点）
 │   │   ├── step_context.py            # StepContext 步骤上下文（hook 间数据传递容器）
 │   │   ├── strategy_config.py         # StrategyConfig 策略注入容器（None → 默认实现）
-│   │   ├── replan_config.py           # ReplanConfig 类型安全配置（替代 43-key dict）
-│   │   ├── replan_core.py             # do_replan 完整 MPC+iLQR 重规划核心编排
+│   │   ├── replan_core.py             # do_replan(request, env_plan, state, config, robot_limits, solver) 类型化签名
 │   │   ├── ball_predictor.py          # BallPredictor 解析抛物线预测（无 MuJoCo 依赖）
 │   │   ├── mpc_helpers.py             # JT 初始控制 + fix_joint5 + R 退火调度
 │   │   ├── tube_types.py              # TubeConfig / HittingTube / ReplanState 数据结构
@@ -196,7 +195,7 @@ mujoco_sim/
 │   ├── test/           # 快速验证 10 个
 │   ├── archive/        # ★ 已归档脚本（V6-V10 + tube + 旧实验，详见 archive/README.md）
 │   └── README.md       # 完整清单与说明
-├── tests/                             # 单元测试（332 tests，30 个文件）
+├── tests/                             # 单元测试（347 tests，42 个文件）
 │   ├── test_kinematics.py
 │   ├── test_linearize.py
 │   ├── test_mpc.py
@@ -219,7 +218,7 @@ mujoco_sim/
 │   ├── test_follow_through.py              # 随挥策略测试
 │   ├── test_hit_point_refiner.py           # 击球点过滤策略测试
 │   ├── test_replan_mode.py                 # 重规划模式测试
-│   ├── test_replan_config.py               # ReplanConfig 测试
+│   ├── test_task2_replan_config_elimination.py # ReplanConfig 消除验证（5 tests）
 │   ├── test_real_runner.py                 # RealRunner Mock 闭环测试
 │   ├── test_robot_interface.py             # RobotInterface SDK Mock 测试
 │   ├── test_safety_monitor.py              # SafetyMonitor 测试
@@ -307,7 +306,7 @@ mujoco_sim/
 ### 多层安全滤波
 - **X 平面墙预判**：臂不越过身体中线（X≥-0.1），越界 PD 推回
 - **关节约束**：位置/速度/加速度/力矩四重限制
-- **TCP 速度硬限制**：max_tcp_speed = 1.8 m/s
+- **TCP 速度硬限制**：max_tcp_speed = 1.8 m/s（仿真默认，default.yaml）。TCP 1.0 m/s 仅真机部署（`--limits-config`）；exp16 验证 TCP 1.0 导致安全滤波锁死加速 → 命中率 30%（vs 1.8 = 78%）+ 关节速度 3.94× 超限（重力坠落）
 - **逐步安全滤波**：β = [0.8, 0.6, 0.4, 0.2, 0.0]，找到最大可行控制
 - **终段豁免**：击球前 terminal_exempt_steps 步跳过速度检查（默认 20 步）
 - **紧急制动**：所有 β 均失败时施加阻尼力矩 u = -20·qdot（力矩模式）；保持当前角度（位置模式）
@@ -397,6 +396,8 @@ mujoco_sim/
 - 运行 MPC 仿真（力矩模式，默认）: `python scripts/rm65_mpc_v12.py --serve-box --ball-speed 7`
 - 位置模式仿真: `python scripts/rm65_mpc_v12.py --serve-box --ball-speed 7 --position-mode`
 - 离线测试: `python scripts/rm65_mpc_v12.py --serve-box --ball-speed 9`
+- 真机限位部署: 追加 `--limits-config configs/real_robot.yaml`（TCP 1.0 m/s；默认仿真用 TCP 1.8）
+- TCP 软惩罚实验: 追加 `--Q-tcp-soft 5000`（默认 0 禁用）
 - 关节安全扫描: `python scripts/scan_joint_safety.py`
 - 运行测试: `pytest tests/`
 - 代码检查: `ruff check src/ tests/ scripts/`

@@ -69,7 +69,7 @@ from src.utils.mujoco_loader import load_mujoco_model     # 跨平台模型加�
 
 ### ilqt/ — iLQR 核心 + 管线架构
 
-- `solver.py`：纯 Python iLQR 求解器（后向 Riccati + 前向线搜索）
+- `solver.py`：纯 Python iLQR 求解器（后向 Riccati + 前向线搜索）+ `build_solver` 工厂函数
 - `cost.py`：`HittingCost` 代价函数（终端 Q_p/Q_v/Q_n + 运行 R/Q_p_running/平滑项/X 墙/body 规避/softmin）
 - `robot_limits.py`：`RobotLimits` 约束参数 + `check_step_feasibility`（制动感知 qdot + 滑窗 qddot）
 - `utils.py`：前向传递（含 alpha 回退）+ 轨迹指标 + 控制量缩放
@@ -82,11 +82,10 @@ from src.utils.mujoco_loader import load_mujoco_model     # 跨平台模型加�
 - `tube_builder.py`：Tube 构建函数（search_hit_window/build_hitting_tube）
 - `tube_cost.py`：代价包装器（TubeHittingCostWrapper/TubeOnlyCost/SoftminOnlyCost）
 - `mpc_helpers.py`：JT 初始控制 dispatch + fix_joint5 + R 退火调度
-- `replan_core.py`：`do_replan` 完整重规划编排（含 Tube 构建 + iLQR 求解 + warm-start）
+- `replan_core.py`：`do_replan` 完整重规划编排（含 Tube 构建 + iLQR 求解 + warm-start；类型化签名 `do_replan(request, env_plan, state, config, robot_limits, solver)`）
 - `ball_predictor.py`：`BallPredictor` 解析抛物线预测（无 MuJoCo 依赖）
 - `mpc_controller.py`：★ `MPCController` 可组合规划模块（封装完整规划生命周期，含策略注入）+ `MPCConfig` + `MPCStepResult`
 - `episode_runner.py`：★ `EpisodeRunner` 通用管线编排器（4 组件：mpc/perception/safety/executor + 5 hook 插入点，仿真/真机共用）
-- `replan_config.py`：★ `ReplanConfig` 类型安全配置（替代 43-key dict）
 - `step_context.py`：`StepContext` 步骤上下文（pre_plan/post_plan/post_exec/on_unsafe/on_done hook 间数据传递容器）
 - `strategy_config.py`：`StrategyConfig` 策略注入容器（聚合 follow_through/hit_refiner/phase_schedule/direction，None → 默认实现）
 - `strategies/`：★ 可插拔策略模块
@@ -136,7 +135,7 @@ from src.utils.mujoco_loader import load_mujoco_model     # 跨平台模型加�
 - `robot_arm_protocol.py`：`RobotArmInterface` Protocol（@runtime_checkable，真机/Mock 共同接口）
 - `fake_robot.py`：`FakeRobot` Mock 实现（简单一阶动力学，测试用）
 - `real_runner.py`：`RealRunner` 真机部署主循环（start/step/stop 分步 + run_episode EpisodeRunner 编排）
-- `runner_factory.py`：工厂函数（build_robot_limits/build_solver/build_replan_cfg + 共享常量）
+- `runner_factory.py`：工厂函数（build_robot_limits + build_solver 重导出 + 共享常量）
 - `robot_executor.py`：`RobotExecutor` 适配器（RobotArmInterface → ExecutorComponent）
 - `perception_adapter.py`：`PerceptionAdapter` 适配器（BallPerceiver → PerceptionComponent）
 - `safety_adapter.py`：`SafetyAdapter` 适配器（SafetyMonitor → SafetyComponent）

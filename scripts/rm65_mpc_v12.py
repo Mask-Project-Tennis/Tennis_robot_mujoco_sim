@@ -119,8 +119,8 @@ def main() -> None:
     parser.add_argument("--serve-x-size", type=float, default=8.0, help="发球区 X 轴全长 (m)")
     parser.add_argument("--serve-y-size", type=float, default=0.2, help="发球区 Y 轴全长 (m)")
     parser.add_argument("--serve-z-size", type=float, default=0.3, help="发球区 Z 轴全长 (m)")
-    parser.add_argument("--Q-tcp-soft", type=float, default=5000.0, help="TCP 速度软惩罚权重")
-    parser.add_argument("--Q-qdot-limit", type=float, default=1000.0, help="关节速度软惩罚权重")
+    parser.add_argument("--Q-tcp-soft", type=float, default=0.0, help="TCP 速度软惩罚权重")
+    parser.add_argument("--Q-qdot-limit", type=float, default=0.0, help="关节速度软惩罚权重")
     parser.add_argument("--normal-weight", type=float, default=500000.0, help="拍面法向量代价权重")
     parser.add_argument("--normal-flip", action="store_true", help="翻转法向量方向")
     parser.add_argument("--replan-interval", type=int, default=None, help="重规划间隔步数")
@@ -151,7 +151,11 @@ def main() -> None:
     parser.add_argument("--space-perturb-min-m", type=float, default=0.0, help="随机扰动空间下限 (m)")
     parser.add_argument("--ball-speed-perturb-pct", type=float, default=0.0, help="球速耦合扰动百分比")
     parser.add_argument("--max-tcp", type=float, default=None, help="TCP 线速度硬限制 (m/s)")
-    parser.add_argument("--terminal-exempt-steps", type=int, default=0, help="终段豁免步数")
+    parser.add_argument("--terminal-exempt-steps", type=int, default=None, help="终段豁免步数（默认沿用 RobotLimits 配置值 20）")
+    parser.add_argument("--sim-limits", action="store_true",
+        help="(已废弃) 仿真限位现为默认行为，此标志无效")
+    parser.add_argument("--limits-config", type=Path, default=None,
+        help="限位 YAML(RealRobotConfig 格式). 优先级高于 --sim-limits")
     parser.add_argument("--obs-freq", type=float, default=0, help="观测频率 Hz")
     parser.add_argument("--obs-noise-pos", type=float, default=0, help="观测位置噪声 std (m)")
     parser.add_argument("--obs-noise-vel", type=float, default=0, help="观测速度噪声 std (m/s)")
@@ -329,15 +333,40 @@ def main() -> None:
         if args.no_feedforward or not use_ff_cfg:
             env.configure_feedforward(False)
 
-    rl_cfg = config_dict.get("robot_limits", {})
+    # ── 构建关节限位 ──
+    # 默认: 仿真限位 (default.yaml, TCP 1.8 m/s)
+    #   网球挥拍末端速度 ~1.2 m/s，TCP 1.8 是物理下限。
+    #   TCP 1.0 会锁死安全滤波加速 → 命中率 30%（exp16 验证）。
+    # 真机部署: --limits-config configs/real_robot.yaml
+    from src.real.config import RealRobotConfig as _RRC
+    from src.real.runner_factory import build_robot_limits as _brl
+    if args.limits_config is not None:
+        try:
+            _real_cfg = _RRC.from_yaml(args.limits_config)
+        except (FileNotFoundError, ValueError) as e:
+            parser.error(f"--limits-config 加载失败: {e}")
+        robot_limits = _brl(env, _real_cfg)
+    else:
+        rl_cfg = config_dict.get("robot_limits", {})
+        robot_limits = RobotLimits.from_config(
+            rl_cfg, dt=dt, ctrlrange=env.model.actuator_ctrlrange[:env.NU])
+
+    # CLI 覆盖（所有模式通用）
     if args.max_tcp is not None:
-        rl_cfg["max_tcp_speed"] = float("inf") if args.max_tcp == 0 else args.max_tcp
-    rl_cfg["terminal_exempt_steps"] = args.terminal_exempt_steps
+        robot_limits.max_tcp_speed = float("inf") if args.max_tcp == 0 else args.max_tcp
+    if args.terminal_exempt_steps is not None:
+        robot_limits.terminal_exempt_steps = args.terminal_exempt_steps
     if args.dq_max_fraction is not None:
-        rl_cfg["dq_max_fraction"] = args.dq_max_fraction
-    robot_limits = RobotLimits.from_config(
-        rl_cfg, dt=dt, ctrlrange=env.model.actuator_ctrlrange[:env.NU],
+        robot_limits.dq_max = robot_limits.qdot_max * dt * args.dq_max_fraction
+
+    logger.info(
+        "关节限位: %s, TCP=%.1f m/s, terminal_exempt=%d",
+        f"自定义({args.limits_config})" if args.limits_config else "仿真默认(default.yaml)",
+        robot_limits.max_tcp_speed,
+        robot_limits.terminal_exempt_steps,
     )
+    if args.sim_limits:
+        logger.warning("--sim-limits 已废弃（仿真限位现为默认行为）")
 
     # X 平面墙 body IDs 缓存（引用共享常量，消除重复）
     from src.ilqt.components.predictive_safety import X_WALL_BODY_NAMES
@@ -562,9 +591,8 @@ def main() -> None:
         use_backswing=use_backswing,
         backswing_offset=backswing_offset,
         backswing_ratio=backswing_ratio,
-        max_tcp_speed=float(args.max_tcp) if args.max_tcp and args.max_tcp > 0 else 1.8,
-        terminal_exempt_steps=rl_cfg.get("terminal_exempt_steps", 0),
-        dq_max_fraction=rl_cfg.get("dq_max_fraction", 0.5),
+        terminal_exempt_steps=args.terminal_exempt_steps if args.terminal_exempt_steps is not None else 20,
+        dq_max_fraction=args.dq_max_fraction if args.dq_max_fraction is not None else 0.5,
         shoulder_pos=shoulder_pos,
         workspace_radius=workspace_radius,
         time_perturb_s=time_perturb_s,
@@ -595,9 +623,7 @@ def main() -> None:
         refiner_window_half=args.refiner_window if args.refiner_window is not None else 15,
     )
 
-    mpc = MPCController(env, mpc_config)
-    # 覆盖 MPCController 内部的 robot_limits 为配置派生值（对齐 V11）
-    mpc._robot_limits = robot_limits
+    mpc = MPCController(env, mpc_config, robot_limits=robot_limits)
 
     # ==========================================================================
     # 12. 组装管线组件
