@@ -18,7 +18,6 @@ import numpy as np
 
 from src.ilqt.async_replanner import AsyncReplanner, PlanRequest
 from src.ilqt.planning_env import PlanningEnv
-from src.ilqt.replan_config import ReplanConfig
 from src.ilqt.replan_core import do_replan
 from src.ilqt.strategies.direction import DirectionPolicy, ReflectDirection
 from src.ilqt.strategies.follow_through import (
@@ -36,10 +35,10 @@ from src.ilqt.strategies.replan_mode import (
     ReplanMode,
     SyncReplanMode,
 )
+from src.ilqt.robot_limits import RobotLimits
+from src.ilqt.solver import build_solver
 from src.ilqt.tube_types import ReplanState, TubeConfig
 from src.ilqt.strategy_config import StrategyConfig
-from src.real.config import RealRobotConfig
-from src.real.runner_factory import build_robot_limits, build_solver
 
 logger = logging.getLogger(__name__)
 
@@ -74,8 +73,8 @@ class MPCConfig:
     normal_weight: float = 500000.0
     racket_speed: float = 1.8
     target_speed: float = 1.8
-    Q_tcp_soft: float = 5000.0
-    Q_qdot_limit: float = 1000.0
+    Q_tcp_soft: float = 0.0
+    Q_qdot_limit: float = 0.0
 
     # ── Tube 参数 ──
     tube_cfg: TubeConfig = field(default_factory=TubeConfig)
@@ -94,7 +93,6 @@ class MPCConfig:
     backswing_ratio: float = 0.35
 
     # ── 安全参数 ──
-    max_tcp_speed: float = 1.8
     terminal_exempt_steps: int = 20
     dq_max_fraction: float = 0.5
 
@@ -187,6 +185,7 @@ class MPCController:
         self,
         env: PlanningEnv,
         config: MPCConfig,
+        robot_limits: RobotLimits,
         strategies: "StrategyConfig | None" = None,
     ) -> None:
         """初始化 solver/limits/replanner/state 构建。
@@ -194,6 +193,9 @@ class MPCController:
         Args:
             env: 规划环境（PlanningEnv 或 RM65Env），用于主线程规划计算。
             config: MPC 配置（控制规划行为）。
+            robot_limits: 关节限位 + 安全滤波器（必传）。调用方负责构建，
+                仿真通常用 ``build_robot_limits(env, RealRobotConfig())``，
+                研究对比可传入自定义限位。
             strategies: 可选策略注入容器。None → 全部使用 MPCConfig 驱动的默认实现。
         """
         self._env = env
@@ -201,16 +203,16 @@ class MPCController:
         self._NU: int = env.NU
         self._NQ: int = env.NQ
 
-        # ── 构建 RobotLimits + solver（复用 runner_factory）──
-        self._robot_limits = build_robot_limits(env, RealRobotConfig())
+        # ── RobotLimits（调用方注入，依赖方向不再反转到 src.real）──
+        self._robot_limits = robot_limits
         self._solver: Any = build_solver()
 
-        # ── AsyncReplanner（独立 env_plan）──
+        # ── AsyncReplanner（独立 env_plan；config/robot_limits/solver 静态注入）──
         model_path = Path(__file__).resolve().parent.parent / "robot" / "rm65_model.xml"
         self._replanner = AsyncReplanner(
-            env, do_replan, config={}, state=None, model_path=model_path,
+            env, do_replan, config, robot_limits, self._solver,
+            state=None, model_path=model_path,
         )
-        self._replan_cfg: ReplanConfig | None = None
         self._replan_state: ReplanState | None = None
 
         # ── 规划状态变量（V11 行 1047-1067）──
@@ -297,17 +299,18 @@ class MPCController:
             PlanResult（do_replan 结果）。
         """
         assert self._replanner.env_plan is not None
-        assert self._replan_cfg is not None and self._replan_state is not None
+        assert self._replan_state is not None
         return do_replan(
             request, self._replanner.env_plan,
-            self._replan_state, self._replan_cfg,
+            self._replan_state, self._config,
+            self._robot_limits, self._solver,
         )
 
     def start(self, ball_pos: np.ndarray, ball_vel: np.ndarray,
               arm_state: np.ndarray) -> None:
         """首次同步规划。
 
-        计算击球方向 → 构建 replan_cfg → 首次 do_replan → 初始化 buffer。
+        计算击球方向 → 首次 do_replan（直接消费 MPCConfig）→ 初始化 buffer。
 
         Args:
             ball_pos: 球当前位置 (3,)。
@@ -322,10 +325,7 @@ class MPCController:
         self._v_hit_desired = direction.v_hit_desired.copy()
         self._d_follow = direction.d_follow.copy()
 
-        # 2. 构建 replan_cfg（B2: ReplanConfig.from_mpc_config 类型安全工厂）
-        self._replan_cfg = self._build_replan_cfg(self._d_hat, self._v_hit_desired)
-
-        # 3. 构建 ReplanState（V11 行 1254-1261）
+        # 2. 构建 ReplanState（V11 行 1254-1261）
         self._replan_state = ReplanState(
             k_hit_new=self._config.total_horizon,
             p_hit_new=ball_pos.copy(),
@@ -335,13 +335,12 @@ class MPCController:
             is_first_plan=True,
         )
         self._replanner._state = self._replan_state
-        self._replanner._config = self._replan_cfg
 
-        # 4. 启动 AsyncReplanner + 确保 env_plan 就绪（V11 行 1315-1318）
+        # 3. 启动 AsyncReplanner + 确保 env_plan 就绪（V11 行 1315-1318）
         self._replanner.start()
         self._replanner._ensure_env_plan()
 
-        # 5. 首次同步 do_replan（V11 行 1349-1364）
+        # 4. 首次同步 do_replan（V11 行 1349-1364）
         first_request = PlanRequest(
             x_current=arm_state.copy(),
             ball_pos=ball_pos.copy(),
@@ -352,13 +351,15 @@ class MPCController:
             p_hit_current=ball_pos.copy(),
             v_hit_desired=self._v_hit_desired.copy(),
             n_des_current=self._d_hat.copy(),
+            d_hat=self._d_hat.copy(),
             is_first_plan=True,
         )
         assert self._replanner.env_plan is not None, "env_plan 未就绪"
         t_replan_start = time.perf_counter()
         result = do_replan(
             first_request, self._replanner.env_plan,
-            self._replan_state, self._replan_cfg,
+            self._replan_state, self._config,
+            self._robot_limits, self._solver,
         )
         t_replan_ms = (time.perf_counter() - t_replan_start) * 1000
         logger.info(
@@ -411,11 +412,7 @@ class MPCController:
         self._step_count = 0
         self._mpc_horizon = self._config.total_horizon
 
-        # 10. 更新 replan_cfg 的 k_hit_total（B2: ReplanConfig 属性访问替代 dict 下标）
-        assert self._replan_cfg is not None
-        self._replan_cfg.k_hit_total = self._k_hit
-
-        # 11. 异步模式首次提交 → ReplanMode.submit（V11 行 1394-1409）
+        # 10. 异步模式首次提交 → ReplanMode.submit（V11 行 1394-1409）
         if self._config.async_mode:
             async_request = self._build_replan_request(
                 ball_pos, ball_vel, arm_state, step=0,
@@ -568,34 +565,6 @@ class MPCController:
         return self._ball_unreachable
 
     # ──────────────────────────────────────────────────────────────────
-    # 私有方法：配置
-    # ──────────────────────────────────────────────────────────────────
-
-    def _build_replan_cfg(
-        self, d_hat: np.ndarray, v_hit_desired: np.ndarray,
-    ) -> ReplanConfig:
-        """构建 do_replan 所需类型安全配置。
-
-        复用 ``ReplanConfig.from_mpc_config`` 工厂（消除 80 行字段翻译），
-        替代旧的 runner_factory.build_replan_cfg() + MPCConfig.update() dict 路径。
-        do_replan 入口兼容层会自动 to_dict() 以支持旧 cfg["..."] 访问。
-
-        Args:
-            d_hat: 击球方向单位向量。
-            v_hit_desired: 期望末端速度。
-
-        Returns:
-            ReplanConfig（可直接传给 do_replan）。
-        """
-        return ReplanConfig.from_mpc_config(
-            self._config,
-            robot_limits=self._robot_limits,
-            solver=self._solver,
-            d_hat=d_hat,
-            v_hit_desired=v_hit_desired,
-        )
-
-    # ──────────────────────────────────────────────────────────────────
     # 私有方法：重规划（A3 统一辅助）
     # ──────────────────────────────────────────────────────────────────
 
@@ -626,6 +595,7 @@ class MPCController:
             p_hit_current=self._p_hit.copy(),
             v_hit_desired=self._v_hit_desired.copy(),
             n_des_current=self._n_des.copy(),
+            d_hat=self._d_hat.copy(),
             is_first_plan=is_first_plan,
         )
 

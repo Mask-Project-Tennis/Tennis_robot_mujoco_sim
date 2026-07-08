@@ -5,7 +5,7 @@
 
 用法示例:
     config = StrategyConfig(direction_policy=TopspinDirection(...))
-    mpc = MPCController(env, mpc_config, strategies=config)
+    mpc = MPCController(env, mpc_config, robot_limits, strategies=config)
 """
 from __future__ import annotations
 

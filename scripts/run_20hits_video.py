@@ -42,6 +42,7 @@ from src.ilqt.robot_limits import (
     ExecutionMetrics,
 )
 from src.ilqt.async_replanner import AsyncReplanner, PlanRequest, PlanResult
+from src.ilqt.mpc_controller import MPCConfig
 try:
     from src.cpp.solver_cpp import ILQTSolver
 except ImportError:
@@ -503,6 +504,7 @@ def run_batch() -> None:
             step=0, k_hit_current=k_hit_total,
             U_prev=np.zeros((0, NU)), p_hit_current=p_hit.copy(),
             v_hit_desired=v_hit_at_contact, n_des_current=n_des_single.copy(),
+            d_hat=d_hat.copy(),
             is_first_plan=True,
         )
         replan_state = ReplanState(
@@ -510,54 +512,46 @@ def run_batch() -> None:
             v_ball_hit_new=v_ball_hit.copy(), current_n_des=n_des_single.copy(),
             U_prev=np.zeros((0, NU)), is_first_plan=True,
         )
-        replan_cfg: dict = {
-            "total_horizon": total_horizon,
-            "fixed_horizon": fixed_horizon,
-            "replan_interval": replan_interval,
-            "max_iter_per_plan": max_iter_per_plan,
-            "first_plan_iters": first_plan_iters,
-            "near_plan_iters": near_plan_iters,
-            "near_threshold": near_threshold,
-            "dt": dt,
-            "shoulder_pos": shoulder_pos,
-            "workspace_radius": workspace_radius,
-            "robot_limits": robot_limits,
-            "solver": solver,
-            "R": R,
-            "Q_p_scale_far": 5.0, "Q_v_scale_far": 3.0,
-            "Q_p_scale_near": 8.0, "Q_v_scale_near": 120.0,
-            "hit_shift": hit_shift, "d_hat": d_hat,
-            "v_hit_desired": v_hit_desired, "v_hit_at_contact": v_hit_at_contact,
-            "d_follow": d_follow,
-            "follow_through_length": follow_through_length,
-            "follow_through_steps": follow_through_steps,
-            "follow_through_v_terminal": follow_through_v_terminal,
-            "use_backswing": use_backswing,
-            "use_r_decay": use_r_decay,
-            "r_decay_ratio": r_decay_ratio,
-            "time_perturb_s": 0.0, "space_perturb_m": 0.0,
-            "perturb_alpha_min": 0.0,
-            "normal_flip": False,
-            "fix_joint5_angle": fix_joint5_angle,
-            "backswing_offset": cur_backswing_offset,
-            "backswing_ratio": backswing_ratio,
-            "k_hit_total": k_hit_total,
-            "smooth_far": far_stage, "smooth_mid": mid_stage,
-            "smooth_near": near_stage,
-            "Q_tcp_soft": 5000.0, "Q_qdot_limit": 1000.0,
-            "softmin_beta": args.softmin_beta,
-            "ball_positions_all": ball_positions_all,
-            "max_tcp_speed": args.max_tcp,
-            "no_v_maximize": False,
-            "normal_weight": args.normal_weight,
-        }
+        # 构建真机 MPCConfig（Q_tcp_soft/Q_qdot_limit=0 保留旧行为：旧 do_replan 从未消费这些键）
+        mpc_config = MPCConfig(
+            dt=dt,
+            total_horizon=total_horizon,
+            fixed_horizon=fixed_horizon,
+            replan_interval=replan_interval,
+            max_iter_per_plan=max_iter_per_plan,
+            first_plan_iters=first_plan_iters,
+            near_plan_iters=near_plan_iters,
+            near_threshold=near_threshold,
+            R=R,
+            Q_p_scale_far=5.0, Q_v_scale_far=3.0,
+            Q_p_scale_near=8.0, Q_v_scale_near=120.0,
+            follow_through_length=follow_through_length,
+            follow_through_steps=follow_through_steps,
+            follow_through_v_terminal=follow_through_v_terminal,
+            use_backswing=use_backswing,
+            use_r_decay=use_r_decay,
+            r_decay_ratio=r_decay_ratio,
+            time_perturb_s=0.0, space_perturb_m=0.0,
+            perturb_alpha_min=0.0,
+            normal_flip=False,
+            fix_joint5_angle=fix_joint5_angle,
+            backswing_offset=cur_backswing_offset,
+            backswing_ratio=backswing_ratio,
+            shoulder_pos=shoulder_pos,
+            workspace_radius=workspace_radius,
+            smooth_far=far_stage, smooth_mid=mid_stage, smooth_near=near_stage,
+            normal_weight=args.normal_weight,
+            racket_speed=racket_speed,
+            far_threshold=far_threshold,
+            tube_cfg=tube_cfg,
+        )
 
-        env_plan = AsyncReplanner(env, do_replan, replan_cfg,
+        env_plan = AsyncReplanner(env, do_replan, mpc_config, robot_limits, solver,
                                   state=replan_state, model_path=model_path)
         _ = env_plan._ensure_env_plan()
 
         first_result = do_replan(first_request, env_plan.env_plan,
-                                 replan_state, replan_cfg)
+                                 replan_state, mpc_config, robot_limits, solver)
         replan_state.is_first_plan = False
         replan_state.k_hit_new = first_result.k_hit_new
         replan_state.p_hit_new = first_result.p_hit_new.copy()

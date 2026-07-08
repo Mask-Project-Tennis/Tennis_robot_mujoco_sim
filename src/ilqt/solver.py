@@ -2,6 +2,7 @@
 
 import logging
 import numpy as np
+from typing import Any
 from src.sim.env import MujocoEnv
 from src.dynamics.linearize import linearize_trajectory, linearize_analytical_trajectory
 from src.ilqt.cost import HittingCost
@@ -379,3 +380,31 @@ class ILQTSolver:
             V_xx = 0.5 * (V_xx + V_xx.T)
 
         return Ks, ks
+
+
+def build_solver() -> Any:
+    """构建 ILQTSolver（优先 C++ 加速版，失败回退纯 Python 版）。
+
+    纯 ILQTSolver 工厂函数，零真机依赖，自然属于 ``src.ilqt``。
+    ``src/real/runner_factory.py`` 重导出本函数以保持真机入口与测试零改动。
+
+    Returns:
+        ILQTSolver 实例（C++ 或 Python 实现，二者接口一致）。
+    """
+    try:
+        from src.cpp.solver_cpp import ILQTSolver
+    except ImportError:
+        from src.ilqt.solver import ILQTSolver
+    return ILQTSolver(
+        {
+            "max_iter": 10,
+            "tol": 1e-4,
+            "horizon": 60,
+            "mu_min": 1e-6,
+            "mu_max": 1e10,
+            "mu_init": 0.01,
+            "delta_0": 1.6,
+            "alpha_list": [1.0, 0.5, 0.25, 0.1, 0.05, 0.01],
+            "lin_eps": 1e-6,
+        }
+    )

@@ -43,7 +43,6 @@ class HittingCost:
         Q_v_max_eps: float = 0.01,
         Q_tcp_soft: float = 0.0,
         tcp_threshold: float = 1.44,
-        max_tcp_speed: float = 1.8,
         Q_qdot_limit: float = 0.0,
         qdot_limit_thresholds: np.ndarray | None = None,
         actuator_mode: int = 0,
@@ -81,7 +80,6 @@ class HittingCost:
             Q_v_max_eps: v6 速度最大化二次正则化系数（防止无界速度）。
             Q_tcp_soft: v6 TCP 速度软惩罚权重（0=禁用）。
             tcp_threshold: v6 TCP 速度阈值（超过此值开始惩罚）。
-            max_tcp_speed: v6 TCP 最大允许速度（用于导数归一化）。
             Q_qdot_limit: v6 关节速度阈值软惩罚权重（0=禁用）。
             qdot_limit_thresholds: v6 各关节速度阈值，形状 (6,)。超过此值开始惩罚。
             actuator_mode: 执行器模式，0=力矩(默认), 1=位置模式(R=0, 控制代价置零)。
@@ -186,7 +184,6 @@ class HittingCost:
         # v6: TCP 速度软惩罚
         self._Q_tcp_soft: float = max(0.0, Q_tcp_soft)
         self._tcp_threshold: float = tcp_threshold
-        self._max_tcp_speed: float = max_tcp_speed
         # v6: 关节速度阈值软惩罚
         self._Q_qdot_limit: float = max(0.0, Q_qdot_limit)
         self._qdot_limit_thresholds: np.ndarray | None = (

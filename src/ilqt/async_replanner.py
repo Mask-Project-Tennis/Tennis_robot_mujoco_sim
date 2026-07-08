@@ -34,7 +34,9 @@ import numpy as np
 from src.sim.rm65_env import RM65Env
 
 if TYPE_CHECKING:
-    from src.ilqt.replan_config import ReplanConfig
+    from src.ilqt.mpc_controller import MPCConfig
+    from src.ilqt.robot_limits import RobotLimits
+    from src.ilqt.solver import ILQTSolver
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +44,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class PlanRequest:
     """规划请求：主线程 → 后台线程。"""
+
     x_current: np.ndarray
     ball_pos: np.ndarray
     ball_vel: np.ndarray
@@ -51,7 +54,9 @@ class PlanRequest:
     p_hit_current: np.ndarray
     v_hit_desired: np.ndarray
     n_des_current: np.ndarray
+    d_hat: np.ndarray                           # 期望击球方向（来球反方向）
     is_first_plan: bool = False
+    d_follow: np.ndarray | None = None          # 随挥方向；None 时回退为 d_hat
 
 
 @dataclass
@@ -85,22 +90,31 @@ class AsyncReplanner:
 
     Args:
         env: 主线程的 MuJoCo 环境（仅读取 model_path/dt）。
-        replan_fn: 规划函数，签名为 (request, env_plan) -> PlanResult。
-        config: 配置字典。
+        replan_fn: 规划函数，签名为
+            (request, env_plan, state, config, robot_limits, solver) -> PlanResult。
+        config: MPCConfig（规划参数集，类型安全直接消费）。
+        robot_limits: 关节约束 + 安全滤波器。
+        solver: ILQTSolver 实例（C++ 或 Python）。
+        state: 初始重规划状态（可选）。
+        model_path: 模型 XML 路径（可选，自动推断）。
     """
 
     def __init__(
         self,
         env: RM65Env,
         replan_fn: "callable",
-        config: "dict | ReplanConfig | None" = None,
+        config: "MPCConfig",
+        robot_limits: "RobotLimits",
+        solver: "ILQTSolver",
         state: object | None = None,
         model_path: "Path | None" = None,
     ) -> None:
         self._replan_fn = replan_fn
-        # config 可为 dict（V11/旧路径）或 ReplanConfig（V12/B2 类型安全路径）；
-        # do_replan 兼容层会自动 to_dict()，此处保留原对象避免无谓转换
-        self._config: "dict | ReplanConfig" = config if config is not None else {}
+        # 静态配置：MPCConfig + RobotLimits + ILQTSolver 直接注入，
+        # 后台线程调用 do_replan(request, env_plan, state, config, robot_limits, solver)
+        self._config: "MPCConfig" = config
+        self._robot_limits: "RobotLimits" = robot_limits
+        self._solver: "ILQTSolver" = solver
         self._state = state
         self._env = env
 
@@ -244,7 +258,10 @@ class AsyncReplanner:
             t_start = time.perf_counter()
 
             try:
-                result = self._replan_fn(request, self.env_plan, self._state, self._config)
+                result = self._replan_fn(
+                    request, self.env_plan, self._state,
+                    self._config, self._robot_limits, self._solver,
+                )
             except Exception as e:
                 logger.error(f"AsyncReplanner: 规划异常: {e}", exc_info=True)
                 result = PlanResult(solver_ok=False, ball_unreachable=False)

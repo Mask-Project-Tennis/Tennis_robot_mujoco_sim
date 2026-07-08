@@ -2,25 +2,25 @@
 
 将 scripts/run_real_robot.py / tests/test_real_runner.py /
 tests/test_replan_core.py 中逐字复制的工厂函数
-（_build_robot_limits / _build_solver / _build_replan_cfg）和共享常量
+（_build_robot_limits）和共享常量
 集中到此模块，消除 ~200 行重复代码。
 
 常量对齐 V11 真机配置；函数去掉下划线前缀作为公开 API，
 供真机入口脚本与测试用例共同复用，确保规划行为完全一致。
 
-B3 统一：build_replan_cfg 经 ReplanConfig.from_mpc_config().to_dict() 构建，
-与 MPCController._build_replan_cfg() 共享同一字段映射，消除重复翻译。
+依赖方向：build_solver 已下沉到 src.ilqt.solver（纯 ILQTSolver 工厂属于
+ilqt 层）；本模块重导出 build_solver 仅为保持真机入口与测试导入路径零改动。
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import numpy as np
 
 from src.ilqt.planning_env import PlanningEnv
-from src.ilqt.replan_config import ReplanConfig
 from src.ilqt.robot_limits import RobotLimits
+from src.ilqt.solver import build_solver
 from src.ilqt.tube_types import TubeConfig
 from src.real.config import RealRobotConfig
 
@@ -36,6 +36,20 @@ SHOULDER_POS = np.array([-0.1, -0.22693, 1.302645], dtype=np.float64)
 WORKSPACE_RADIUS = 0.90
 KP = np.array([200.0, 200.0, 100.0, 50.0, 50.0, 20.0], dtype=np.float64)
 KD = np.array([20.0, 20.0, 10.0, 5.0, 5.0, 2.0], dtype=np.float64)
+
+# 公开 API（显式声明 re-export，供 `from src.real.runner_factory import build_solver` 零改动）
+__all__ = [
+    "DT",
+    "INIT_Q",
+    "INIT_Q_LEFT",
+    "SHOULDER_POS",
+    "WORKSPACE_RADIUS",
+    "KP",
+    "KD",
+    "build_robot_limits",
+    "build_solver",
+    "_build_real_robot_mpc_config",
+]
 
 
 def build_robot_limits(env: PlanningEnv, config: RealRobotConfig) -> RobotLimits:
@@ -68,36 +82,13 @@ def build_robot_limits(env: PlanningEnv, config: RealRobotConfig) -> RobotLimits
     )
 
 
-def build_solver() -> Any:
-    """构建 ILQTSolver（优先 C++ 加速版，失败回退纯 Python 版）。
-
-    Returns:
-        ILQTSolver 实例（C++ 或 Python 实现，二者接口一致）。
-    """
-    try:
-        from src.cpp.solver_cpp import ILQTSolver
-    except ImportError:
-        from src.ilqt.solver import ILQTSolver
-    return ILQTSolver(
-        {
-            "max_iter": 10,
-            "tol": 1e-4,
-            "horizon": 60,
-            "mu_min": 1e-6,
-            "mu_max": 1e10,
-            "mu_init": 0.01,
-            "delta_0": 1.6,
-            "alpha_list": [1.0, 0.5, 0.25, 0.1, 0.05, 0.01],
-            "lin_eps": 1e-6,
-        }
-    )
-
-
 def _build_real_robot_mpc_config(config: RealRobotConfig) -> "MPCConfig":
     """构建真机专用 MPCConfig（从 RealRobotConfig 读取可调参数）。
 
-    dt / max_tcp_speed / racket_speed 从 config 读取，
+    dt / racket_speed 从 config 读取，
     其余 MPC 参数保持为真机对齐常量。
+    TCP 速度由 robot_limits（build_robot_limits）单独管理，
+    MPCConfig 不再持有 max_tcp_speed 死字段。
 
     Args:
         config: 真机配置（YAML 为唯一真相源）。
@@ -105,8 +96,7 @@ def _build_real_robot_mpc_config(config: RealRobotConfig) -> "MPCConfig":
     Returns:
         MPCConfig 实例（真机专用参数集）。
     """
-    # 延迟导入：mpc_controller 反向依赖本模块的 build_robot_limits/build_solver，
-    # 运行期延迟到此函数调用时再加载，打破模块级循环依赖
+    # 延迟导入 MPCConfig：仅在真机配置构建路径需要，避免模块加载期耦合
     from src.ilqt.mpc_controller import MPCConfig
 
     return MPCConfig(
@@ -125,7 +115,6 @@ def _build_real_robot_mpc_config(config: RealRobotConfig) -> "MPCConfig":
         Q_v_scale_near=120.0,
         normal_weight=500000.0,
         racket_speed=config.target_hit_speed,
-        max_tcp_speed=config.max_tcp_speed,
         is_position_mode=True,
         ablation_mode="full",
         use_backswing=False,
@@ -156,41 +145,3 @@ def _build_real_robot_mpc_config(config: RealRobotConfig) -> "MPCConfig":
         Q_du_base=0.0,
         far_threshold=50,
     )
-
-
-def build_replan_cfg(
-    _env: PlanningEnv,
-    robot_limits: RobotLimits,
-    solver: Any,
-    d_hat: np.ndarray,
-    v_hit_desired: np.ndarray,
-    config: RealRobotConfig,
-) -> dict:
-    """构建 do_replan 所需的完整配置字典（51 键）。
-
-    B3 统一：经 ``ReplanConfig.from_mpc_config().to_dict()`` 构建，
-    与 ``MPCController._build_replan_cfg()`` 共享同一字段映射工厂，
-    消除两条路径各自维护字段翻译的重复。
-
-    ``env`` 参数预留以备未来扩展（如从 env 读取额外配置），当前未使用。
-
-    Args:
-        env: 规划环境。
-        robot_limits: 关节约束 + 安全滤波器。
-        solver: ILQTSolver 实例。
-        d_hat: 期望击球方向单位向量（来球反方向）。
-        v_hit_desired: 期望击球时刻末端速度。
-        config: 真机配置（YAML 为唯一真相源）。
-
-    Returns:
-        replan_cfg dict，可直接传给 AsyncReplanner / do_replan / RealRunner。
-    """
-    mpc_config = _build_real_robot_mpc_config(config)
-    replan_cfg = ReplanConfig.from_mpc_config(
-        mpc_config,
-        robot_limits=robot_limits,
-        solver=solver,
-        d_hat=d_hat,
-        v_hit_desired=v_hit_desired,
-    )
-    return replan_cfg.to_dict()

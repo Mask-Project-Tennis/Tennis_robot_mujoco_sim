@@ -1,6 +1,6 @@
 """runner_factory config 消费测试。
 
-验证 build_robot_limits / build_replan_cfg 从 RealRobotConfig 读取参数，
+验证 build_robot_limits 从 RealRobotConfig 读取参数，
 而非使用硬编码值。YAML 为唯一真相源。
 """
 
@@ -15,9 +15,7 @@ from src.real.runner_factory import (
     INIT_Q_LEFT,
     KD,
     KP,
-    build_replan_cfg,
     build_robot_limits,
-    build_solver,
 )
 
 

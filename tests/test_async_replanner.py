@@ -17,10 +17,13 @@ def test_async_replanner_creates_planning_env():
 
     model_path = Path("src/robot/rm65_model.xml")
     env = PlanningEnv()
+    # 新签名：replan_fn 接受 6 参数 (request, env_plan, state, config, robot_limits, solver)
     replanner = AsyncReplanner(
         env=env,
-        replan_fn=lambda req, env_p, state, cfg: PlanResult(solver_ok=False),
-        config={},
+        replan_fn=lambda req, env_p, state, config, robot_limits, solver: PlanResult(solver_ok=False),
+        config=None,  # type: ignore[arg-type]  # lambda 不消费 config
+        robot_limits=None,  # type: ignore[arg-type]
+        solver=None,  # type: ignore[arg-type]
         state=ReplanState(),
         model_path=model_path,
     )

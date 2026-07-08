@@ -10,6 +10,7 @@ import numpy as np
 
 from src.ilqt.mpc_controller import MPCConfig, MPCController, MPCStepResult
 from src.ilqt.planning_env import PlanningEnv
+from src.real.config import RealRobotConfig
 from src.real.runner_factory import (
     DT,
     INIT_Q,
@@ -17,8 +18,9 @@ from src.real.runner_factory import (
     KD,
     KP,
     build_robot_limits,
-    build_solver,
 )
+
+_CFG = RealRobotConfig()
 
 
 def _build_env() -> PlanningEnv:
@@ -55,7 +57,7 @@ class TestMPCControllerSmoke:
         """start + step × 1 返回 MPCStepResult，不崩溃。"""
         env = _build_env()
         config = _build_config()
-        mpc = MPCController(env, config)
+        mpc = MPCController(env, config, robot_limits=build_robot_limits(env, _CFG))
 
         ball_pos = np.array([0.0, -1.5, 1.8])
         ball_vel = np.array([0.0, 2.0, 1.0])
@@ -77,7 +79,7 @@ class TestMPCControllerReachable:
         """可达球应有 k_hit > 0 且 u_cmd 非零。"""
         env = _build_env()
         config = _build_config()
-        mpc = MPCController(env, config)
+        mpc = MPCController(env, config, robot_limits=build_robot_limits(env, _CFG))
 
         ball_pos = np.array([0.0, -1.5, 1.8])
         ball_vel = np.array([0.0, 2.0, 1.0])
@@ -100,7 +102,7 @@ class TestMPCControllerFollowThrough:
         config = _build_config()
         config.follow_through_steps = 5  # 启用随挥
         config.total_horizon = 15  # 短 horizon 加速测试
-        mpc = MPCController(env, config)
+        mpc = MPCController(env, config, robot_limits=build_robot_limits(env, _CFG))
 
         # 用接近工作空间的球（确保短 horizon 内可达）
         ball_pos = np.array([0.0, -0.6, 1.4])
@@ -124,7 +126,7 @@ class TestMPCControllerUnreachable:
         """球在 [10,10,10]（远离工作空间）→ 不可达。"""
         env = _build_env()
         config = _build_config()
-        mpc = MPCController(env, config)
+        mpc = MPCController(env, config, robot_limits=build_robot_limits(env, _CFG))
 
         ball_far = np.array([10.0, 10.0, 10.0])
         ball_vel_zero = np.array([0.0, 0.0, 0.0])
@@ -138,3 +140,37 @@ class TestMPCControllerUnreachable:
         else:
             assert mpc.done
         mpc.stop()
+
+
+class TestDependencyDirection:
+    """轮 5：依赖方向修复 — build_solver 迁入 src.ilqt.solver，robot_limits 必传。"""
+
+    def test_build_solver_importable_from_ilqt(self) -> None:
+        """build_solver 可从 src.ilqt.solver 导入（移出 runner_factory）。"""
+        from src.ilqt.solver import build_solver
+
+        solver = build_solver()
+        assert solver is not None
+
+    def test_robot_limits_injected(self) -> None:
+        """MPCController 接受并使用注入的 robot_limits（Minor #4）。"""
+        env = _build_env()
+        config = _build_config()
+        custom_rl = build_robot_limits(env, _CFG)
+        mpc = MPCController(env, config, robot_limits=custom_rl)
+        assert mpc._robot_limits is custom_rl
+        mpc.stop()
+
+    def test_no_src_real_imports_in_mpc_controller(self) -> None:
+        """src.ilqt.mpc_controller 不应导入 src.real（依赖方向）。"""
+        import ast
+        from pathlib import Path
+
+        source = Path("src/ilqt/mpc_controller.py").read_text()
+        tree = ast.parse(source)
+        violations = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module:
+                if node.module.startswith("src.real"):
+                    violations.append(node.module)
+        assert not violations, f"发现 src.real 导入: {violations}"

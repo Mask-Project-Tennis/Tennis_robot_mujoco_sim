@@ -67,7 +67,7 @@ class SyncReplanMode:
 
         Args:
             replan_fn: 规划函数 (PlanRequest) → PlanResult。
-                       调用方负责绑定 env_plan/replan_state/replan_cfg。
+                       调用方负责绑定 env_plan/replan_state/config/robot_limits/solver。
         """
         self._replan_fn: Callable[[PlanRequest], PlanResult] = replan_fn
         self._result: PlanResult | None = None

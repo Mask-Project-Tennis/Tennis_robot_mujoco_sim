@@ -28,7 +28,7 @@ from src.real.runner_factory import (
     INIT_Q_LEFT,
     KD,
     KP,
-    build_replan_cfg,
+    _build_real_robot_mpc_config,
     build_robot_limits,
     build_solver,
 )
@@ -94,22 +94,21 @@ def _build_test_runner(
     safety_cfg.max_tcp_speed = float(robot_limits_pre.max_tcp_speed)
     safety = SafetyMonitor(safety_cfg, robot=robot)
 
-    # 6. 规划方向（来球反方向）
+    # 6. 规划方向（来球反方向，用于 replan_state.current_n_des）
     ball_vel_norm = float(np.linalg.norm(ball_vel))
     if ball_vel_norm > 1e-6:
         d_hat = -ball_vel / ball_vel_norm
     else:
         d_hat = np.array([0.0, 1.0, 0.0])
-    v_hit_desired = 1.8 * d_hat
 
-    # 7. 规划配置
+    # 7. 规划配置：构建 MPCConfig + 直接传 RealRunner（无翻译层）
     robot_limits = robot_limits_pre
     solver = build_solver()
-    replan_cfg = build_replan_cfg(env, robot_limits, solver, d_hat, v_hit_desired, _CFG)
+    mpc_config = _build_real_robot_mpc_config(_CFG)
 
     # 8. 重规划状态
     replan_state = ReplanState(
-        k_hit_new=replan_cfg["k_hit_total"],
+        k_hit_new=mpc_config.total_horizon,
         p_hit_new=ball_pos.copy(),
         v_ball_hit_new=ball_vel.copy(),
         current_n_des=d_hat.copy(),
@@ -117,10 +116,11 @@ def _build_test_runner(
         is_first_plan=True,
     )
 
-    # 9. 异步重规划器
+    # 9. 异步重规划器（静态注入 config/robot_limits/solver）
     model_path = Path(__file__).resolve().parent.parent / "src" / "robot" / "rm65_model.xml"
     replanner = AsyncReplanner(
-        env, do_replan, replan_cfg, state=replan_state, model_path=model_path
+        env, do_replan, mpc_config, robot_limits, solver,
+        state=replan_state, model_path=model_path,
     )
 
     # 10. 自适应定时器
@@ -132,7 +132,9 @@ def _build_test_runner(
         ball_perceiver=perceiver,
         safety=safety,
         replanner=replanner,
-        replan_cfg=replan_cfg,
+        config=mpc_config,
+        robot_limits=robot_limits,
+        solver=solver,
         timer=timer,
         replan_state=replan_state,
     )

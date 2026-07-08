@@ -5,7 +5,7 @@
 
 使用方式：
     runner = RealRunner(env, robot, perceiver, safety, replanner,
-                        replan_cfg, timer, replan_state)
+                        config, robot_limits, solver, timer, replan_state)
     runner.start()
     while not runner.done:
         info = runner.step()
@@ -30,6 +30,8 @@ from numpy.typing import NDArray
 
 if TYPE_CHECKING:
     from src.ilqt.mpc_controller import MPCConfig
+    from src.ilqt.robot_limits import RobotLimits
+    from src.ilqt.solver import ILQTSolver
 
 from src.ilqt.async_replanner import AsyncReplanner, PlanRequest
 from src.ilqt.replan_core import do_replan
@@ -53,7 +55,9 @@ class RealRunner:
         ball_perceiver: 球感知器（sensor → KF 滤波 → pos/vel）。
         safety: 安全监控（关节位置/速度/TCP 速度检查）。
         replanner: 异步重规划器（后台线程 iLQR）。
-        replan_cfg: do_replan 所需配置字典。
+        config: MPCConfig（规划参数集，类型安全直接消费）。
+        robot_limits: 关节约束 + 安全滤波器。
+        solver: ILQTSolver 实例。
         timer: 自适应频率控制器。
         replan_state: 重规划可变状态快照。
     """
@@ -65,7 +69,9 @@ class RealRunner:
         ball_perceiver: BallPerceiver,
         safety: SafetyMonitor,
         replanner: AsyncReplanner,
-        replan_cfg: dict,
+        config: "MPCConfig",
+        robot_limits: "RobotLimits",
+        solver: "ILQTSolver",
         timer: AdaptiveTimer,
         replan_state: ReplanState,
     ) -> None:
@@ -74,20 +80,26 @@ class RealRunner:
         self._perceiver = ball_perceiver
         self._safety = safety
         self._replanner = replanner
-        self._replan_cfg = replan_cfg
+        self._config = config
+        self._robot_limits = robot_limits
+        self._solver = solver
         self._timer = timer
         self._replan_state = replan_state
 
         # 运行状态
         self._step_count: int = 0
-        self._max_steps: int = int(replan_cfg.get("total_horizon", 200))
-        self._replan_interval: int = int(replan_cfg.get("replan_interval", 20))
+        self._max_steps: int = int(config.total_horizon)
+        self._replan_interval: int = int(config.replan_interval)
         self._U_buffer: NDArray[np.floating] = np.zeros((0, env.NU))
         self._buffer_idx: int = 0
         self._x_current: NDArray[np.floating] = np.zeros(env.NX)
         self._u_cmd: NDArray[np.floating] = np.zeros(env.NU)
         self._last_ball_pos: NDArray[np.floating] | None = None
         self._last_ball_vel: NDArray[np.floating] | None = None
+
+        # 运行期击球方向（start() 中根据来球计算，每步 PlanRequest 携带）
+        self._d_hat: NDArray[np.floating] = np.array([0.0, 1.0, 0.0])
+        self._v_hit_desired: NDArray[np.floating] = np.zeros(3)
 
         # 结束标志
         self._done: bool = False
@@ -109,7 +121,7 @@ class RealRunner:
         2. 启动球传感器
         3. 启动异步重规划线程
         4. 读取初始球状态 + 臂状态
-        5. 计算 d_hat / v_hit_desired，更新 replan_cfg
+        5. 计算 d_hat / v_hit_desired（存实例属性，供后续 PlanRequest 携带）
         6. 同步执行首次规划
         7. 初始化 U_buffer / buffer_idx / step_count
         """
@@ -150,13 +162,13 @@ class RealRunner:
             d_hat = -ball_vel / ball_vel_norm
         else:
             d_hat = np.array([0.0, 1.0, 0.0])
-        target_speed = float(self._replan_cfg.get("racket_speed", 1.8))
+        target_speed = float(self._config.racket_speed)
         if target_speed > 2.0:
             target_speed = 1.8  # 真机首版保守限速
         v_hit_desired = target_speed * d_hat
-        self._replan_cfg["d_hat"] = d_hat
-        self._replan_cfg["v_hit_desired"] = v_hit_desired
-        self._replan_cfg["v_hit_at_contact"] = v_hit_desired
+        # 存实例属性，供后续 _submit_replan 构建 PlanRequest 时携带
+        self._d_hat = d_hat.copy()
+        self._v_hit_desired = v_hit_desired.copy()
         logger.info(
             "RealRunner: d_hat=%s v_hit_desired=%s",
             np.round(d_hat, 3), np.round(v_hit_desired, 3),
@@ -168,18 +180,21 @@ class RealRunner:
             ball_pos=ball_pos,
             ball_vel=ball_vel,
             step=0,
-            k_hit_current=int(self._replan_cfg.get("k_hit_total", self._max_steps)),
+            k_hit_current=self._max_steps,
             U_prev=np.zeros((0, self._env.NU)),
             p_hit_current=ball_pos.copy(),
             v_hit_desired=v_hit_desired,
             n_des_current=d_hat.copy(),
+            d_hat=d_hat.copy(),
             is_first_plan=True,
         )
         first_result = do_replan(
             first_request,
             self._replanner.env_plan,  # type: ignore[arg-type]
             self._replan_state,
-            self._replan_cfg,
+            self._config,
+            self._robot_limits,
+            self._solver,
         )
 
         # 球不可达 → 优雅退出
@@ -296,7 +311,7 @@ class RealRunner:
 
         # 5a. 位置模式 dq_max 限幅：逐步角度变化不超过 dq_max（平滑追踪规划轨迹）
         #     防止首规划（fp_limits=None）产生激进跳变直接发给真机
-        robot_limits = self._replan_cfg.get("robot_limits")
+        robot_limits = self._robot_limits
         if robot_limits is not None and getattr(robot_limits, "dq_max", None) is not None:
             q_current = self._x_current[: self._env.NQ]
             dq = u_cmd - q_current
@@ -369,8 +384,9 @@ class RealRunner:
             k_hit_current=self._replan_state.k_hit_new,
             U_prev=self._replan_state.U_prev.copy(),
             p_hit_current=self._replan_state.p_hit_new.copy(),
-            v_hit_desired=self._replan_cfg["v_hit_desired"],
+            v_hit_desired=self._v_hit_desired.copy(),
             n_des_current=self._replan_state.current_n_des.copy(),
+            d_hat=self._d_hat.copy(),
             is_first_plan=False,
         )
         self._replanner.submit(request)
@@ -458,7 +474,11 @@ class RealRunner:
         from src.real.safety_adapter import SafetyAdapter
 
         # 1. 组装组件
-        mpc = MPCController(self._env, self._build_episode_mpc_config())
+        mpc = MPCController(
+            self._env,
+            self._build_episode_mpc_config(),
+            robot_limits=self._robot_limits,
+        )
         perception = PerceptionAdapter(self._perceiver)
         safety = SafetyAdapter(self._safety, self._env)
         executor = RobotExecutor(self._robot)
@@ -494,7 +514,7 @@ class RealRunner:
     def _build_episode_mpc_config(self) -> "MPCConfig":
         """构建 run_episode 专用 MPCConfig（真机位置模式对齐）。
 
-        从现有 replan_cfg 提取时间/horizon 参数（保持与 start/step/stop
+        从现有 config 提取时间/horizon 参数（保持与 start/step/stop
         路径一致），迭代次数采用真机保守值（少迭代减延迟）。
 
         Returns:
@@ -505,10 +525,10 @@ class RealRunner:
         return MPCConfig(
             is_position_mode=True,
             version="real",
-            dt=float(self._replan_cfg.get("dt", 0.005)),
-            total_horizon=int(self._replan_cfg.get("total_horizon", 200)),
-            fixed_horizon=int(self._replan_cfg.get("fixed_horizon", 60)),
-            replan_interval=int(self._replan_cfg.get("replan_interval", 20)),
+            dt=self._config.dt,
+            total_horizon=self._config.total_horizon,
+            fixed_horizon=self._config.fixed_horizon,
+            replan_interval=self._config.replan_interval,
             max_iter_per_plan=3,
             first_plan_iters=5,
             near_plan_iters=2,

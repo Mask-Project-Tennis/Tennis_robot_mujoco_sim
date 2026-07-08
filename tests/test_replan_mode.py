@@ -29,6 +29,7 @@ def _make_request(step: int = 10) -> PlanRequest:
         p_hit_current=np.array([0.0, -0.5, 1.2]),
         v_hit_desired=np.array([0.0, 1.8, 0.0]),
         n_des_current=np.array([0.0, 1.0, 0.0]),
+        d_hat=np.array([0.0, 1.0, 0.0]),
         is_first_plan=False,
     )
 
