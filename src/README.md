@@ -77,7 +77,6 @@ from src.utils.mujoco_loader import load_mujoco_model     # 跨平台模型加�
 - `jt_init.py`：位置模式 JT 初始控制 + 后摆 warm-start
 - `robot_env_protocol.py`：`RobotEnv` Protocol（@runtime_checkable，RM65Env/PlanningEnv 共同接口）
 - `planning_env.py`：`PlanningEnv` MPC 规划计算环境（MuJoCo 纯计算，无球/无左臂/无碰撞，供真机管线 iLQR 规划用）
-- `costs/`：模块化代价函数基类（`BaseCost` + `HittingCost`）
 - `tube_types.py`：Tube 数据结构（TubeConfig/HitWindow/HittingTube/ReplanState）
 - `tube_builder.py`：Tube 构建函数（search_hit_window/build_hitting_tube）
 - `tube_cost.py`：代价包装器（TubeHittingCostWrapper/TubeOnlyCost/SoftminOnlyCost）

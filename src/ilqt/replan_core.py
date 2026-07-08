@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -36,6 +36,7 @@ from src.tennis.hitting import find_hitting_point_physics
 if TYPE_CHECKING:
     from src.ilqt.mpc_controller import MPCConfig
     from src.ilqt.robot_limits import RobotLimits
+    from src.ilqt.solver import ILQTSolver
     from src.sim.rm65_env import RM65Env
 
 
@@ -48,7 +49,7 @@ def do_replan(
     state: ReplanState,
     config: "MPCConfig",
     robot_limits: "RobotLimits",
-    solver: Any,
+    solver: ILQTSolver,
 ) -> PlanResult:
     """在后台线程中执行完整的重规划流程。
 

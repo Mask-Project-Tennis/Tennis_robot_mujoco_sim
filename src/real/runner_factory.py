@@ -48,7 +48,7 @@ __all__ = [
     "KD",
     "build_robot_limits",
     "build_solver",
-    "_build_real_robot_mpc_config",
+    "build_real_robot_mpc_config",
 ]
 
 
@@ -82,7 +82,7 @@ def build_robot_limits(env: PlanningEnv, config: RealRobotConfig) -> RobotLimits
     )
 
 
-def _build_real_robot_mpc_config(config: RealRobotConfig) -> "MPCConfig":
+def build_real_robot_mpc_config(config: RealRobotConfig) -> "MPCConfig":
     """构建真机专用 MPCConfig（从 RealRobotConfig 读取可调参数）。
 
     dt / racket_speed 从 config 读取，

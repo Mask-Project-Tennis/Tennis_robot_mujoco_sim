@@ -24,7 +24,7 @@ from src.real.runner_factory import (
     INIT_Q_LEFT,
     KD,
     KP,
-    _build_real_robot_mpc_config,
+    build_real_robot_mpc_config,
     build_robot_limits,
     build_solver,
 )
@@ -66,7 +66,7 @@ def _build_planning_setup(
 
     robot_limits = build_robot_limits(env, _CFG)
     solver = build_solver()
-    config = _build_real_robot_mpc_config(_CFG)
+    config = build_real_robot_mpc_config(_CFG)
 
     # 创建 env_plan（独立 MjData，由 AsyncReplanner 延迟构建）
     model_path = Path(__file__).resolve().parent.parent / "src" / "robot" / "rm65_model.xml"
@@ -90,7 +90,7 @@ def test_replan_reachable_ball() -> None:
 
     robot_limits = build_robot_limits(env, _CFG)
     solver = build_solver()
-    config = _build_real_robot_mpc_config(_CFG)
+    config = build_real_robot_mpc_config(_CFG)
 
     arm_state = env.get_arm_state()
     request = PlanRequest(
@@ -125,7 +125,7 @@ def test_replan_unreachable_ball() -> None:
 
     robot_limits = build_robot_limits(env, _CFG)
     solver = build_solver()
-    config = _build_real_robot_mpc_config(_CFG)
+    config = build_real_robot_mpc_config(_CFG)
 
     arm_state = env.get_arm_state()
     request = PlanRequest(

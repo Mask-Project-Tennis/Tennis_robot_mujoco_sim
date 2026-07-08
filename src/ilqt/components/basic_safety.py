@@ -27,8 +27,9 @@ class BasicSafetyFilter:
         q_lower: (NU,) 关节位置下限，弧度。
         q_upper: (NU,) 关节位置上限，弧度。
         max_qdot: (NU,) 关节速度上限，弧度/秒。
-        max_tcp_speed: TCP 最大线速度 m/s（本基础版未实现 TCP 预测，
-            保留参数以兼容接口；留作 TODO）。
+        max_tcp_speed: TCP 最大线速度 m/s（**设计上不检查** — 需要 env FK
+            做 TCP 速度预测，本基础版无 env 依赖。如需 TCP 检查请用
+            PredictiveSafetyFilter。参数保留仅为构造签名一致性）。
     """
 
     def __init__(
@@ -83,5 +84,5 @@ class BasicSafetyFilter:
         if np.any(np.abs(qdot) > self._max_qdot):
             return np.asarray(u_cmd), False
 
-        # TODO: max_tcp_speed 检查需要 env FK，本基础版不支持。
+        # 设计决策：TCP 速度检查需要 env FK，本基础版不支持（见类 docstring）。
         return np.asarray(u_cmd), True

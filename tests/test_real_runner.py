@@ -28,7 +28,7 @@ from src.real.runner_factory import (
     INIT_Q_LEFT,
     KD,
     KP,
-    _build_real_robot_mpc_config,
+    build_real_robot_mpc_config,
     build_robot_limits,
     build_solver,
 )
@@ -104,7 +104,7 @@ def _build_test_runner(
     # 7. 规划配置：构建 MPCConfig + 直接传 RealRunner（无翻译层）
     robot_limits = robot_limits_pre
     solver = build_solver()
-    mpc_config = _build_real_robot_mpc_config(_CFG)
+    mpc_config = build_real_robot_mpc_config(_CFG)
 
     # 8. 重规划状态
     replan_state = ReplanState(

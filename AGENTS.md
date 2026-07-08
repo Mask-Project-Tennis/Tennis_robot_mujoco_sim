@@ -132,10 +132,6 @@ mujoco_sim/
 │   │   │   ├── sim_perception.py      # SimPerception 读 MuJoCo 球状态
 │   │   │   ├── predictive_safety.py   # PredictiveSafetyFilter（beta 递降 + X 墙，X_WALL_BODY_NAMES 共享常量）
 │   │   │   └── basic_safety.py        # BasicSafetyFilter（仅限位检查，构造时 RuntimeWarning）
-│   │   └── costs/                     # 模块化代价函数
-│   │       ├── __init__.py
-│   │       ├── base.py                # BaseCost 基类
-│   │       └── hitting.py             # 击打场景专用代价
 │   ├── cpp/                           # C++ 加速模块（pybind11）
 │   │   ├── __init__.py
 │   │   ├── solver_cpp.py              # Python 封装，桥接 C++ 和 Python（含 _backward_pass_numpy 参考实现）
