@@ -42,6 +42,7 @@ from src.real.trajectory_sink import CommandSink, RecorderSink, RobotSink, TeeSi
 from src.real.trajectory_source import (
     FileSource,
     ResampledSource,
+    TcpSpeedControllable,
     TcpSpeedLimiter,
     TrajectorySource,
 )
@@ -92,7 +93,7 @@ def pre_motion(
             return False
 
     # 限制 TCP 速度
-    if hasattr(robot, "set_max_tcp_speed"):
+    if isinstance(robot, TcpSpeedControllable):
         robot.set_max_tcp_speed(max_tcp_speed)
 
     robot.send_joint_command(traj.init_q)
@@ -165,7 +166,16 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="跳过控制模式安全检查（危险！仅用于确认旧文件是位置模式生成）",
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+
+    # 安全检查：speed > 1.0 会加速轨迹（点数压缩、关节跳变增大），真机不安全
+    if args.speed > 1.0:
+        parser.error(
+            f"--speed={args.speed} > 1.0 会加速轨迹，真机不安全。"
+            "仅支持减速（0 < speed ≤ 1.0）。"
+        )
+
+    return args
 
 
 def main() -> None:
@@ -255,7 +265,7 @@ def main() -> None:
             return
 
         # 恢复预运动期间降低的 TCP 速度
-        if hasattr(robot, "set_max_tcp_speed"):
+        if isinstance(robot, TcpSpeedControllable):
             robot.set_max_tcp_speed(config.max_tcp_speed)
 
         # 构建 Source 链
