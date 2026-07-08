@@ -27,24 +27,22 @@ python 04_send_zero_pose.py --config configs/real_robot.yaml
 
 | 字段 | 类型 | 测试默认 | 生产默认 | 单位 | 说明 |
 |------|------|---------|---------|------|------|
-| `ip` | str | `"192.168.1.18"` | 同左 | — | 机械臂 IP。左臂 `.18` / 右臂 `.19` |
+| `ip` | str | `"192.168.1.19"` | 同左 | — | 机械臂 IP。测试默认连右臂 `.19`；如需连左臂改为 `.18` |
 | `port` | int | `8080` | 同左 | — | 控制器端口，固定 8080 |
 
 **调参建议**：
-- 首次使用前用 `ping 192.168.1.18` 确认网络可达
+- 首次使用前用 `ping 192.168.1.19` 确认网络可达
 - 左右臂 IP 不同，切换臂时必须修改
 - 多台机械臂在同一网段时注意 IP 冲突
 
 ---
 
-### [2] control — 控制模式
+### [2] control — 控制参数
 
 | 字段 | 类型 | 测试默认 | 生产默认 | 单位 | 说明 |
 |------|------|---------|---------|------|------|
-| `control_mode` | str | `"ip"` | 同左 | — | `"ip"` 稳定 / `"canfd"` 高跟随 |
 | `dt` | float | `0.005` | 同左 | 秒 | MPC 规划步长（不影响测试脚本发送频率） |
-| `canfd_trajectory_mode` | int | `1` | 同左 | — | canfd 专用: 0=透传 1=曲线拟合 2=滤波 |
-| `canfd_smooth_radio` | int | `50` | 同左 | — | canfd 专用: 平滑系数 0-100 |
+| `target_hit_speed` | float | `1.8` | 同左 | m/s | 期望击球速度，影响挥拍规划目标 |
 
 **关键区分**：
 - `control.dt` = MPC 规划步长（5ms），用于 iLQR 算法
@@ -52,8 +50,7 @@ python 04_send_zero_pose.py --config configs/real_robot.yaml
 - 两者**完全独立**，不要混淆
 
 **调参建议**：
-- 测试脚本始终用 `"ip"` 模式（`rm_movej_follow`），简单稳定
-- `"canfd"` 模式需要 ≤10ms 发送周期，适合 MPC 实时控制，不适合慢速测试
+- 测试脚本固定用 `rm_movej_follow`（ip 模式），简单稳定
 
 ---
 
@@ -190,7 +187,7 @@ python 04_send_zero_pose.py --config configs/real_robot.yaml
 | 配置字段 | 影响的脚本 | 影响方式 |
 |----------|-----------|---------|
 | `robot.ip` / `robot.port` | 01-08 全部 | `load_and_connect()` 连接目标 |
-| `control.control_mode` | 04/05/07/08 | `send_joint_command()` 选择 ip/canfd 接口 |
+| （无） | 04/05/07/08 | 脚本固定用 `rm_movej_follow`（ip 模式），不读 control 字段 |
 | `safety.collision_stage` | 01-08 全部 | 连接时 `_configure_safety()` 下发到固件 |
 | `safety.enable_self_collision` | 01-08 全部 | 同上 |
 | `safety.torque_limit` | 01-08 全部 | 同上 |
@@ -206,9 +203,9 @@ python 04_send_zero_pose.py --config configs/real_robot.yaml
 ### 场景 1: 首次连接测试
 
 ```yaml
-# 使用默认测试配置即可，仅需修改 IP
+# 使用默认测试配置即可（默认连右臂 .19）
 robot:
-  ip: "192.168.1.18"   # ← 改成你的机械臂 IP
+  ip: "192.168.1.19"   # ← 改成你的机械臂 IP
 ```
 
 ### 场景 2: 碰撞频繁误触发
@@ -234,9 +231,9 @@ position_mode:
   kd: [40, 40, 20, 10, 10, 5]    # 升阻尼
 ```
 
-### 场景 5: 切换到右臂测试
+### 场景 5: 切换到左臂测试
 
 ```yaml
 robot:
-  ip: "192.168.1.19"   # .18 → .19
+  ip: "192.168.1.18"   # .19 → .18
 ```

@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """14_velocity_passthrough.py — 速度透传测试。
 
+⚠️ 已知问题：方向偏差 ~77°（基坐标系旋转），结果仅供调试参考，勿作为基线。
+测试结论：rm_movev_canfd 不可用于 MPC 控制，rm_movej_follow 是唯一可行接口。
+
 测试 rm_movev_canfd 笛卡尔空间速度透传功能。
 中风险: 连续运动，需要实时监控 + 急停准备。
 

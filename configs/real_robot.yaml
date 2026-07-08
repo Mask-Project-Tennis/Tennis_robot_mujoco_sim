@@ -5,7 +5,7 @@
 # 实验时最常调整（按优先级）:
 #   1. [3] safety.collision_stage  — 碰撞灵敏度，首次 5，稳定后降低
 #   2. [3] safety.max_tcp_speed    — TCP 速度限制，0.5→1.0 逐步提高
-#   3. [2] control.control_mode     — "ip"(稳) vs "canfd"(高跟随)
+#   3. [2] control.target_hit_speed — 期望击球速度，影响挥拍规划目标
 #   4. [4] position_mode.kp / kd   — PD 增益，跟踪精度
 #   5. [7] perception pos/vel_std  — KF 滤波强度
 #
