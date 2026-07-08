@@ -117,7 +117,7 @@ mujoco_sim/
 │   │   ├── replan_core.py             # do_replan(request, env_plan, state, config, robot_limits, solver) 类型化签名
 │   │   ├── ball_predictor.py          # BallPredictor 解析抛物线预测（无 MuJoCo 依赖）
 │   │   ├── mpc_helpers.py             # JT 初始控制 + fix_joint5 + R 退火调度
-│   │   ├── tube_types.py              # TubeConfig / HittingTube / ReplanState 数据结构
+│   │   ├── tube_types.py              # TubeConfig / HitWindow / HittingTube / BallTrajectoryTube / ReplanState 数据结构
 │   │   ├── tube_builder.py            # Tube 走廊构建
 │   │   ├── tube_cost.py               # Tube 走廊代价
 │   │   ├── strategies/                # ★ 可插拔策略模块（5 个 Protocol）
@@ -151,7 +151,8 @@ mujoco_sim/
 │   │   └── hit_detection.py           # 击打检测共享模块（classify_hit_result + determine_hit_from_type）
 │   ├── perception/                    # 感知模块（噪声+滤波）
 │   │   ├── __init__.py
-│   │   └── ball_estimator.py          # 6D 卡尔曼滤波器（位置+速度，匀速+重力过程模型）
+│   │   ├── ball_estimator.py          # 6D 卡尔曼滤波器（位置+速度，匀速+重力过程模型）
+│   │   └── ball_obs_gate.py           # 观测门控（频率控制 + 异常值剔除）
 │   ├── tennis/                        # 网球场景相关
 │   │   ├── __init__.py
 │   │   ├── ball.py                    # 网球抛物线轨迹预测
@@ -164,7 +165,19 @@ mujoco_sim/
 │   │   ├── adaptive_timer.py          # 在线自适应频率控制（EMA 平滑）
 │   │   ├── safety_monitor.py          # 软件层安全检查（关节位置/速度/TCP 超限）
 │   │   ├── ball_sensor.py             # BallSensor ABC + SimulatedBallSensor（动捕/相机抽象接口）
-│   │   └── ball_perceiver.py          # BallPerceiver（sensor → 有限差分速度 → KF 滤波 → pos/vel）
+│   │   ├── ball_perceiver.py          # BallPerceiver（sensor → 有限差分速度 → KF 滤波 → pos/vel）
+│   │   ├── robot_arm_protocol.py      # RobotArmInterface Protocol（@runtime_checkable，真机/Mock 共同接口）
+│   │   ├── fake_robot.py              # FakeRobot Mock 实现（简单一阶动力学，测试用）
+│   │   ├── real_runner.py             # RealRunner 真机主循环（start/step/stop 分步 + run_episode 编排）
+│   │   ├── runner_factory.py          # 工厂函数（build_robot_limits + build_solver + build_real_robot_mpc_config + 共享常量）
+│   │   ├── robot_executor.py          # RobotExecutor 适配器（RobotArmInterface → ExecutorComponent）
+│   │   ├── perception_adapter.py      # PerceptionAdapter 适配器（BallPerceiver → PerceptionComponent）
+│   │   ├── safety_adapter.py          # SafetyAdapter 适配器（SafetyMonitor → SafetyComponent）
+│   │   ├── resample_strategy.py       # 轨迹重采样策略（时间轴拉伸 + 三次样条插值）
+│   │   ├── trajectory_types.py        # 重演轨迹数据结构（ReplayTrajectory）
+│   │   ├── trajectory_source.py       # 轨迹源接口（TrajectorySource Protocol）
+│   │   ├── trajectory_sink.py         # 命令消费 Sink 链（TeeSink Composite + 责任链）
+│   │   └── trajectory_recorder.py     # 轨迹记录器（仿真侧记录，真机侧重演）
 │   └── utils/
 │       ├── __init__.py
 │       ├── math_utils.py              # 通用数学工具
@@ -183,6 +196,7 @@ mujoco_sim/
 │   ├── rm65_evaluate.py                          # 评估脚本
 │   ├── run_20hits_video.py                       # 连续 20 次击打视频生成脚本
 │   ├── run_real_robot.py                         # 真机入口
+│   ├── replay_trajectory.py                      # 轨迹回放脚本（含 --speed 安全检查）
 │   ├── sim/            # 独立仿真（fast/ilqt/train 等工具）
 │   ├── exp/            # 实验设施（活跃: exp9-15 包装·批量·运行器）
 │   ├── extract/        # 结果提取 9 个（日志→CSV）
@@ -191,7 +205,7 @@ mujoco_sim/
 │   ├── test/           # 快速验证 10 个
 │   ├── archive/        # ★ 已归档脚本（V6-V10 + tube + 旧实验，详见 archive/README.md）
 │   └── README.md       # 完整清单与说明
-├── tests/                             # 单元测试（347 tests，42 个文件）
+├── tests/                             # 单元测试（468 tests，48 个文件）
 │   ├── test_kinematics.py
 │   ├── test_linearize.py
 │   ├── test_mpc.py
@@ -504,7 +518,19 @@ src/real/                              # 真机部署模块（纯真机接口，
 ├── adaptive_timer.py                 # 在线自适应频率控制（EMA 平滑）
 ├── safety_monitor.py                 # 软件层安全检查（关节位置/速度/TCP 超限）
 ├── ball_sensor.py                    # BallSensor ABC + SimulatedBallSensor（动捕/相机抽象接口）
-└── ball_perceiver.py                  # BallPerceiver（sensor → 有限差分速度 → KF 滤波 → pos/vel）
+├── ball_perceiver.py                  # BallPerceiver（sensor → 有限差分速度 → KF 滤波 → pos/vel）
+├── robot_arm_protocol.py              # RobotArmInterface Protocol（@runtime_checkable，真机/Mock 共同接口）
+├── fake_robot.py                      # FakeRobot Mock 实现（简单一阶动力学，测试用）
+├── real_runner.py                     # RealRunner 真机主循环（start/step/stop 分步 + run_episode 编排）
+├── runner_factory.py                  # 工厂函数（build_robot_limits + build_solver + build_real_robot_mpc_config + 共享常量）
+├── robot_executor.py                  # RobotExecutor 适配器（RobotArmInterface → ExecutorComponent）
+├── perception_adapter.py              # PerceptionAdapter 适配器（BallPerceiver → PerceptionComponent）
+├── safety_adapter.py                  # SafetyAdapter 适配器（SafetyMonitor → SafetyComponent）
+├── resample_strategy.py               # 轨迹重采样策略（时间轴拉伸 + 三次样条插值）
+├── trajectory_types.py                # 重演轨迹数据结构（ReplayTrajectory）
+├── trajectory_source.py               # 轨迹源接口（TrajectorySource Protocol）
+├── trajectory_sink.py                 # 命令消费 Sink 链（TeeSink Composite + 责任链）
+└── trajectory_recorder.py             # 轨迹记录器（仿真侧记录，真机侧重演）
 src/ilqt/
 └── planning_env.py                    # MPC 规划计算环境（MuJoCo 纯计算，不接触真机硬件）
 configs/
@@ -547,6 +573,37 @@ configs/
 - 无球物理/无左臂PD/无碰撞（全禁用，碰撞由控制器固件负责）
 - 支持力矩模式 + 位置模式（`configure_actuator_mode`）
 
+#### `robot_arm_protocol.py` — RobotArmInterface Protocol
+- `@runtime_checkable` Protocol，真机（RobotInterface）与 Mock（FakeRobot）的共同接口
+- 方法：`connect()` / `disconnect()` / `send_joint_angles()` / `get_joint_state()` / `slow_stop()` / `emergency_stop()`
+
+#### `fake_robot.py` — FakeRobot Mock
+- `RobotArmInterface` 的 Mock 实现，简单一阶动力学（角度命令低通跟踪）
+- 测试用，不接触真实硬件
+
+#### `real_runner.py` — RealRunner
+- 真机部署主循环，分步 API：`start()` / `step()` / `stop()`
+- `run_episode()` 编排：初始化 → 感知循环 → MPC 规划 → 执行 → 安全检查
+- 内部组装 EpisodeRunner 管线（PerceptionAdapter + RobotExecutor + SafetyAdapter）
+
+#### `runner_factory.py` — 工厂函数
+- `build_robot_limits()`：从 RealRobotConfig 构建 RobotLimits（关节限位/TCP/dt）
+- `build_real_robot_mpc_config()`：构建真机专用 MPCConfig（从 YAML 读取可调参数）
+- 重导出 `build_solver`（纯 ILQTSolver 工厂属于 ilqt 层）
+- 共享常量：DT / INIT_Q / KP / KD / SHOULDER_POS / WORKSPACE_RADIUS（对齐 V11 真机配置）
+
+#### 适配器三件套（Adapter Pattern）
+- `robot_executor.py` — `RobotExecutor`：RobotArmInterface → ExecutorComponent（下发角度命令）
+- `perception_adapter.py` — `PerceptionAdapter`：BallPerceiver → PerceptionComponent（读球状态）
+- `safety_adapter.py` — `SafetyAdapter`：SafetyMonitor → SafetyComponent（安全检查）
+
+#### 轨迹重演模块（仿真→真机桥接）
+- `trajectory_types.py`：`ReplayTrajectory` 数据结构（q/v/u 完整轨迹，保存/加载/回放）
+- `trajectory_source.py`：`TrajectorySource` Protocol（装饰器链产出 q_desired 序列）
+- `trajectory_sink.py`：命令消费 Sink 链（Composite + 责任链模式，下发/记录/过滤）
+- `trajectory_recorder.py`：`TrajectoryRecorder`（仿真侧记录规划/执行轨迹，真机侧可重演）
+- `resample_strategy.py`：轨迹重采样策略（时间轴拉伸 + 三次样条插值）
+
 ### 三层安全架构
 ```
 Layer 1: 控制器固件（实时，连接时配置）
@@ -575,7 +632,7 @@ Layer 3: 紧急停止（兜底）
 | Stage 4 | ✅ | `robot_interface` + `torque_to_position` + `adaptive_timer` + `safety_monitor` |
 | Stage 5 | ✅ | `ball_sensor` + `ball_perceiver` |
 | Stage 6 | ✅ | MPCController + EpisodeRunner 管线解耦完成，V12 使用 EpisodeRunner 架构（命中率 4/4 > V11 的 2/4） |
-| Stage 7 | ✅ | `real_runner.py`（start/step/stop 分步，4 tests Mock 闭环）+ `run_real_robot.py` 入口 |
+| Stage 7 | ✅ | `real_runner.py`（start/step/stop 分步，8 tests Mock 闭环）+ `run_real_robot.py` 入口 |
 
 ### 待确认事项
 - **真机 MuJoCo 模型**：当前使用占位模型（rm65_model.xml），真机模型开发中

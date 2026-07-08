@@ -77,7 +77,7 @@ from src.utils.mujoco_loader import load_mujoco_model     # 跨平台模型加�
 - `jt_init.py`：位置模式 JT 初始控制 + 后摆 warm-start
 - `robot_env_protocol.py`：`RobotEnv` Protocol（@runtime_checkable，RM65Env/PlanningEnv 共同接口）
 - `planning_env.py`：`PlanningEnv` MPC 规划计算环境（MuJoCo 纯计算，无球/无左臂/无碰撞，供真机管线 iLQR 规划用）
-- `tube_types.py`：Tube 数据结构（TubeConfig/HitWindow/HittingTube/ReplanState）
+- `tube_types.py`：Tube 数据结构（TubeConfig/HitWindow/HittingTube/BallTrajectoryTube/ReplanState）
 - `tube_builder.py`：Tube 构建函数（search_hit_window/build_hitting_tube）
 - `tube_cost.py`：代价包装器（TubeHittingCostWrapper/TubeOnlyCost/SoftminOnlyCost）
 - `mpc_helpers.py`：JT 初始控制 dispatch + fix_joint5 + R 退火调度
@@ -134,7 +134,7 @@ from src.utils.mujoco_loader import load_mujoco_model     # 跨平台模型加�
 - `robot_arm_protocol.py`：`RobotArmInterface` Protocol（@runtime_checkable，真机/Mock 共同接口）
 - `fake_robot.py`：`FakeRobot` Mock 实现（简单一阶动力学，测试用）
 - `real_runner.py`：`RealRunner` 真机部署主循环（start/step/stop 分步 + run_episode EpisodeRunner 编排）
-- `runner_factory.py`：工厂函数（build_robot_limits + build_solver 重导出 + 共享常量）
+- `runner_factory.py`：工厂函数（build_robot_limits + build_solver 重导出 + build_real_robot_mpc_config + 共享常量）
 - `robot_executor.py`：`RobotExecutor` 适配器（RobotArmInterface → ExecutorComponent）
 - `perception_adapter.py`：`PerceptionAdapter` 适配器（BallPerceiver → PerceptionComponent）
 - `safety_adapter.py`：`SafetyAdapter` 适配器（SafetyMonitor → SafetyComponent）

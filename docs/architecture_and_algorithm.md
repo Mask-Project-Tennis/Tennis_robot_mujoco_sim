@@ -73,7 +73,7 @@
 | **MPCController** | `ilqt/mpc_controller.py` | EpisodeRunner | MPC 外循环：阶段调度 / 击球点精化 / 随挥 / 重规划调度 |
 | **do_replan** | `ilqt/replan_core.py` | MPCController.step() | 单次重规划：球预测→代价构建→iLQR→buffer |
 | **ILQTSolver** | `ilqt/solver.py` / `cpp/` | do_replan | iLQR 内循环：线性化→代价导数→Riccati→线搜索 |
-| **HittingCost** | `ilqt/cost.py` / `costs/` | do_replan | 代价函数：终端(位置+速度+法向) + 运行(控制+平滑) |
+| **HittingCost** | `ilqt/cost.py` | do_replan | 代价函数：终端(位置+速度+法向) + 运行(控制+平滑) |
 | **TubeHittingCostWrapper** | `ilqt/tube_cost.py` | do_replan | 走廊代价：在候选窗口施加空间约束 |
 | **PlanningEnv** | `ilqt/planning_env.py` | do_replan | MuJoCo 纯计算环境（FK / Jacobian / 前向仿真） |
 | **RobotLimits** | `ilqt/robot_limits.py` | do_replan, SafetyFilter | 关节约束 + 安全滤波（beta 递降） |

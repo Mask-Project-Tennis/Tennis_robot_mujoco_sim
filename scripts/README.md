@@ -10,7 +10,7 @@
 
 | 目录 | 数量 | 内容 | 运行方式 |
 |------|------|------|---------|
-| `scripts/` (根) | 6 | 活跃核心脚本 | `python scripts/xxx.py --args` |
+| `scripts/` (根) | 7 | 活跃核心脚本 | `python scripts/xxx.py --args` |
 | `sim/` | 11 | 独立仿真（MPC/iLQR/Training/工具） | `python scripts/sim/xxx.py --args` |
 | `exp/` | ~20 | 活跃实验基础设施（exp9-15） | `python scripts/exp/xxx.py --args` |
 | `extract/` | 9 | 结果提取：日志 → CSV | `python scripts/extract/xxx.py` |
@@ -19,7 +19,7 @@
 | `test/` | 10 | 快速验证脚本 | `python scripts/test/xxx.py` |
 | `archive/` | 53 | 已归档（V6-V10 + tube + 旧实验） | 详见 `archive/README.md` |
 
-## 根目录（6 个）
+## 根目录（7 个）
 
 | 文件 | 用途 |
 |------|------|
@@ -29,6 +29,7 @@
 | `rm65_evaluate.py` | 评估脚本 |
 | `run_20hits_video.py` | 连续 20 次击打视频生成 |
 | `run_real_robot.py` | 真机入口 |
+| `replay_trajectory.py` | 轨迹回放（含 --speed 安全检查） |
 
 ## sim/ — 独立仿真（11 个）
 
