@@ -92,10 +92,6 @@ class MPCConfig:
     backswing_offset: float = 0.6
     backswing_ratio: float = 0.35
 
-    # ── 安全参数 ──
-    terminal_exempt_steps: int = 20
-    dq_max_fraction: float = 0.5
-
     # ── 几何参数 ──
     shoulder_pos: np.ndarray = field(
         default_factory=lambda: np.array([-0.1, -0.22693, 1.302645])

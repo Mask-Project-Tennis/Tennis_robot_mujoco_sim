@@ -591,8 +591,6 @@ def main() -> None:
         use_backswing=use_backswing,
         backswing_offset=backswing_offset,
         backswing_ratio=backswing_ratio,
-        terminal_exempt_steps=args.terminal_exempt_steps if args.terminal_exempt_steps is not None else 20,
-        dq_max_fraction=args.dq_max_fraction if args.dq_max_fraction is not None else 0.5,
         shoulder_pos=shoulder_pos,
         workspace_radius=workspace_radius,
         time_perturb_s=time_perturb_s,
