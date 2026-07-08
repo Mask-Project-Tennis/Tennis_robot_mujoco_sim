@@ -26,6 +26,8 @@ class FakeRobot:
         self.command_history: list[np.ndarray] = []
         self.slow_stop_count = 0
         self.emergency_stop_count = 0
+        self._max_tcp_speed: float = 0.0
+        self.set_max_tcp_speed_calls: list[float] = []
 
     def connect(self) -> bool:
         self._connected = True
@@ -50,3 +52,8 @@ class FakeRobot:
 
     def slow_stop(self) -> None:
         self.slow_stop_count += 1
+
+    def set_max_tcp_speed(self, speed: float) -> None:
+        """设置 TCP 最大线速度（测试 Mock）。"""
+        self._max_tcp_speed = speed
+        self.set_max_tcp_speed_calls.append(speed)

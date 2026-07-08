@@ -46,6 +46,7 @@ from src.ilqt.episode_runner import EpisodeRunner
 from src.ilqt.components.sim_perception import SimPerception
 from src.ilqt.components.predictive_safety import PredictiveSafetyFilter
 from src.ilqt.components.sim_component import SimComponent
+from src.real.trajectory_recorder import TrajectoryRecorder
 
 logging.basicConfig(
     level=logging.INFO,
@@ -137,7 +138,7 @@ def main() -> None:
     parser.add_argument("--fixed-direction", action="store_true", help="使用固定 YAML hit_direction")
     parser.add_argument("--target-speed", type=float, default=1.8, help="终端目标速度 (m/s)")
     parser.add_argument("--no-plot", action="store_true", help="禁用 matplotlib 可视化")
-    parser.add_argument("--dump-trajectory", type=str, default=None, help="保存轨迹到 pickle")
+    parser.add_argument("--dump-trajectory", type=str, default=None, help="保存轨迹到 npz 文件（可被 replay_trajectory.py 加载）")
     parser.add_argument("--realtime", action="store_true", help="模拟实时节奏")
     parser.add_argument("--async-replan", action="store_true", help="启用异步重规划")
     parser.add_argument("--time-perturb-ms", type=float, default=0.0, help="球到达时间预测扰动 (ms)")
@@ -631,11 +632,28 @@ def main() -> None:
     sim_component.X_history = [x0.copy()]
     sim_component.ball_pos_history = [p0.copy()]
 
+    # 创建轨迹记录器（如果 --dump-trajectory 指定）
+    recorder = None
+    if args.dump_trajectory:
+        recorder = TrajectoryRecorder(
+            env=env,
+            init_q=init_q,
+            init_q_left=init_q_left,
+            dt=dt,
+            metadata={
+                "p0": p0_real.tolist(),
+                "v0": v0_real.tolist(),
+                "ball_speed": args.ball_speed,
+                "is_position_mode": is_position_mode,
+            },
+        )
+
     runner = EpisodeRunner(
         mpc=mpc,
         perception=perception,
         safety=safety,
         executor=sim_component,
+        post_exec_hooks=[recorder.make_hook()] if recorder else [],
     )
 
     # ==========================================================================
@@ -655,7 +673,7 @@ def main() -> None:
     post_hit_steps = 20
     logger.info(f"击打后继续仿真 {post_hit_steps} 步...")
     x_current = env.get_arm_state()
-    for _ in range(post_hit_steps):
+    for i in range(post_hit_steps):
         q_hold = x_current[:env.NQ].copy()
         if is_position_mode:
             u_hold = q_hold.copy()
@@ -668,6 +686,17 @@ def main() -> None:
         sim_component.X_history.append(x_current.copy())
         sim_component.U_history.append(u_hold.copy())
         sim_component.ball_pos_history.append(ball_pos_post.copy())
+
+        # 记录 post-hit 步到 TrajectoryRecorder（hook 不覆盖此段）
+        if recorder is not None:
+            step_idx = total_horizon + follow_through_steps + i
+            recorder.record(
+                q_desired=q_hold.copy(),
+                q_actual=x_current[:env.NQ].copy(),
+                timestamp=step_idx * dt,
+                tcp_pos=env.get_ee_pos().copy(),
+                ball_pos=ball_pos_post.copy(),
+            )
 
     # ==========================================================================
     # 15. 评估（对齐 V11 2245-2505）
@@ -771,25 +800,17 @@ def main() -> None:
     # ==========================================================================
     # 16. 保存轨迹
     # ==========================================================================
-    if args.dump_trajectory:
-        import pickle as _pickle
-        traj_data = {
-            "X_history": X_history,
-            "U_history": U_history,
-            "ball_pos_history": ball_pos_history,
-            "init_q": init_q,
-            "init_q_left": init_q_left,
-            "pos_error": pos_error,
+    if args.dump_trajectory and recorder is not None:
+        # 评估完成后更新 metadata
+        recorder._metadata.update({
             "hit_type": hit_type_en,
-            "p0": p0_real,
-            "v0": v0_real,
+            "pos_error": float(pos_error),
             "hit_step": hit_step,
             "post_hit_steps": post_hit_steps,
-        }
+        })
         dump_path = Path(args.dump_trajectory)
-        dump_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(dump_path, "wb") as _f:
-            _pickle.dump(traj_data, _f)
+        recorder.save(dump_path, hit_step=hit_step)
+        logger.info(f"轨迹已保存至 {dump_path}（.npz 格式，{len(recorder._q_desired_list)} 步）")
 
     # ==========================================================================
     # 17. 可视化

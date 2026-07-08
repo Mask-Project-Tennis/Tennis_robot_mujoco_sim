@@ -170,3 +170,18 @@ class RobotInterface:
             self._last_q = None
             self._last_time = None
             logger.info("机械臂连接已断开")
+
+    def set_max_tcp_speed(self, speed: float) -> None:
+        """设置 TCP 最大线速度（m/s）。
+
+        对 rm_movej_follow 有效（控制器固件层 TCP 速度限制）。
+        用于重演时限制运动速度作为安全兜底。
+
+        Args:
+            speed: TCP 最大线速度（m/s），如 0.3 表示 0.3 m/s
+        """
+        if not self._connected or self._arm is None:
+            raise RuntimeError("机器人未连接")
+        ret = self._arm.rm_set_arm_max_line_speed(speed)
+        if ret != 0:
+            logger.warning("rm_set_arm_max_line_speed 返回码: %d", ret)
