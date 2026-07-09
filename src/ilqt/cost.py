@@ -1,7 +1,156 @@
-"""iLQT 代价函数：终端击打点代价 + 拍面法向量代价 + 运行代价 + 身体硬约束。"""
+"""iLQT 代价函数：终端击打点代价 + 拍面法向量代价 + 运行代价 + 身体硬约束。
+
+Phase 1 (C1): FKContext + RunningDerivatives + TerminalDerivatives 基础设施。
+Phase 2 (C2): CompositeCost + 惩罚项组合化（替换旧 HittingCost）。
+"""
+
+from __future__ import annotations
 
 import numpy as np
 from src.sim.env import MujocoEnv
+
+
+class RunningDerivatives:
+    """惩罚项运行导数贡献（Flyweight 模式）。
+
+    数组在惩罚项构造时预分配，每步 np.copyto 原地更新。
+    返回持久引用——零分配/步。
+
+    None 语义：此项数学上不依赖该变量（非缺失实现）。
+    例如 ControlEffortTerm.l_x = None，因为 R·u² 不依赖状态 x。
+    """
+
+    __slots__ = ("l_x", "l_u", "l_xx", "l_ux", "l_uu")
+
+    def __init__(
+        self,
+        l_x: np.ndarray | None = None,
+        l_u: np.ndarray | None = None,
+        l_xx: np.ndarray | None = None,
+        l_ux: np.ndarray | None = None,
+        l_uu: np.ndarray | None = None,
+    ) -> None:
+        """初始化导数容器。
+
+        Args:
+            l_x: 状态梯度 (NX,)。None=不依赖状态。
+            l_u: 控制梯度 (NU,)。None=不依赖控制。
+            l_xx: 状态 Hessian (NX,NX)。None=不依赖状态。
+            l_ux: 控制-状态交叉 Hessian (NU,NX)。None=不贡献。
+            l_uu: 控制 Hessian (NU,NU)。None=不依赖控制。
+        """
+        self.l_x = l_x
+        self.l_u = l_u
+        self.l_xx = l_xx
+        self.l_ux = l_ux
+        self.l_uu = l_uu
+
+
+class TerminalDerivatives:
+    """惩罚项终端导数贡献（Flyweight 模式）。
+
+    同 RunningDerivatives，但终端代价仅依赖状态（无控制）。
+    """
+
+    __slots__ = ("l_x", "l_xx")
+
+    def __init__(
+        self,
+        l_x: np.ndarray | None = None,
+        l_xx: np.ndarray | None = None,
+    ) -> None:
+        """初始化终端导数容器。
+
+        Args:
+            l_x: 状态梯度 (NX,)。
+            l_xx: 状态 Hessian (NX,NX)。
+        """
+        self.l_x = l_x
+        self.l_xx = l_xx
+
+
+class FKContext:
+    """末端 FK 缓存上下文。
+
+    缓存一次 env.set_arm_state(x) 的全部末端 FK 结果（位置/速度/雅可比/法向量），
+    供所有惩罚项共享读取。惩罚项不直接接触 env，通过此对象获取 FK 量，
+    便于单元测试（MockFKContext 纯数据，不依赖 MuJoCo）。
+
+    相同状态重复调用 update 时跳过（避免冗余 mj_forward）。
+    """
+
+    def __init__(self, env) -> None:
+        """初始化 FK 上下文。
+
+        Args:
+            env: 满足 RobotEnv Protocol 的环境实例。
+        """
+        self._env = env
+        self._x_cached: np.ndarray | None = None
+        # 预分配缓存（避免每步重复分配）
+        self._p_ee: np.ndarray = np.zeros(3)
+        self._v_ee: np.ndarray = np.zeros(3)
+        self._J_p: np.ndarray = np.zeros((3, env.NQ))
+        self._J_r: np.ndarray = np.zeros((3, env.NQ))
+        self._n_rack: np.ndarray = np.zeros(3)
+        self._J_n: np.ndarray = np.zeros((3, env.NX))
+
+    def update(self, x: np.ndarray) -> None:
+        """设置机器人状态并缓存全部末端 FK 结果。
+
+        相同状态跳过（避免冗余 mj_forward 调用）。
+
+        Args:
+            x: 臂状态 [q(6), qdot(6)]，形状 (12,)。
+        """
+        if self._x_cached is not None and np.array_equal(x, self._x_cached):
+            return
+        self._env.set_arm_state(x)
+        self._p_ee = self._env.get_ee_pos()
+        self._v_ee = self._env.get_ee_vel()
+        self._J_p = self._env.get_ee_jacp()
+        self._J_r = self._env.get_ee_jacr()
+        self._n_rack = self._env.get_ee_normal()
+        # 法向量雅可比：J_n = skew(-n_rack) @ J_r，写入 (3, NX) 前 NQ 列
+        nx_, ny_, nz_ = -self._n_rack[0], -self._n_rack[1], -self._n_rack[2]
+        skew = np.array([
+            [0.0, -nz_, ny_],
+            [nz_, 0.0, -nx_],
+            [-ny_, nx_, 0.0],
+        ])
+        self._J_n = np.zeros((3, self._env.NX))
+        self._J_n[:, : self._env.NQ] = skew @ self._J_r
+        self._x_cached = x.copy()
+
+    @property
+    def p_ee(self) -> np.ndarray:
+        """末端位置 (3,)。"""
+        return self._p_ee
+
+    @property
+    def v_ee(self) -> np.ndarray:
+        """末端速度 (3,)。"""
+        return self._v_ee
+
+    @property
+    def J_p(self) -> np.ndarray:
+        """位置雅可比 (3, NQ)。"""
+        return self._J_p
+
+    @property
+    def J_r(self) -> np.ndarray:
+        """旋转雅可比 (3, NQ)。"""
+        return self._J_r
+
+    @property
+    def n_rack(self) -> np.ndarray:
+        """拍面法向量 (3,)，单位向量。"""
+        return self._n_rack
+
+    @property
+    def J_n(self) -> np.ndarray:
+        """法向量雅可比 (3, NX)。前 NQ 列 = skew(-n)@J_r，后 NQ 列为零。"""
+        return self._J_n
 
 
 class HittingCost:
