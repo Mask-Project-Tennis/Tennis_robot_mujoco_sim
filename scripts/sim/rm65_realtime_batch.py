@@ -29,6 +29,7 @@ from src.sim.rm65_env import RM65Env
 from src.tennis.ball import generate_ball_to_target_box
 from src.tennis.hitting import find_hitting_point_physics, compute_desired_hit_velocity
 from src.ilqt.cost import HittingCost
+from src.robot.constants import DT, SHOULDER_POS, WORKSPACE_RADIUS, INIT_Q, INIT_Q_LEFT
 try:
     from src.cpp.solver_cpp import ILQTSolver
 except ImportError:
@@ -64,7 +65,6 @@ FIRST_PLAN_ITERS = 3
 NEAR_PLAN_ITERS = 5
 HORIZON_CAP = 40
 TOTAL_HORIZON = 200
-DT = 0.005
 
 
 def load_config(path: Path) -> dict:
@@ -95,12 +95,12 @@ def run_single(seed: int, args: argparse.Namespace, base_config: dict) -> dict |
     config = merge_configs(base_config.copy(), base_config)
     dt = float(config["sim"]["dt"])
     g = np.array(config["ball"]["gravity"], dtype=np.float64)
-    shoulder_pos = np.array([-0.1, -0.22693, 1.302645], dtype=np.float64)
-    workspace_radius = 0.90
+    shoulder_pos = SHOULDER_POS
+    workspace_radius = WORKSPACE_RADIUS
 
     rng = np.random.default_rng(seed)
-    init_q = np.array([-1.5, 1.57, -0.236, 0.404, 0.446, 2.45], dtype=np.float64)
-    init_q_left = np.array([-0.373, -1.57, 0.236, -0.404, -0.446, -2.45], dtype=np.float64)
+    init_q = INIT_Q
+    init_q_left = INIT_Q_LEFT
 
     model_path = Path(__file__).resolve().parent.parent.parent / "src" / "robot" / "rm65_model.xml"
     env = RM65Env(str(model_path), dt=dt)

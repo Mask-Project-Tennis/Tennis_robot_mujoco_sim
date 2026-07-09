@@ -32,6 +32,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "scripts"
 
 from src.tennis.ball import generate_ball_to_target_box, generate_ball_from_serve_box
 from src.tennis.hitting import find_hitting_point_physics, compute_desired_hit_velocity
+from src.robot.constants import SHOULDER_POS, WORKSPACE_RADIUS, INIT_Q
 
 logging.basicConfig(
     level=logging.INFO,
@@ -102,8 +103,8 @@ def serve_box_quick_scan(
     """
     dt = float(config_dict["sim"]["dt"])
     g = np.array(config_dict["ball"]["gravity"], dtype=np.float64)
-    shoulder_pos = np.array([-0.1, -0.22693, 1.302645], dtype=np.float64)
-    workspace_radius = 0.90
+    shoulder_pos = SHOULDER_POS
+    workspace_radius = WORKSPACE_RADIUS
 
     results: list[BallScanResult] = []
 
@@ -310,7 +311,7 @@ def run_mpc_evaluation(
 
         mpc_cfg = config_dict.get("mpc", {})
 
-        init_q = np.array([-1.5, 1.57, -0.236, 0.404, 0.446, 2.45], dtype=np.float64)
+        init_q = INIT_Q
         model_path = Path(__file__).resolve().parent.parent.parent / "src" / "robot" / "rm65_model.xml"
         env = RM65Env(model_path, dt=dt)
 

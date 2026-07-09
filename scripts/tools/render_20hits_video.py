@@ -28,6 +28,8 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "scripts" / "archive" / "root"))  # archive/root
 
+from src.robot.constants import INIT_Q
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S")
 logger = logging.getLogger("render_video")
 
@@ -48,9 +50,6 @@ SERVE_DIST_MAP = {5: 5.7, 6: 6.8, 7: 8.0}
 serve_dist = SERVE_DIST_MAP.get(int(args.ball_speed), 9.5)
 
 TEMP_DIR = Path("results/_traj_temp")
-
-INIT_Q = np.array([-1.5, 1.57, -0.236, 0.404, 0.446, 2.45], dtype=np.float64)
-INIT_Q_LEFT = np.array([-0.373, -1.57, 0.236, -0.404, -0.446, -2.45], dtype=np.float64)
 
 
 def run_one_and_dump(seed: int) -> dict | None:

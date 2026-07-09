@@ -43,6 +43,7 @@ from src.ilqt.robot_limits import (
 )
 from src.ilqt.async_replanner import AsyncReplanner, PlanRequest, PlanResult
 from src.ilqt.mpc_controller import MPCConfig
+from src.robot.constants import SHOULDER_POS, WORKSPACE_RADIUS, INIT_Q, INIT_Q_LEFT
 try:
     from src.cpp.solver_cpp import ILQTSolver
 except ImportError:
@@ -153,8 +154,8 @@ def run_batch() -> None:
     dt = float(config_dict["sim"]["dt"])
     g = np.array(config_dict["ball"]["gravity"], dtype=np.float64)
 
-    shoulder_pos = np.array([-0.1, -0.22693, 1.302645], dtype=np.float64)
-    workspace_radius = 0.90
+    shoulder_pos = SHOULDER_POS
+    workspace_radius = WORKSPACE_RADIUS
 
     total_horizon = 200
     fixed_horizon = 40
@@ -175,9 +176,8 @@ def run_batch() -> None:
         logger.info("serve-box: distance=%.1fm, horizon=%d, replan=%d",
                      serve_dist, fixed_horizon, replan_interval)
 
-    init_q = np.array([-1.5, 1.57, -0.236, 0.404, 0.446, 2.45], dtype=np.float64)
-    init_q_left = np.array([-0.373, -1.57, 0.236, -0.404, -0.446, -2.45],
-                           dtype=np.float64)
+    init_q = INIT_Q
+    init_q_left = INIT_Q_LEFT
 
     fix_joint5_angle: float | None = init_q[5] if args.fix_joint5 else None
     use_backswing = not args.no_backswing

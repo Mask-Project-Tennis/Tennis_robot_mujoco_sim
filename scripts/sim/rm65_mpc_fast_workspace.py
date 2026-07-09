@@ -35,6 +35,7 @@ from src.tennis.hitting import (
     compute_desired_hit_velocity,
 )
 from src.ilqt.cost import HittingCost
+from src.robot.constants import SHOULDER_POS, WORKSPACE_RADIUS, INIT_Q, INIT_Q_LEFT
 try:
     from src.cpp.solver_cpp import ILQTSolver
 except ImportError:
@@ -1075,8 +1076,8 @@ def main() -> None:
     g = np.array(config["ball"]["gravity"], dtype=np.float64)
     bounce_restitution = float(config["ball"].get("bounce_restitution", 0.75))
 
-    shoulder_pos = np.array([-0.1, -0.22693, 1.302645], dtype=np.float64)
-    workspace_radius = 0.90
+    shoulder_pos = SHOULDER_POS
+    workspace_radius = WORKSPACE_RADIUS
 
     mpc_cfg = config.get("mpc", {})
     total_horizon = 200
@@ -1097,8 +1098,8 @@ def main() -> None:
     if args.replan_interval is not None:
         replan_interval = args.replan_interval
 
-    init_q = np.array([-1.5, 1.57, -0.236, 0.404, 0.446, 2.45], dtype=np.float64)
-    init_q_left = np.array([-0.373, -1.57, 0.236, -0.404, -0.446, -2.45], dtype=np.float64)
+    init_q = INIT_Q
+    init_q_left = INIT_Q_LEFT
 
     fix_joint5_angle: float | None = init_q[5] if args.fix_joint5 else None
 

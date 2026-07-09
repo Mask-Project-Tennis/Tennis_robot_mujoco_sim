@@ -28,6 +28,7 @@ from src.tennis.hitting import (
     compute_desired_hit_velocity,
 )
 from src.ilqt.cost import HittingCost
+from src.robot.constants import SHOULDER_POS, WORKSPACE_RADIUS, INIT_Q, INIT_Q_LEFT
 try:
     from src.cpp.solver_cpp import ILQTSolver
 except ImportError:
@@ -532,8 +533,8 @@ def run_single_episode(
     dt = float(config["sim"]["dt"])
     g = np.array(config["ball"]["gravity"], dtype=np.float64)
 
-    shoulder_pos = np.array([-0.1, -0.22693, 1.302645], dtype=np.float64)
-    workspace_radius = 0.90
+    shoulder_pos = SHOULDER_POS
+    workspace_radius = WORKSPACE_RADIUS
 
     total_horizon = 200
     _fixed_horizon = 40
@@ -547,8 +548,8 @@ def run_single_episode(
     first_plan_iters = args.first_iters
     near_plan_iters = args.near_iters
 
-    init_q = np.array([-1.5, 1.57, -0.236, 0.404, 0.446, 2.45], dtype=np.float64)
-    init_q_left = np.array([-0.373, -1.57, 0.236, -0.404, -0.446, -2.45], dtype=np.float64)
+    init_q = INIT_Q
+    init_q_left = INIT_Q_LEFT
 
     fix_joint5_angle: float | None = init_q[5]
 
@@ -1344,7 +1345,7 @@ def main() -> None:
 
     # ===== 构建回放数据 =====
     segments: list[dict] = []
-    init_q = np.array([-1.5, 1.57, -0.236, 0.404, 0.446, 2.45], dtype=np.float64)
+    init_q = INIT_Q
     x0 = np.zeros(env.NX)
     x0[:env.NQ] = init_q
 

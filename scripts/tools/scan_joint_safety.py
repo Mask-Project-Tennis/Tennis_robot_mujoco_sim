@@ -21,6 +21,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from src.utils.mujoco_loader import load_mujoco_model
+from src.robot.constants import INIT_Q
 import mujoco
 
 # 需要监控的臂体
@@ -36,9 +37,6 @@ JOINT_NAMES = {
     4: "r_joint5 (wrist_2)",
     5: "r_joint6 (wrist_3)",
 }
-
-# 初始右臂关节角度（击球准备姿势）
-INIT_Q = np.array([-1.5, 1.57, -0.236, 0.404, 0.446, 2.45], dtype=np.float64)
 
 
 def scan_joint(

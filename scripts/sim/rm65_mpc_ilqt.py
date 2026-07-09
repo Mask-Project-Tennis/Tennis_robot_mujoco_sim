@@ -35,6 +35,7 @@ from src.tennis.hitting import (
 )
 from src.ilqt.cost import HittingCost
 from src.ilqt.solver import ILQTSolver
+from src.robot.constants import SHOULDER_POS, WORKSPACE_RADIUS, INIT_Q_LEFT
 
 logging.basicConfig(
     level=logging.INFO,
@@ -628,8 +629,8 @@ def main() -> None:
     bounce_restitution = float(config["ball"].get("bounce_restitution", 0.75))
 
     # RM-65 肩关节位置（右臂 base_link1 安装位置）
-    shoulder_pos = np.array([-0.1, -0.22693, 1.302645], dtype=np.float64)
-    workspace_radius = 0.90
+    shoulder_pos = SHOULDER_POS
+    workspace_radius = WORKSPACE_RADIUS
 
     # RM-65 专用 MPC 参数
     # 两阶段策略：阶段1 仅位置代价（快速收敛），阶段2 完整代价（精细速度）
@@ -651,7 +652,7 @@ def main() -> None:
     # 初始右臂状态
     init_q = np.array([0.373, 1.57, -0.236, 0.404, 0.446, 2.45], dtype=np.float64)
     # 初始左臂状态
-    init_q_left = np.array([-0.373, -1.57, 0.236, -0.404, -0.446, -2.45], dtype=np.float64)
+    init_q_left = INIT_Q_LEFT
 
     # 第 6 关节固定角度（若启用 --fix-joint5）
     fix_joint5_angle: float | None = init_q[5] if args.fix_joint5 else None

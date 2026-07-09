@@ -35,6 +35,7 @@ from src.tennis.hitting import (
 )
 from src.ilqt.cost import HittingCost
 from src.ilqt.solver import ILQTSolver
+from src.robot.constants import SHOULDER_POS, WORKSPACE_RADIUS, INIT_Q_LEFT
 
 logging.basicConfig(
     level=logging.INFO,
@@ -186,8 +187,8 @@ def main() -> None:
     dt = float(config["sim"]["dt"])
     g = np.array(config["ball"]["gravity"], dtype=np.float64)
 
-    shoulder_pos = np.array([-0.1, -0.22693, 1.302645], dtype=np.float64)
-    workspace_radius = 0.90
+    shoulder_pos = SHOULDER_POS
+    workspace_radius = WORKSPACE_RADIUS
 
     mpc_cfg = config.get("mpc", {})
     total_horizon = 200
@@ -206,7 +207,7 @@ def main() -> None:
 
     # ===== 初始位姿 =====
     init_q = np.array([0.373, 1.57, -0.236, 0.404, 0.446, 2.45], dtype=np.float64)
-    init_q_left = np.array([-0.373, -1.57, 0.236, -0.404, -0.446, -2.45], dtype=np.float64)
+    init_q_left = INIT_Q_LEFT
 
     # ===== 初始化环境 =====
     model_path = Path(__file__).resolve().parent.parent.parent / "src" / "robot" / "rm65_model.xml"

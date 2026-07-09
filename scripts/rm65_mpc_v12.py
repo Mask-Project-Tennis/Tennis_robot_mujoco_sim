@@ -47,6 +47,7 @@ from src.ilqt.components.sim_perception import SimPerception
 from src.ilqt.components.predictive_safety import PredictiveSafetyFilter
 from src.ilqt.components.sim_component import SimComponent
 from src.real.trajectory_recorder import TrajectoryRecorder
+from src.robot.constants import SHOULDER_POS, WORKSPACE_RADIUS, INIT_Q, INIT_Q_LEFT
 
 logging.basicConfig(
     level=logging.INFO,
@@ -247,8 +248,8 @@ def main() -> None:
         config_dict["hitting"]["follow_through_length"] = 0.0
         config_dict["hitting"]["follow_through_v_terminal"] = 0.0
 
-    shoulder_pos = np.array([-0.1, -0.22693, 1.302645], dtype=np.float64)
-    workspace_radius = 0.90
+    shoulder_pos = SHOULDER_POS
+    workspace_radius = WORKSPACE_RADIUS
 
     # ==========================================================================
     # 4. 时间参数推导（与 V11 一致）
@@ -289,8 +290,8 @@ def main() -> None:
     # ==========================================================================
     # 5. 关节 + 执行器配置（与 V11 一致）
     # ==========================================================================
-    init_q = np.array([-1.5, 1.57, -0.236, 0.404, 0.446, 2.45], dtype=np.float64)
-    init_q_left = np.array([-0.373, -1.57, 0.236, -0.404, -0.446, -2.45], dtype=np.float64)
+    init_q = INIT_Q
+    init_q_left = INIT_Q_LEFT
 
     fix_joint5_angle: float | None = init_q[5] if args.fix_joint5 else None
     use_backswing = args.use_backswing
