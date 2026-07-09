@@ -36,7 +36,7 @@ docs/experiments/
 | exp13 | V12 架构对比验证 | [design](design/exp13_v12_architecture_validation.md) | [2026-06-18](reports/2026-06-18_exp13_v12_architecture_validation.md) | ✅ |
 | exp14 | V12 位置模式 PD 扫描 | [design](design/exp14_v12_pd_scan.md) | [2026-06-22](reports/2026-06-22_exp14_v12_pd_scan.md) | ✅ |
 | exp15 | V12 多球速鲁棒性 | [design](design/exp15_v12_speed_sweep.md) | [2026-06-22](reports/2026-06-22_exp15_v12_speed_sweep.md) | ✅ |
-| exp16 | 真机限位对比 | [design](design/exp16_limits_comparison.md) | — | ✅ |
+| exp16 | 真机限位对比 | [design](design/exp16_limits_comparison.md) | [2026-07-09](reports/2026-07-09_exp16_v12_limits_comparison.md) | ✅ |
 
 ## 文档类型说明
 
