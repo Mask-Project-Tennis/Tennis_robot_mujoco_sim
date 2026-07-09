@@ -303,7 +303,8 @@ def run_mpc_evaluation(
 
     try:
         from src.sim.rm65_env import RM65Env
-        from src.ilqt.cost import HittingCost
+        from src.ilqt.cost import CompositeCost
+        from src.ilqt.cost_terms import ControlEffortTerm, TerminalHitTerm
         try:
             from src.cpp.solver_cpp import ILQTSolver
         except ImportError:
@@ -341,8 +342,16 @@ def run_mpc_evaluation(
         racket_speed = float(hitting_cfg["racket_speed"])
         v_hit_desired = compute_desired_hit_velocity(hit_direction, racket_speed)
 
-        cost_fn = HittingCost(
-            env, hit_info["p_hit"], v_hit_desired, Q_p, Q_v, R,
+        # 最小代价组装：控制代价 + 终端击打代价（扫描脚本不需要平滑/约束项）
+        cost_fn = CompositeCost(
+            env,
+            running_terms=[ControlEffortTerm(R=R, NU=env.NU)],
+            terminal_terms=[
+                TerminalHitTerm(
+                    hit_info["p_hit"], v_hit_desired, Q_p, Q_v,
+                    NX=env.NX, NQ=env.NQ,
+                )
+            ],
         )
 
         x0 = np.zeros(env.NX)

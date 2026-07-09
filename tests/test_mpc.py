@@ -3,9 +3,10 @@
 import numpy as np
 
 from src.tennis.hitting import schedule_weights
-from src.ilqt.cost import HittingCost
+from src.ilqt.cost import CompositeCost
+from src.ilqt.cost_terms import ControlEffortTerm, TerminalHitTerm
 from src.ilqt.solver import ILQTSolver
-from src.sim.env import MujocoEnv
+from src.sim.rm65_env import RM65Env
 from pathlib import Path
 
 
@@ -39,20 +40,24 @@ class TestScheduleWeights:
             assert Q_v_list[i] <= Q_v_list[i + 1]
 
 
-class TestHittingCost:
-    """测试代价函数更新。"""
+class TestCompositeCost:
+    """测试组合代价函数更新（ControlEffortTerm + TerminalHitTerm 组装）。"""
 
     def test_update_weights(self) -> None:
         """测试权重更新。"""
-        model_path = Path(__file__).resolve().parent.parent / "src" / "robot" / "model.xml"
-        env = MujocoEnv(model_path)
+        model_path = Path(__file__).resolve().parent.parent / "src" / "robot" / "rm65_model.xml"
+        env = RM65Env(model_path)
         p_hit = np.array([0.5, 0.0, 1.0])
         v_hit = np.array([0.0, 0.0, 0.0])
         Q_p = np.array([100.0, 100.0, 100.0])
         Q_v = np.array([10.0, 10.0, 10.0])
         R = 0.001
 
-        cost_fn = HittingCost(env, p_hit, v_hit, Q_p, Q_v, R)
+        cost_fn = CompositeCost(
+            env,
+            running_terms=[ControlEffortTerm(R=R, NU=env.NU)],
+            terminal_terms=[TerminalHitTerm(p_hit, v_hit, Q_p, Q_v)],
+        )
 
         # 更新权重
         cost_fn.update_weights(2.0, 3.0)
@@ -62,11 +67,15 @@ class TestHittingCost:
 
     def test_update_target(self) -> None:
         """测试目标更新。"""
-        model_path = Path(__file__).resolve().parent.parent / "src" / "robot" / "model.xml"
-        env = MujocoEnv(model_path)
+        model_path = Path(__file__).resolve().parent.parent / "src" / "robot" / "rm65_model.xml"
+        env = RM65Env(model_path)
         p_hit = np.array([0.5, 0.0, 1.0])
         v_hit = np.zeros(3)
-        cost_fn = HittingCost(env, p_hit, v_hit, np.ones(3) * 100, np.ones(3) * 10, 0.001)
+        cost_fn = CompositeCost(
+            env,
+            running_terms=[ControlEffortTerm(R=0.001, NU=env.NU)],
+            terminal_terms=[TerminalHitTerm(p_hit, v_hit, np.ones(3) * 100, np.ones(3) * 10)],
+        )
 
         new_p = np.array([0.6, 0.1, 1.2])
         new_v = np.array([1.0, 0.0, 0.0])
@@ -81,8 +90,8 @@ class TestSolverFewIters:
 
     def test_few_iters_returns_result(self) -> None:
         """solve_few_iters 应返回有效的轨迹和控制。"""
-        model_path = Path(__file__).resolve().parent.parent / "src" / "robot" / "model.xml"
-        env = MujocoEnv(model_path, dt=0.005)
+        model_path = Path(__file__).resolve().parent.parent / "src" / "robot" / "rm65_model.xml"
+        env = RM65Env(model_path, dt=0.005)
 
         init_q = np.array([0.0, -0.5, 0.5, -0.5, 0.0, 0.0])
         x0 = np.zeros(12)
@@ -94,7 +103,11 @@ class TestSolverFewIters:
         Q_v = np.array([10.0, 10.0, 10.0])
         R = 0.001
 
-        cost_fn = HittingCost(env, p_hit, v_hit, Q_p, Q_v, R)
+        cost_fn = CompositeCost(
+            env,
+            running_terms=[ControlEffortTerm(R=R, NU=env.NU)],
+            terminal_terms=[TerminalHitTerm(p_hit, v_hit, Q_p, Q_v)],
+        )
 
         ilqt_cfg = {
             "max_iter": 10,

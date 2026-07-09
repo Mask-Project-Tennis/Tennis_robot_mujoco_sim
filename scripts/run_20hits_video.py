@@ -35,7 +35,8 @@ from src.tennis.hitting import (
     find_hitting_point_physics,
     compute_desired_hit_velocity,
 )
-from src.ilqt.cost import HittingCost
+from src.ilqt.cost import CompositeCost
+from src.ilqt.cost_terms import ControlEffortTerm, SmoothnessTerm, TerminalHitTerm
 from src.ilqt.robot_limits import (
     RobotLimits,
     check_one_step_feasibility,
@@ -449,18 +450,36 @@ def run_batch() -> None:
             if use_r_decay else None
         )
 
-        base_cost_fn = HittingCost(
-            env, p_follow, v_hit_desired, Q_p, Q_v, R,
-            Q_p_running=0.0,
-            R_joint_scale=r_joint_scale if r_joint_scale else None,
-            q_des_traj=None,
-            Q_joint=None,
-            R_schedule=R_schedule_init,
-            Q_n=args.normal_weight,
-            n_des=n_des_single,
-            Q_qdot=float(config_dict["cost"].get("Q_qdot", 0.0)),
-            Q_qddot=float(config_dict["cost"].get("Q_qddot", 0.0)),
-            Q_du=float(config_dict["cost"].get("Q_du", 0.0)),
+        # 组装基准代价（Tube 包装前的底座）：
+        #   运行项：控制代价（含关节级缩放 + R 退火）+ 关节平滑代价（速度/加速度/控制变化率）
+        #   终端项：击打代价（位置 + 速度 + 法向量）
+        # Q_joint=None 时关节跟踪本就为 no-op，故不组装 JointTrackingTerm
+        _q_qdot = float(config_dict["cost"].get("Q_qdot", 0.0))
+        _q_qddot = float(config_dict["cost"].get("Q_qddot", 0.0))
+        _q_du = float(config_dict["cost"].get("Q_du", 0.0))
+        base_cost_fn = CompositeCost(
+            env,
+            running_terms=[
+                ControlEffortTerm(
+                    R=R,
+                    R_joint_scale=r_joint_scale if r_joint_scale else None,
+                    R_schedule=R_schedule_init,
+                    NU=env.NU,
+                ),
+                SmoothnessTerm(
+                    Q_qdot=_q_qdot,
+                    Q_qddot=_q_qddot,
+                    Q_du=_q_du,
+                    NQ=env.NQ, NX=env.NX, NU=env.NU, dt=env.dt,
+                ),
+            ],
+            terminal_terms=[
+                TerminalHitTerm(
+                    p_follow, v_hit_desired, Q_p, Q_v,
+                    Q_n=args.normal_weight, n_des=n_des_single,
+                    NX=env.NX, NQ=env.NQ,
+                ),
+            ],
         )
 
         if hitting_tube is not None:

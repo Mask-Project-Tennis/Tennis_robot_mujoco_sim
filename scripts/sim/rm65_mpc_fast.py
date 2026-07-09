@@ -30,7 +30,8 @@ from src.tennis.hitting import (
     find_hitting_point_physics,
     compute_desired_hit_velocity,
 )
-from src.ilqt.cost import HittingCost
+from src.ilqt.cost import CompositeCost
+from src.ilqt.cost_terms import ControlEffortTerm, TerminalHitTerm
 from src.robot.constants import SHOULDER_POS, WORKSPACE_RADIUS, INIT_Q, INIT_Q_LEFT
 # C++ 版优先，回退到 Python 版
 try:
@@ -1106,15 +1107,25 @@ def main() -> None:
 
     # 初始化代价函数
     # 终端位置用随挥点 p_follow（略偏球位前方），拍面自然穿越球而非停在球位
-    cost_fn = HittingCost(
-        env, p_follow, v_hit_desired, Q_p, Q_v, R,
-        Q_p_running=0.0,
-        R_joint_scale=r_joint_scale if r_joint_scale else None,
-        q_des_traj=q_des_traj_init,
-        Q_joint=Q_joint,
-        R_schedule=R_schedule_init,
-        Q_n=args.normal_weight,
-        n_des=n_des,
+    # 组装：控制代价（含关节级缩放 + R 退火调度）+ 终端击打代价
+    # Q_joint=None 时关节跟踪本就为 no-op，故不组装 JointTrackingTerm
+    cost_fn = CompositeCost(
+        env,
+        running_terms=[
+            ControlEffortTerm(
+                R=R,
+                R_joint_scale=r_joint_scale if r_joint_scale else None,
+                R_schedule=R_schedule_init,
+                NU=env.NU,
+            ),
+        ],
+        terminal_terms=[
+            TerminalHitTerm(
+                p_follow, v_hit_desired, Q_p, Q_v,
+                Q_n=args.normal_weight, n_des=n_des,
+                NX=env.NX, NQ=env.NQ,
+            ),
+        ],
     )
 
     # 初始化求解器

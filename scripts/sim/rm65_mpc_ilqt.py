@@ -33,7 +33,8 @@ from src.tennis.hitting import (
     find_hitting_point_physics,
     compute_desired_hit_velocity,
 )
-from src.ilqt.cost import HittingCost
+from src.ilqt.cost import CompositeCost
+from src.ilqt.cost_terms import ControlEffortTerm, TerminalHitTerm
 from src.ilqt.solver import ILQTSolver
 from src.robot.constants import SHOULDER_POS, WORKSPACE_RADIUS, INIT_Q_LEFT
 
@@ -734,9 +735,24 @@ def main() -> None:
 
     # 初始化代价函数
     r_joint_scale = {5: 1000.0} if fix_joint5_angle is not None else None
-    cost_fn = HittingCost(
-        env, p_hit, v_hit_desired, Q_p, Q_v, R,
-        Q_p_running=0.20, R_joint_scale=r_joint_scale,
+    # 组装：控制代价（含关节级缩放）+ 终端击打代价
+    # 注：原 Q_p_running 运行位置代价已弃用（与 V12 生产路径 build_production_cost 一致，
+    # 终端 TerminalHitTerm 已保证末端到达击打点）
+    cost_fn = CompositeCost(
+        env,
+        running_terms=[
+            ControlEffortTerm(
+                R=R,
+                R_joint_scale=r_joint_scale,
+                NU=env.NU,
+            ),
+        ],
+        terminal_terms=[
+            TerminalHitTerm(
+                p_hit, v_hit_desired, Q_p, Q_v,
+                NX=env.NX, NQ=env.NQ,
+            ),
+        ],
     )
 
     # 初始化求解器

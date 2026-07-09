@@ -14,6 +14,8 @@ from pathlib import Path
 
 from src.sim.rm65_env import RM65Env
 from src.dynamics.linearize import linearize_analytical
+from src.ilqt.cost import CompositeCost
+from src.ilqt.cost_terms import ControlEffortTerm, TerminalHitTerm
 
 
 def _make_env() -> RM65Env:
@@ -373,7 +375,6 @@ class TestSolverIntegration:
     def _make_solver() -> tuple:
         """创建 env + solver + cost_fn，返回 (env, solver, cost_fn, x0, U_init)。"""
         from src.ilqt.solver import ILQTSolver
-        from src.ilqt.cost import HittingCost
 
         env = _make_env()
         env.reset(q0=np.array([0.0, -1.2, 1.8, -0.6, 0.0, 0.0]))
@@ -385,7 +386,11 @@ class TestSolverIntegration:
         v_hit = np.array([-2.0, 0.0, 1.0])
         Q_p = np.diag([5000.0, 5000.0, 5000.0])
         Q_v = np.diag([10.0, 10.0, 10.0])
-        cost_fn = HittingCost(env, p_hit, v_hit, Q_p, Q_v, R=0.001)
+        cost_fn = CompositeCost(
+            env,
+            running_terms=[ControlEffortTerm(R=0.001, NU=env.NU)],
+            terminal_terms=[TerminalHitTerm(p_hit, v_hit, Q_p, Q_v)],
+        )
 
         ilqt_cfg = {
             "max_iter": 10,
@@ -424,7 +429,6 @@ class TestSolverIntegration:
         验证 B 矩阵下半部分含 Kp 缩放（即确认线性化路径读取了 actuator_mode=1）。
         """
         from src.ilqt.solver import ILQTSolver
-        from src.ilqt.cost import HittingCost
 
         env = _make_env()
         kp = np.array([200.0, 200.0, 200.0, 50.0, 50.0, 20.0])
@@ -439,7 +443,11 @@ class TestSolverIntegration:
         v_hit = np.array([-2.0, 0.0, 1.0])
         Q_p = np.diag([5000.0, 5000.0, 5000.0])
         Q_v = np.diag([10.0, 10.0, 10.0])
-        cost_fn = HittingCost(env, p_hit, v_hit, Q_p, Q_v, R=0.001)
+        cost_fn = CompositeCost(
+            env,
+            running_terms=[ControlEffortTerm(R=0.001, NU=env.NU)],
+            terminal_terms=[TerminalHitTerm(p_hit, v_hit, Q_p, Q_v)],
+        )
 
         ilqt_cfg = {
             "max_iter": 10,
@@ -491,8 +499,6 @@ class TestSolverIntegration:
         except ImportError:
             pytest.skip("C++ iLQR_Core 模块未编译")
 
-        from src.ilqt.cost import HittingCost
-
         env = _make_env()
         kp = np.array([200.0, 200.0, 200.0, 50.0, 50.0, 20.0])
         kd = np.array([20.0, 20.0, 20.0, 5.0, 5.0, 2.0])
@@ -506,7 +512,11 @@ class TestSolverIntegration:
         v_hit = np.array([-2.0, 0.0, 1.0])
         Q_p = np.diag([5000.0, 5000.0, 5000.0])
         Q_v = np.diag([10.0, 10.0, 10.0])
-        cost_fn = HittingCost(env, p_hit, v_hit, Q_p, Q_v, R=0.001)
+        cost_fn = CompositeCost(
+            env,
+            running_terms=[ControlEffortTerm(R=0.001, NU=env.NU)],
+            terminal_terms=[TerminalHitTerm(p_hit, v_hit, Q_p, Q_v)],
+        )
 
         ilqt_cfg = {
             "max_iter": 10,
@@ -661,7 +671,6 @@ class TestForwardPassPosition:
     def test_forward_pass_single_position_mode(self) -> None:
         """位置模式下 forward_pass_single 正确传递 actuator_mode。"""
         from src.ilqt.robot_limits import RobotLimits
-        from src.ilqt.cost import HittingCost
         from src.ilqt.utils import forward_pass_single
 
         env = _make_env()
@@ -680,7 +689,11 @@ class TestForwardPassPosition:
         v_hit = np.array([-2.0, 0.0, 1.0])
         Q_p = np.diag([5000.0, 5000.0, 5000.0])
         Q_v = np.diag([10.0, 10.0, 10.0])
-        cost_fn = HittingCost(env, p_hit, v_hit, Q_p, Q_v, R=0.0)
+        cost_fn = CompositeCost(
+            env,
+            running_terms=[ControlEffortTerm(R=0.0, NU=env.NU)],
+            terminal_terms=[TerminalHitTerm(p_hit, v_hit, Q_p, Q_v)],
+        )
 
         Ks = [np.zeros((6, 12)) for _ in range(N)]
         ks = [np.zeros(6) for _ in range(N)]
@@ -727,10 +740,16 @@ class TestCostPositionMode:
         Q_v = np.diag([10.0, 10.0, 10.0])
         R = 0.01
 
-        from src.ilqt.cost import HittingCost
-
-        cost_torque = HittingCost(env, p_hit, v_hit, Q_p, Q_v, R=R, actuator_mode=0)
-        cost_pos = HittingCost(env, p_hit, v_hit, Q_p, Q_v, R=R, actuator_mode=1)
+        cost_torque = CompositeCost(
+            env,
+            running_terms=[ControlEffortTerm(R=R, actuator_mode=0, NU=env.NU)],
+            terminal_terms=[TerminalHitTerm(p_hit, v_hit, Q_p, Q_v)],
+        )
+        cost_pos = CompositeCost(
+            env,
+            running_terms=[ControlEffortTerm(R=R, actuator_mode=1, NU=env.NU)],
+            terminal_terms=[TerminalHitTerm(p_hit, v_hit, Q_p, Q_v)],
+        )
 
         x = np.concatenate([np.array([0.0, -1.2, 1.8, -0.6, 0.0, 0.0]), np.zeros(6)])
         u = np.array([10.0, -5.0, 8.0, -3.0, 2.0, -1.0])
@@ -756,10 +775,16 @@ class TestCostPositionMode:
         Q_v = np.diag([10.0, 10.0, 10.0])
         R = 0.01
 
-        from src.ilqt.cost import HittingCost
-
-        cost_pos = HittingCost(env, p_hit, v_hit, Q_p, Q_v, R=R, actuator_mode=1)
-        cost_torque = HittingCost(env, p_hit, v_hit, Q_p, Q_v, R=R, actuator_mode=0)
+        cost_pos = CompositeCost(
+            env,
+            running_terms=[ControlEffortTerm(R=R, actuator_mode=1, NU=env.NU)],
+            terminal_terms=[TerminalHitTerm(p_hit, v_hit, Q_p, Q_v)],
+        )
+        cost_torque = CompositeCost(
+            env,
+            running_terms=[ControlEffortTerm(R=R, actuator_mode=0, NU=env.NU)],
+            terminal_terms=[TerminalHitTerm(p_hit, v_hit, Q_p, Q_v)],
+        )
 
         x = np.concatenate([np.array([0.0, -1.2, 1.8, -0.6, 0.0, 0.0]), np.zeros(6)])
         u = np.array([10.0, -5.0, 8.0, -3.0, 2.0, -1.0])

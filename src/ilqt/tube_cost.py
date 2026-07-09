@@ -12,15 +12,16 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from src.ilqt.cost import CompositeCost, HittingCost
+from src.ilqt.cost import CompositeCost
 from src.ilqt.tube_types import (
     TubeConfig,
     HittingTube,
 )
 
-# base_cost 鸭子类型：HittingCost（旧）与 CompositeCost（新）均满足同一接口
-# （terminal_cost / terminal_derivatives + p_hit / Q_p / Q_v / Q_n / n_des 属性）
-BaseCost = HittingCost | CompositeCost
+# base_cost 类型别名：旧 HittingCost 巨石已删除（Task 16），现在统一为 CompositeCost。
+# 保留别名以维持 TubeHittingCostWrapper 构造签名的语义化类型标注
+# （base_cost 需提供 terminal_cost / terminal_derivatives + Q_p / Q_v / Q_n 等属性）。
+BaseCost = CompositeCost
 
 if TYPE_CHECKING:
     from src.sim.rm65_env import RM65Env
@@ -30,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 
 class TubeHittingCostWrapper:
-    """包装 HittingCost，在候选击球窗口内施加空间走廊式 tube 代价。
+    """包装 CompositeCost，在候选击球窗口内施加空间走廊式 tube 代价。
 
     空间走廊（hinge loss）：
       - 走廊半宽 = RACKET_RADIUS（固定）
@@ -65,7 +66,7 @@ class TubeHittingCostWrapper:
 
         Args:
             env: RM-65 环境实例。
-            base_cost: 基础代价实例（HittingCost 或 CompositeCost，提供终端代价和基础运行代价）。
+            base_cost: 基础代价实例（CompositeCost，提供终端代价和基础运行代价）。
             hitting_tube: 击球管道。
             horizon: 规划地平线步数。
             config: Tube 配置。

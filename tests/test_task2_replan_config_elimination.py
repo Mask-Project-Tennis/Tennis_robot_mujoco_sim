@@ -155,7 +155,7 @@ def test_q_tcp_soft_flows_to_production_cost(monkeypatch) -> None:
     """MPCConfig.Q_tcp_soft / Q_qdot_limit 通过 do_replan 到达生产路径代价项。
 
     生产路径（build_production_cost）将 Q_tcp_soft 传入 TcpSoftTerm，
-    Q_qdot_limit 传入 QdotLimitTerm（替代旧 HittingCost 的扁平参数）。
+    Q_qdot_limit 传入 QdotLimitTerm（替代旧 HittingCost 扁平参数的 CompositeCost 组装路径）。
     """
     from src.ilqt.cost_terms import TcpSoftTerm, QdotLimitTerm
     from src.ilqt.replan_core import do_replan

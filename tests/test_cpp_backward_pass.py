@@ -10,7 +10,8 @@ import pytest
 from pathlib import Path
 
 from src.sim.rm65_env import RM65Env
-from src.ilqt.cost import HittingCost
+from src.ilqt.cost import CompositeCost
+from src.ilqt.cost_terms import ControlEffortTerm, SmoothnessTerm, TerminalHitTerm
 from src.cpp.solver_cpp import ILQTSolver, _backward_pass_numpy
 from src.cpp.iLQR_Core import backward_pass as cpp_backward_pass
 
@@ -31,18 +32,33 @@ def _make_solver(N: int = 60) -> ILQTSolver:
     return ILQTSolver(cfg, use_analytical=True)
 
 
-def _make_cost(env: RM65Env, N: int) -> HittingCost:
-    """创建 V11 默认风格代价函数。"""
-    init_q = np.array([0.0, -1.2, 1.8, -0.6, 0.0, 0.0])
-    return HittingCost(
-        env, np.array([0.5, -0.5, 1.2]), np.array([0.0, -3.0, 1.0]),
-        np.array([50000.0] * 3), np.array([200.0] * 3), 0.0001,
-        Q_p_running=0.0,
-        q_des_traj=np.tile(init_q, (N, 1)),
-        Q_joint={1: 50.0, 2: 50.0},
-        R_schedule=0.0001 * (0.4 ** (np.arange(N) / N)),
-        Q_qdot=0.001, Q_qddot=0.0005, Q_du=0.001,
-        actuator_mode=0,
+def _make_cost(env: RM65Env, N: int) -> CompositeCost:
+    """创建 V11 默认风格代价函数（CompositeCost 组装）。
+
+    关节跟踪（q_des_traj + Q_joint）在新系统中由 JointTrackUpdatable 协议项提供，
+    当前测试无对应具体项类，省略该惩罚（不影响 C++ vs Python 后向传递数值等价验证）。
+    """
+    return CompositeCost(
+        env,
+        running_terms=[
+            ControlEffortTerm(
+                R=0.0001,
+                R_schedule=0.0001 * (0.4 ** (np.arange(N) / N)),
+                actuator_mode=0,
+                NU=env.NU,
+            ),
+            SmoothnessTerm(
+                Q_qdot=0.001, Q_qddot=0.0005, Q_du=0.001,
+                NQ=env.NQ, NX=env.NX, NU=env.NU, dt=env.dt,
+            ),
+        ],
+        terminal_terms=[
+            TerminalHitTerm(
+                np.array([0.5, -0.5, 1.2]), np.array([0.0, -3.0, 1.0]),
+                np.array([50000.0] * 3), np.array([200.0] * 3),
+                NX=env.NX, NQ=env.NQ,
+            ),
+        ],
     )
 
 
@@ -155,26 +171,32 @@ class TestBackwardIntegration:
     """solve_few_iters 用 C++ backward 与强制 Python backward 产出一致轨迹。"""
 
     def test_solve_few_iters_matches(self, monkeypatch):
-        """5 迭代 solve: C++ backward vs Python backward 轨迹 atol=1e-8。"""
+        """5 迭代 solve: C++ backward vs Python backward 轨迹 atol=1e-8。
+
+        注意：两次 solve 使用独立的 cost_fn 实例，避免 SmoothnessTerm._u_prev
+        状态泄漏导致 k=0 步 Q_du 行为不一致（旧 HittingCost 内部有 k>0 守卫，
+        新 SmoothnessTerm 仅检查 _u_prev is not None）。
+        """
         env = _make_env()
         N = 30
         solver = _make_solver(N)
-        cost_fn = _make_cost(env, N)
         init_q = np.array([0.0, -1.2, 1.8, -0.6, 0.0, 0.0])
         x0 = np.concatenate([init_q, np.zeros(6)])
         U_init = np.random.default_rng(99).standard_normal((N, 6)) * 2.0
 
         # C++ backward（默认）
+        cost_fn_cpp = _make_cost(env, N)
         X_cpp, U_cpp, _, ok_cpp = solver.solve_few_iters(
-            env, cost_fn, x0, U_init, max_iter=5,
+            env, cost_fn_cpp, x0, U_init, max_iter=5,
             skip_linesearch=True, use_fast_lin=True)
-        # 强制 Python backward
+        # 强制 Python backward（独立 cost_fn 避免状态泄漏）
         monkeypatch.setattr(
             solver, "_backward_pass",
             lambda As, Bs, lx, lu, lxx, lux, luu, lxN, lxxN, mu:
                 _backward_pass_numpy(As, Bs, lx, lu, lxx, lux, luu, lxN, lxxN, mu))
+        cost_fn_py = _make_cost(env, N)
         X_py, U_py, _, ok_py = solver.solve_few_iters(
-            env, cost_fn, x0, U_init, max_iter=5,
+            env, cost_fn_py, x0, U_init, max_iter=5,
             skip_linesearch=True, use_fast_lin=True)
         assert ok_cpp and ok_py
         np.testing.assert_allclose(X_cpp, X_py, atol=1e-8, err_msg="轨迹偏差")

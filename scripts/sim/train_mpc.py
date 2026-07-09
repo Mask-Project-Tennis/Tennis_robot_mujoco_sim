@@ -34,7 +34,8 @@ from src.tennis.hitting import (
     find_hitting_point_physics,
     compute_desired_hit_velocity,
 )
-from src.ilqt.cost import HittingCost
+from src.ilqt.cost import CompositeCost
+from src.ilqt.cost_terms import ControlEffortTerm, TerminalHitTerm
 from src.ilqt.solver import ILQTSolver
 from src.sim.viewer import visualize_result, plot_results
 
@@ -333,7 +334,14 @@ def main() -> None:
     logger.info("已计算雅可比转置初始控制序列")
 
     # 初始化代价函数
-    cost_fn = HittingCost(env, p_hit, v_hit_desired, Q_p, Q_v, R)
+    # 组装：控制代价 + 终端击打代价
+    cost_fn = CompositeCost(
+        env,
+        running_terms=[ControlEffortTerm(R=R, NU=env.NU)],
+        terminal_terms=[TerminalHitTerm(
+            p_hit, v_hit_desired, Q_p, Q_v, NX=env.NX, NQ=env.NQ,
+        )],
+    )
 
     # 初始化求解器
     solver = ILQTSolver(ilqt_cfg, use_analytical=use_analytical)

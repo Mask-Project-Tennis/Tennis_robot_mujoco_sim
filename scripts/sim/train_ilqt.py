@@ -34,7 +34,8 @@ from src.tennis.hitting import (
     find_hitting_point,
     compute_desired_hit_velocity,
 )
-from src.ilqt.cost import HittingCost
+from src.ilqt.cost import CompositeCost
+from src.ilqt.cost_terms import ControlEffortTerm, TerminalHitTerm
 from src.ilqt.solver import ILQTSolver
 from src.sim.viewer import visualize_result, plot_results
 
@@ -206,7 +207,14 @@ def main() -> None:
 
     if args.single_phase:
         # ===== 单阶段优化 =====
-        cost_fn = HittingCost(env, p_hit, v_hit_desired, Q_p, Q_v, R)
+        # 组装：控制代价 + 终端击打代价
+        cost_fn = CompositeCost(
+            env,
+            running_terms=[ControlEffortTerm(R=R, NU=env.NU)],
+            terminal_terms=[TerminalHitTerm(
+                p_hit, v_hit_desired, Q_p, Q_v, NX=env.NX, NQ=env.NQ,
+            )],
+        )
         solver = ILQTSolver(ilqt_cfg)
         logger.info(f"开始 iLQT 优化（单阶段），规划步数={actual_horizon}...")
         X_opt, U_opt, cost_history = solver.solve(env, cost_fn, x0, U_jac)
@@ -216,7 +224,14 @@ def main() -> None:
         Q_p_phase1 = Q_p * 5.0
         Q_v_phase1 = np.ones(3) * 1.0
         R_phase1 = R * 0.1
-        cost_fn_p1 = HittingCost(env, p_hit, np.zeros(3), Q_p_phase1, Q_v_phase1, R_phase1)
+        # 组装阶段1代价：控制代价 + 终端击打代价（零速度目标）
+        cost_fn_p1 = CompositeCost(
+            env,
+            running_terms=[ControlEffortTerm(R=R_phase1, NU=env.NU)],
+            terminal_terms=[TerminalHitTerm(
+                p_hit, np.zeros(3), Q_p_phase1, Q_v_phase1, NX=env.NX, NQ=env.NQ,
+            )],
+        )
 
         ilqt_cfg_p1 = dict(ilqt_cfg)
         ilqt_cfg_p1["max_iter"] = 100
@@ -231,7 +246,14 @@ def main() -> None:
         logger.info(f"阶段1完成，位置误差: {pos_err_p1:.4f} m")
 
         # 阶段2：完整代价（位置+速度），从阶段1热启动
-        cost_fn_p2 = HittingCost(env, p_hit, v_hit_desired, Q_p, Q_v, R)
+        # 组装阶段2代价：控制代价 + 终端击打代价
+        cost_fn_p2 = CompositeCost(
+            env,
+            running_terms=[ControlEffortTerm(R=R, NU=env.NU)],
+            terminal_terms=[TerminalHitTerm(
+                p_hit, v_hit_desired, Q_p, Q_v, NX=env.NX, NQ=env.NQ,
+            )],
+        )
         ilqt_cfg_p2 = dict(ilqt_cfg)
         ilqt_cfg_p2["mu_init"] = max(ilqt_cfg["mu_init"], 0.1)
         solver_p2 = ILQTSolver(ilqt_cfg_p2)
