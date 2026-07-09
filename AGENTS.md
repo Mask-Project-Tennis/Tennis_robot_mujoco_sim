@@ -92,8 +92,10 @@ mujoco_sim/
 │   ├── README.md                     # 源代码模块索引与依赖说明
 │   ├── robot/                         # 机器人模型定义
 │   │   ├── __init__.py
+│   │   ├── constants.py               # 共享常量（DT/INIT_Q/SHOULDER_POS/WORKSPACE_RADIUS/KP/KD，单一事实来源）
 │   │   ├── rm65_model.xml             # MuJoCo XML 模型（双臂12DOF + 球拍 + 球）
 │   │   ├── model.xml                  # 旧版单臂模型（左臂装在右侧桩柱）
+│   │   ├── tennis_rbt.xml             # 自制网球机器人模型
 │   │   └── kinematics.py              # 正运动学 / 雅可比矩阵工具
 │   ├── dynamics/                      # 动力学计算
 │   │   ├── __init__.py

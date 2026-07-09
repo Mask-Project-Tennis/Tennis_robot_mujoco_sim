@@ -1,15 +1,12 @@
-"""RealRunner 组装工厂 — 共享常量与构建函数。
+"""RealRunner 组装工厂 — 共享常量重导出与构建函数。
 
-将 scripts/run_real_robot.py / tests/test_real_runner.py /
-tests/test_replan_core.py 中逐字复制的工厂函数
-（_build_robot_limits）和共享常量
-集中到此模块，消除 ~200 行重复代码。
+共享常量已移至 src.robot.constants（单一事实来源），本模块重导出
+以保持真机入口脚本与测试导入路径零改动（INIT_Q 别名为 INIT_Q_REAL）。
 
-常量对齐 V11 真机配置；函数去掉下划线前缀作为公开 API，
-供真机入口脚本与测试用例共同复用，确保规划行为完全一致。
+工厂函数（build_robot_limits / build_real_robot_mpc_config）从 RealRobotConfig
+读取参数；build_solver 从 src.ilqt.solver 重导出。
 
-依赖方向：build_solver 已下沉到 src.ilqt.solver（纯 ILQTSolver 工厂属于
-ilqt 层）；本模块重导出 build_solver 仅为保持真机入口与测试导入路径零改动。
+依赖方向：build_solver 属于 ilqt 层；本模块重导出仅为保持导入路径兼容。
 """
 
 from __future__ import annotations

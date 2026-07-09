@@ -53,6 +53,7 @@ from src.utils.mujoco_loader import load_mujoco_model     # 跨平台模型加�
 
 ### robot/ — 机器人模型
 
+- `constants.py`：共享常量单一事实来源（DT/INIT_Q/INIT_Q_REAL/INIT_Q_LEFT/SHOULDER_POS/WORKSPACE_RADIUS/KP/KD），仅依赖 numpy
 - `rm65_model.xml`：MuJoCo XML 模型（双臂 12DOF + 球拍 + 球 freejoint），DOF 和关节顺序的唯一事实来源
 - `kinematics.py`：正运动学 / 雅可比矩阵工具函数
 
