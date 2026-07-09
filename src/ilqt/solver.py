@@ -5,7 +5,7 @@ import numpy as np
 from typing import Any
 from src.sim.env import MujocoEnv
 from src.dynamics.linearize import linearize_trajectory, linearize_analytical_trajectory
-from src.ilqt.cost import HittingCost
+from src.ilqt.components.protocols import RunningCost, SmoothnessMixin
 from src.ilqt.robot_limits import RobotLimits
 from src.ilqt.utils import (
     compute_total_cost,
@@ -63,7 +63,7 @@ class ILQTSolver:
     def solve(
         self,
         env: MujocoEnv,
-        cost_fn: HittingCost,
+        cost_fn: RunningCost,
         x0: np.ndarray,
         U_init: np.ndarray | None = None,
         limits: RobotLimits | None = None,
@@ -152,7 +152,7 @@ class ILQTSolver:
     def solve_few_iters(
         self,
         env: MujocoEnv,
-        cost_fn: HittingCost,
+        cost_fn: RunningCost,
         x0: np.ndarray,
         U_init: np.ndarray,
         max_iter: int = 3,
@@ -286,20 +286,22 @@ class ILQTSolver:
         return X
 
     def _running_cost_derivatives(
-        self, cost_fn: HittingCost, X: np.ndarray, U: np.ndarray
+        self, cost_fn: RunningCost, X: np.ndarray, U: np.ndarray
     ) -> tuple[list, list, list, list, list]:
         """计算所有时间步的运行代价导数。"""
         N = len(U)
         l_xs, l_us, l_xxs, l_uxs, l_uus = [], [], [], [], []
         for k in range(N):
-            if k > 0 and hasattr(cost_fn, 'set_u_prev'):
+            if k > 0 and isinstance(cost_fn, SmoothnessMixin):
                 cost_fn.set_u_prev(U[k - 1])
             lx, lu, lxx, lux, luu = cost_fn.running_derivatives(X[k], U[k], k)
-            l_xs.append(lx)
-            l_us.append(lu)
-            l_xxs.append(lxx)
-            l_uxs.append(lux)
-            l_uus.append(luu)
+            # 必须复制：CompositeCost（Flyweight 模式）返回持久引用，
+            # 不复制会导致列表中所有元素指向同一数组（aliasing）
+            l_xs.append(lx.copy())
+            l_us.append(lu.copy())
+            l_xxs.append(lxx.copy())
+            l_uxs.append(lux.copy())
+            l_uus.append(luu.copy())
         return l_xs, l_us, l_xxs, l_uxs, l_uus
 
     def _linearize_fast(

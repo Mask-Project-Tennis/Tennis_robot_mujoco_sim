@@ -12,7 +12,7 @@ import ctypes
 import logging
 import numpy as np
 from src.sim.env import MujocoEnv
-from src.ilqt.cost import HittingCost
+from src.ilqt.components.protocols import RunningCost
 
 logger = logging.getLogger(__name__)
 
@@ -214,11 +214,13 @@ else:
                 lx, lu, lxx, lux, luu = cost_fn.running_derivatives(
                     X[k], U[k], k
                 )
-                l_xs.append(lx)
-                l_us.append(lu)
-                l_xxs.append(lxx)
-                l_uxs.append(lux)
-                l_uus.append(luu)
+                # 必须复制：CompositeCost（Flyweight 模式）返回持久引用，
+                # 不复制会导致列表中所有元素指向同一数组（aliasing）
+                l_xs.append(lx.copy())
+                l_us.append(lu.copy())
+                l_xxs.append(lxx.copy())
+                l_uxs.append(lux.copy())
+                l_uus.append(luu.copy())
             return l_xs, l_us, l_xxs, l_uxs, l_uus
 
         def _backward_pass(self, As, Bs, l_xs, l_us, l_xxs, l_uxs, l_uus,
@@ -324,7 +326,7 @@ else:
         def solve_few_iters(
             self,
             env: MujocoEnv,
-            cost_fn: HittingCost,
+            cost_fn: RunningCost,
             x0: np.ndarray,
             U_init: np.ndarray,
             max_iter: int = 3,

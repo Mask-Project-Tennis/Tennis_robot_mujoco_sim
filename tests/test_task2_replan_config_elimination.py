@@ -3,7 +3,7 @@
 本测试文件先于实现编写（TDD RED 阶段），验证 5 项契约：
 - RED 4: PlanRequest 包含 d_hat/d_follow 字段
 - RED 5: do_replan 接受 MPCConfig 而非 dict
-- RED 6: Q_tcp_soft 从 MPCConfig 到达 HittingCost
+- RED 6: Q_tcp_soft 从 MPCConfig 到达生产路径代价（build_production_cost → TcpSoftTerm）
 - RED 7: MPCConfig 不含 max_tcp_speed 死字段
 - RED 8: ReplanConfig 模块已删除
 """
@@ -71,7 +71,7 @@ def test_replan_config_deleted() -> None:
         from src.ilqt.replan_config import ReplanConfig  # noqa: F401
 
 
-# ── RED 5 & 6: do_replan 接受 MPCConfig + Q_tcp_soft 到达 HittingCost ──
+# ── RED 5 & 6: do_replan 接受 MPCConfig + Q_tcp_soft 到达生产路径代价 ──
 # 这两个测试需要完整的 env_plan / state / config / robot_limits / solver，
 # 共享构建逻辑集中在此。
 
@@ -151,30 +151,41 @@ def test_do_replan_accepts_mpc_config() -> None:
     assert isinstance(result, PlanResult)
 
 
-def test_q_tcp_soft_flows_to_hitting_cost(monkeypatch) -> None:
-    """MPCConfig.Q_tcp_soft 通过 do_replan 到达 HittingCost。"""
-    from src.ilqt.cost import HittingCost
+def test_q_tcp_soft_flows_to_production_cost(monkeypatch) -> None:
+    """MPCConfig.Q_tcp_soft / Q_qdot_limit 通过 do_replan 到达生产路径代价项。
+
+    生产路径（build_production_cost）将 Q_tcp_soft 传入 TcpSoftTerm，
+    Q_qdot_limit 传入 QdotLimitTerm（替代旧 HittingCost 的扁平参数）。
+    """
+    from src.ilqt.cost_terms import TcpSoftTerm, QdotLimitTerm
     from src.ilqt.replan_core import do_replan
 
-    captured: dict = {}
-    orig_init = HittingCost.__init__
+    tcp_captured: dict = {}
+    orig_tcp_init = TcpSoftTerm.__init__
 
-    def spy(self, *a, **kw):
-        captured["Q_tcp_soft"] = kw.get("Q_tcp_soft", 0.0)
-        captured["tcp_threshold"] = kw.get("tcp_threshold", 1.44)
-        captured["Q_qdot_limit"] = kw.get("Q_qdot_limit", 0.0)
-        captured["qdot_limit_thresholds"] = kw.get("qdot_limit_thresholds", None)
-        orig_init(self, *a, **kw)
+    def tcp_spy(self, *a, **kw):
+        tcp_captured["Q_tcp_soft"] = kw.get("Q_tcp_soft", 0.0)
+        tcp_captured["tcp_threshold"] = kw.get("tcp_threshold", 1.44)
+        orig_tcp_init(self, *a, **kw)
 
-    monkeypatch.setattr(HittingCost, "__init__", spy)
+    qdot_captured: dict = {}
+    orig_qdot_init = QdotLimitTerm.__init__
+
+    def qdot_spy(self, *a, **kw):
+        qdot_captured["Q_qdot_limit"] = kw.get("Q_qdot_limit", 0.0)
+        qdot_captured["qdot_limit_thresholds"] = kw.get("qdot_limit_thresholds", None)
+        orig_qdot_init(self, *a, **kw)
+
+    monkeypatch.setattr(TcpSoftTerm, "__init__", tcp_spy)
+    monkeypatch.setattr(QdotLimitTerm, "__init__", qdot_spy)
 
     env_plan, state, config, robot_limits, solver, request = _build_plan_test_setup()
     assert config.Q_tcp_soft == 5000.0  # 测试前置条件
 
     do_replan(request, env_plan, state, config, robot_limits, solver)
 
-    assert captured["Q_tcp_soft"] == 5000.0
-    assert captured["tcp_threshold"] > 0  # 从 robot_limits.max_tcp_speed 派生
-    assert captured["tcp_threshold"] == pytest.approx(0.8 * robot_limits.max_tcp_speed)
+    assert tcp_captured["Q_tcp_soft"] == 5000.0
+    assert tcp_captured["tcp_threshold"] > 0  # 从 robot_limits.max_tcp_speed 派生
+    assert tcp_captured["tcp_threshold"] == pytest.approx(0.8 * robot_limits.max_tcp_speed)
     # qdot_limit_thresholds 从 robot_limits.qdot_max 派生
-    assert captured["qdot_limit_thresholds"] is not None
+    assert qdot_captured["qdot_limit_thresholds"] is not None

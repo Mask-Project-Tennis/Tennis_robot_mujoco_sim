@@ -555,3 +555,185 @@ def test_xwall_stub_raises():
     """XWallTerm 构造时抛 NotImplementedError（Phase 4 占位）。"""
     with pytest.raises(NotImplementedError):
         XWallTerm(limit_x=-0.1, Q_x=1.0, body_names=["r_link3"])
+
+
+# ── TubeHittingCostWrapper 终端委托测试（C4）──
+# 验证 softmin 关闭/单候选时 terminal_cost/derivatives 委托给 base_cost，
+# softmin 开启多候选时走自身 softmin 路径。全部使用替身，不依赖 MuJoCo。
+
+
+class _MockEnvForTube:
+    """TubeHittingCostWrapper 测试用 env 替身（无 MuJoCo 依赖）。"""
+
+    NX = 12
+    NQ = 6
+    NU = 6
+
+    def __init__(self, p_ee=None, v_ee=None, n_rack=None, J_p=None, J_r=None):
+        self._p_ee = p_ee if p_ee is not None else np.zeros(3)
+        self._v_ee = v_ee if v_ee is not None else np.zeros(3)
+        self._n_rack = n_rack if n_rack is not None else np.array([1.0, 0.0, 0.0])
+        self._J_p = J_p if J_p is not None else np.zeros((3, 6))
+        self._J_r = J_r if J_r is not None else np.zeros((3, 6))
+
+    def set_arm_state(self, x):
+        pass
+
+    def get_ee_pos(self):
+        return self._p_ee
+
+    def get_ee_vel(self):
+        return self._v_ee
+
+    def get_ee_normal(self):
+        return self._n_rack
+
+    def get_ee_jacp(self):
+        return self._J_p
+
+    def get_ee_jacr(self):
+        return self._J_r
+
+
+class _RecordingBaseCost:
+    """记录终端调用并暴露 softmin 路径所需属性的 base_cost 替身。"""
+
+    def __init__(self, term_cost=2.5):
+        self._term_cost = term_cost
+        self.terminal_calls = 0
+        self.derivatives_calls = 0
+        self.last_term_x = None
+        self.last_deriv_x = None
+        # softmin 路径读取的属性
+        self.p_hit = np.zeros(3)
+        self.v_hit = np.zeros(3)
+        self.Q_p = np.eye(3)
+        self.Q_v = np.eye(3)
+        self.Q_n = 0.0
+        self.n_des = None
+
+    def terminal_cost(self, x):
+        self.terminal_calls += 1
+        self.last_term_x = x.copy()
+        return self._term_cost
+
+    def terminal_derivatives(self, x):
+        self.derivatives_calls += 1
+        self.last_deriv_x = x.copy()
+        return np.zeros(12), np.zeros((12, 12))
+
+    def running_cost(self, x, u, k=None):
+        return 0.0
+
+    def running_derivatives(self, x, u, k=None):
+        return np.zeros(12), np.zeros(6), np.zeros((12, 12)), np.zeros((6, 12)), np.zeros((6, 6))
+
+
+def _empty_hitting_tube():
+    """构造无候选的空 HittingTube（触发委托路径）。"""
+    from src.ilqt.tube_types import HittingTube
+    return HittingTube(
+        k_candidates=np.array([], dtype=int),
+        p_racket_des=np.zeros((0, 3)),
+        v_racket_des=np.zeros((0, 3)),
+        n_racket_des=np.zeros((0, 3)),
+        p_ball=np.zeros((0, 3)),
+        v_ball=np.zeros((0, 3)),
+        weights=np.zeros(0),
+        best_k=0,
+    )
+
+
+def test_tube_wrapper_delegates_terminal_cost_when_softmin_off():
+    """C4: softmin 关闭时 terminal_cost 委托给 base_cost（不自行计算）。"""
+    from src.ilqt.tube_cost import TubeHittingCostWrapper
+    from src.ilqt.tube_types import TubeConfig
+
+    base = _RecordingBaseCost(term_cost=3.14)
+    cfg = TubeConfig(use_softmin_terminal=False)
+    wrapper = TubeHittingCostWrapper(
+        env=_MockEnvForTube(), base_cost=base,
+        hitting_tube=_empty_hitting_tube(), horizon=50, config=cfg,
+    )
+
+    x = np.linspace(0.0, 1.0, 12)
+    assert wrapper.terminal_cost(x) == pytest.approx(3.14)
+    assert base.terminal_calls == 1
+    np.testing.assert_allclose(base.last_term_x, x)
+
+
+def test_tube_wrapper_delegates_terminal_derivatives_when_softmin_off():
+    """C4: softmin 关闭时 terminal_derivatives 委托给 base_cost。"""
+    from src.ilqt.tube_cost import TubeHittingCostWrapper
+    from src.ilqt.tube_types import TubeConfig
+
+    base = _RecordingBaseCost()
+    cfg = TubeConfig(use_softmin_terminal=False)
+    wrapper = TubeHittingCostWrapper(
+        env=_MockEnvForTube(), base_cost=base,
+        hitting_tube=_empty_hitting_tube(), horizon=50, config=cfg,
+    )
+
+    x = np.full(12, 0.5)
+    lx, lxx = wrapper.terminal_derivatives(x)
+    assert base.derivatives_calls == 1
+    np.testing.assert_allclose(base.last_deriv_x, x)
+    np.testing.assert_allclose(lx, np.zeros(12))
+    np.testing.assert_allclose(lxx, np.zeros((12, 12)))
+
+
+def test_tube_wrapper_delegates_when_softmin_on_but_single_candidate():
+    """C4: softmin 开启但仅单候选（M<=1）时仍委托（len(candidates)>1 为 False）。"""
+    from src.ilqt.tube_cost import TubeHittingCostWrapper
+    from src.ilqt.tube_types import TubeConfig, HittingTube
+
+    single_tube = HittingTube(
+        k_candidates=np.array([10]),
+        p_racket_des=np.array([[0.5, -0.3, 1.0]]),
+        v_racket_des=np.array([[0.0, -3.0, 0.0]]),
+        n_racket_des=np.array([[1.0, 0.0, 0.0]]),
+        p_ball=np.array([[0.5, -0.3, 1.0]]),
+        v_ball=np.array([[0.0, 3.0, 0.0]]),
+        weights=np.array([1.0]),
+        best_k=10,
+    )
+    base = _RecordingBaseCost(term_cost=9.9)
+    cfg = TubeConfig(use_softmin_terminal=True)  # 开启，但仅 1 个候选
+    wrapper = TubeHittingCostWrapper(
+        env=_MockEnvForTube(), base_cost=base,
+        hitting_tube=single_tube, horizon=50, config=cfg,
+    )
+
+    x = np.zeros(12)
+    assert wrapper.terminal_cost(x) == pytest.approx(9.9)
+    assert base.terminal_calls == 1  # 走委托路径
+
+
+def test_tube_wrapper_uses_softmin_when_enabled_multi_candidate():
+    """C4: softmin 开启且多候选（M>1）时不委托，走自身 softmin 路径。"""
+    from src.ilqt.tube_cost import TubeHittingCostWrapper
+    from src.ilqt.tube_types import TubeConfig, HittingTube
+
+    multi_tube = HittingTube(
+        k_candidates=np.array([9, 10, 11]),
+        p_racket_des=np.array([[0.5, -0.3, 1.0]] * 3),
+        v_racket_des=np.array([[0.0, -3.0, 0.0]] * 3),
+        n_racket_des=np.array([[1.0, 0.0, 0.0]] * 3),
+        p_ball=np.array([[0.5, -0.3, 1.0], [0.51, -0.3, 1.0], [0.49, -0.3, 1.0]]),
+        v_ball=np.array([[0.0, 3.0, 0.0]] * 3),
+        weights=np.array([0.2, 0.6, 0.2]),
+        best_k=10,
+    )
+    base = _RecordingBaseCost(term_cost=9.9)
+    base.Q_n = 0.0  # 禁用法向量项，简化 softmin 数值
+    cfg = TubeConfig(use_softmin_terminal=True, softmin_beta=5.0)
+    env = _MockEnvForTube(p_ee=np.array([0.5, -0.3, 1.0]), v_ee=np.array([0.0, -3.0, 0.0]))
+    wrapper = TubeHittingCostWrapper(
+        env=env, base_cost=base, hitting_tube=multi_tube, horizon=50, config=cfg,
+    )
+
+    x = np.zeros(12)
+    cost = wrapper.terminal_cost(x)
+    # 末端在中心候选附近 → softmin 代价很小（off-center 候选贡献微弱），且不委托
+    assert base.terminal_calls == 0
+    assert cost == pytest.approx(0.0, abs=1e-2)

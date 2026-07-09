@@ -12,11 +12,15 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from src.ilqt.cost import HittingCost
+from src.ilqt.cost import CompositeCost, HittingCost
 from src.ilqt.tube_types import (
     TubeConfig,
     HittingTube,
 )
+
+# base_cost 鸭子类型：HittingCost（旧）与 CompositeCost（新）均满足同一接口
+# （terminal_cost / terminal_derivatives + p_hit / Q_p / Q_v / Q_n / n_des 属性）
+BaseCost = HittingCost | CompositeCost
 
 if TYPE_CHECKING:
     from src.sim.rm65_env import RM65Env
@@ -52,7 +56,7 @@ class TubeHittingCostWrapper:
     def __init__(
         self,
         env: "RM65Env",
-        base_cost: HittingCost,
+        base_cost: BaseCost,
         hitting_tube: HittingTube,
         horizon: int,
         config: TubeConfig,
@@ -61,7 +65,7 @@ class TubeHittingCostWrapper:
 
         Args:
             env: RM-65 环境实例。
-            base_cost: 原始 HittingCost 实例（提供终端代价和基础运行代价）。
+            base_cost: 基础代价实例（HittingCost 或 CompositeCost，提供终端代价和基础运行代价）。
             hitting_tube: 击球管道。
             horizon: 规划地平线步数。
             config: Tube 配置。
@@ -166,43 +170,20 @@ class TubeHittingCostWrapper:
     def terminal_cost(self, x: np.ndarray) -> float:
         """计算终端代价。
 
-        V2 改进（P0-2）：
-        若启用 softmin，终端代价在所有候选击球位置上取 softmin：
+        softmin 开启（且候选数 > 1）时，终端代价在所有候选击球位置上取 softmin：
           cost = -log(Σ_i w_i * exp(-β * c_i)) / β
         其中 c_i = ||p_ee - p_ball[i]||²_Qp + ||v_ee - v_des[i]||²_Qv
         这允许求解器"选择"在任意候选时刻击球，容忍时间不确定性。
 
-        若未启用 softmin，退化为原始单点终端代价。
+        softmin 关闭时委托给 base_cost.terminal_cost，消除终端代价重复实现（C4）。
         """
-        self.env.set_arm_state(x)
-        p_ee = self.env.get_ee_pos()
-        v_ee = self.env.get_ee_vel()
-        n_rack = self.env.get_ee_normal()
-
         if self._use_softmin and len(self._p_ball_candidates) > 1:
+            self.env.set_arm_state(x)
+            p_ee = self.env.get_ee_pos()
+            v_ee = self.env.get_ee_vel()
+            n_rack = self.env.get_ee_normal()
             return self._compute_softmin_terminal(p_ee, v_ee, n_rack)
-        else:
-            return self._compute_single_terminal(p_ee, v_ee, n_rack)
-
-    def _compute_single_terminal(
-        self, p_ee: np.ndarray, v_ee: np.ndarray, n_rack: np.ndarray
-    ) -> float:
-        """原始单点终端代价（best_k 处的精确击打约束）。
-
-        v8 改进：终端代价不再乘以 (1-ratio)，始终完整保留。
-        Tube 走廊代价作为辅助项叠加在运行代价上，不削弱终端目标。
-        """
-        dp = p_ee - self.base_cost.p_hit
-        cost_p = 0.5 * float(dp @ self.base_cost.Q_p @ dp)
-
-        dv = v_ee - self.base_cost.v_hit
-        cost_v = 0.5 * float(dv @ self.base_cost.Q_v @ dv)
-
-        cost = cost_p + cost_v
-        if self.base_cost.n_des is not None and self.base_cost.Q_n > 0:
-            n_err = n_rack - self.base_cost.n_des
-            cost += 0.5 * self.base_cost.Q_n * float(n_err @ n_err)
-        return cost
+        return self.base_cost.terminal_cost(x)
 
     def _compute_softmin_terminal(
         self, p_ee: np.ndarray, v_ee: np.ndarray, n_rack: np.ndarray
@@ -262,67 +243,24 @@ class TubeHittingCostWrapper:
     def terminal_derivatives(self, x: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """终端代价导数。
 
-        V2 改进（P0-2）：softmin 加权导数。
+        softmin 开启（且候选数 > 1）时使用 softmin 加权导数：
         softmin 的梯度 = Σ_i α_i * ∂c_i/∂x，其中 α_i 是 softmin 权重。
+
+        softmin 关闭时委托给 base_cost.terminal_derivatives，消除终端导数
+        重复实现（C4，含 skew @ J_omega 法向量雅可比）。
         """
-        n_x = self.env.NX
-        n_q = self.env.NQ
-
-        self.env.set_arm_state(x)
-        p_ee = self.env.get_ee_pos()
-        v_ee = self.env.get_ee_vel()
-        n_rack = self.env.get_ee_normal()
-        J_p = self.env.get_ee_jacp()
-
         if self._use_softmin and len(self._p_ball_candidates) > 1:
-            l_x, l_xx = self._compute_softmin_terminal_derivatives(
+            n_x = self.env.NX
+            n_q = self.env.NQ
+            self.env.set_arm_state(x)
+            p_ee = self.env.get_ee_pos()
+            v_ee = self.env.get_ee_vel()
+            n_rack = self.env.get_ee_normal()
+            J_p = self.env.get_ee_jacp()
+            return self._compute_softmin_terminal_derivatives(
                 p_ee, v_ee, n_rack, J_p, n_x, n_q
             )
-        else:
-            l_x, l_xx = self._compute_single_terminal_derivatives(
-                p_ee, v_ee, n_rack, J_p, n_x, n_q
-            )
-
-        return l_x, l_xx
-
-    def _compute_single_terminal_derivatives(
-        self,
-        p_ee: np.ndarray,
-        v_ee: np.ndarray,
-        n_rack: np.ndarray,
-        J_p: np.ndarray,
-        n_x: int,
-        n_q: int,
-    ) -> tuple[np.ndarray, np.ndarray]:
-        """原始单点终端代价导数。"""
-        K_p = self.base_cost.Q_p
-        dp = p_ee - self.base_cost.p_hit
-
-        l_x = np.zeros(n_x)
-        l_xx = np.zeros((n_x, n_x))
-
-        l_x[:n_q] = J_p.T @ K_p @ dp
-        l_xx[:n_q, :n_q] = J_p.T @ K_p @ J_p
-
-        dv = v_ee - self.base_cost.v_hit
-        l_x[n_q:] = J_p.T @ self.base_cost.Q_v @ dv
-        l_xx[n_q:, n_q:] = J_p.T @ self.base_cost.Q_v @ J_p
-
-        if self.base_cost.n_des is not None and self.base_cost.Q_n > 0:
-            J_omega = self.env.get_ee_jacr()
-            nx, ny, nz = -n_rack[0], -n_rack[1], -n_rack[2]
-            skew = np.array([
-                [0, -nz, ny],
-                [nz, 0, -nx],
-                [-ny, nx, 0],
-            ])
-            J_n = np.zeros((3, n_x))
-            J_n[:, :n_q] = skew @ J_omega
-            n_err = n_rack - self.base_cost.n_des
-            l_x += self.base_cost.Q_n * (J_n.T @ n_err)
-            l_xx += self.base_cost.Q_n * (J_n.T @ J_n)
-
-        return l_x, l_xx
+        return self.base_cost.terminal_derivatives(x)
 
     def _compute_softmin_terminal_derivatives(
         self,
@@ -527,7 +465,7 @@ class TubeOnlyCost(TubeHittingCostWrapper):
     def __init__(
         self,
         env: "RM65Env",
-        base_cost: HittingCost,
+        base_cost: BaseCost,
         hitting_tube: HittingTube,
         horizon: int,
         config: TubeConfig,
@@ -546,7 +484,7 @@ class SoftminOnlyCost(TubeHittingCostWrapper):
     def __init__(
         self,
         env: "RM65Env",
-        base_cost: HittingCost,
+        base_cost: BaseCost,
         hitting_tube: HittingTube,
         horizon: int,
         config: TubeConfig,

@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from src.ilqt.async_replanner import PlanRequest, PlanResult
-from src.ilqt.cost import HittingCost
+from src.ilqt.cost import build_production_cost
 from src.ilqt.tube_types import ReplanState
 from src.ilqt.mpc_helpers import (
     _jt_init_dispatch,
@@ -267,20 +267,12 @@ def do_replan(
         Q_v_mat = Q_v_scale * np.diag(_q_v_base)
     else:
         Q_v_mat = Q_v_scale * _q_v_base
-    R_mat = config.R * np.eye(env_plan.NU)
-    cost_fn_plan = HittingCost(
-        env_plan, p_terminal_v5, v_terminal_v5, Q_p_mat, Q_v_mat, R_mat,
-        Q_n=config.normal_weight,
-        n_des=n_des_new,
-        Q_qdot=config.Q_qdot_base,
-        Q_qddot=config.Q_qddot_base,
-        Q_du=config.Q_du_base,
-        actuator_mode=1 if config.is_position_mode else 0,
-        # 管道接通：Q_tcp_soft / Q_qdot_limit 从 MPCConfig 到达 HittingCost
-        Q_tcp_soft=config.Q_tcp_soft,
-        tcp_threshold=0.8 * robot_limits.max_tcp_speed,
-        Q_qdot_limit=config.Q_qdot_limit,
-        qdot_limit_thresholds=0.8 * robot_limits.qdot_max,
+    # Q_p_mat/Q_v_mat 已在上方基于 sigmoid 调度预计算（保留不动）
+    # 工厂函数仅组装代价项，不负责权重调度；R_schedule 在工厂返回后由下方设置
+    cost_fn_plan = build_production_cost(
+        env_plan, config, robot_limits,
+        p_hit=p_terminal_v5, v_hit=v_terminal_v5, n_des=n_des_new,
+        Q_p_mat=Q_p_mat, Q_v_mat=Q_v_mat,
     )
 
     if config.use_r_decay and not config.is_position_mode:
