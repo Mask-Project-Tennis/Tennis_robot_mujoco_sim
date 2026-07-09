@@ -23,19 +23,19 @@ from src.ilqt.robot_limits import RobotLimits
 from src.ilqt.solver import build_solver
 from src.ilqt.tube_types import TubeConfig
 from src.real.config import RealRobotConfig
+from src.robot.constants import (
+    DT,
+    INIT_Q_LEFT,
+    INIT_Q_REAL as INIT_Q,
+    KD,
+    KP,
+    SHOULDER_POS,
+    WORKSPACE_RADIUS,
+)
 
 if TYPE_CHECKING:
     # 仅类型检查期导入 MPCConfig，运行期用延迟导入打破与 mpc_controller 的循环依赖
     from src.ilqt.mpc_controller import MPCConfig
-
-# ── 共享常量（对齐 V11 真机配置）──
-DT: float = 0.005
-INIT_Q = np.array([-1.5, 1.40, -0.236, 0.404, 0.446, 2.45], dtype=np.float64)
-INIT_Q_LEFT = np.array([-0.373, -1.57, 0.236, -0.404, -0.446, -2.45], dtype=np.float64)
-SHOULDER_POS = np.array([-0.1, -0.22693, 1.302645], dtype=np.float64)
-WORKSPACE_RADIUS = 0.90
-KP = np.array([200.0, 200.0, 100.0, 50.0, 50.0, 20.0], dtype=np.float64)
-KD = np.array([20.0, 20.0, 10.0, 5.0, 5.0, 2.0], dtype=np.float64)
 
 # 公开 API（显式声明 re-export，供 `from src.real.runner_factory import build_solver` 零改动）
 __all__ = [
