@@ -40,6 +40,8 @@ KP.flags.writeable = False
 KD = np.array([20.0, 20.0, 10.0, 5.0, 5.0, 2.0], dtype=np.float64)
 KD.flags.writeable = False
 
+# NOTE: 以下为共享只读数组；不要重新绑定（如 init_q = init_q + offset），
+# 重新赋值会断开别名共享，使 .flags.writeable 保护失效。
 __all__ = [
     "DT",
     "INIT_Q",

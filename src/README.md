@@ -42,7 +42,7 @@ scripts/（调用方，不属于 src/）
 ```python
 from src.sim.rm65_env import RM65Env          # 创建仿真环境
 from src.cpp.solver_cpp import ILQTSolver     # C++ 加速 iLQR 求解器
-from src.ilqt.cost import HittingCost         # 代价函数（Tube + Softmin + 平滑项）
+from src.ilqt.cost import CompositeCost        # 组合代价聚合器（Flyweight + Protocol 委托）
 from src.ilqt.robot_limits import RobotLimits # 关节约束参数
 from src.perception.ball_estimator import BallEstimator  # 卡尔曼滤波器
 from src.tennis.ball import predict_trajectory            # 抛物线预测
@@ -71,7 +71,8 @@ from src.utils.mujoco_loader import load_mujoco_model     # 跨平台模型加�
 ### ilqt/ — iLQR 核心 + 管线架构
 
 - `solver.py`：纯 Python iLQR 求解器（后向 Riccati + 前向线搜索）+ `build_solver` 工厂函数
-- `cost.py`：`HittingCost` 代价函数（终端 Q_p/Q_v/Q_n + 运行 R/Q_p_running/平滑项/X 墙/body 规避/softmin）
+- `cost.py`：`CompositeCost` 组合代价聚合器 + `FKContext` FK 缓存 + `build_production_cost` 工厂
+- `cost_terms.py`：8 个独立代价项（ControlEffort/Smoothness/QdotLimit/TcpSoft/TerminalHit/JointLimit/BodyAvoidance/XWall）
 - `robot_limits.py`：`RobotLimits` 约束参数 + `check_step_feasibility`（制动感知 qdot + 滑窗 qddot）
 - `utils.py`：前向传递（含 alpha 回退）+ 轨迹指标 + 控制量缩放
 - `async_replanner.py`：异步重规划器（后台线程 iLQR + buffer 机制）

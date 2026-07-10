@@ -132,15 +132,17 @@ def test_smoothness_qdot_derivatives():
 
 
 def test_smoothness_du_requires_u_prev():
-    """Q_du 在 set_u_prev 前不产生代价。"""
+    """Q_du 在 set_u_prev 前不产生代价；且 k=0 不应用 Q_du（k>0 守卫）。"""
     term = SmoothnessTerm(Q_qdot=0.0, Q_qddot=0.0, Q_du=5.0)
     u = np.ones(6)
     fk = MockFKContext()
     # 未设置 u_prev
     assert term.running_cost(np.zeros(12), u, k=0, fk=fk) == 0.0
-    # 设置后产生代价
+    # 设置后 k=0 仍不产生代价（k>0 守卫，防止 _u_prev 残留幽灵代价）
     term.set_u_prev(np.zeros(6))
-    cost = term.running_cost(np.zeros(12), u, k=0, fk=fk)
+    assert term.running_cost(np.zeros(12), u, k=0, fk=fk) == 0.0
+    # k>0 才产生代价
+    cost = term.running_cost(np.zeros(12), u, k=1, fk=fk)
     assert cost == pytest.approx(0.5 * 5.0 * 6.0)
 
 

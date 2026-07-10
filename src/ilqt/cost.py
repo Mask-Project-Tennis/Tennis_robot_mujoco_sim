@@ -6,6 +6,7 @@ Phase 2 (C2): CompositeCost + 惩罚项组合化（替换旧 HittingCost）。
 
 from __future__ import annotations
 
+import logging
 import numpy as np
 from src.ilqt.components.protocols import (
     SmoothnessMixin,
@@ -95,13 +96,17 @@ class FKContext:
         """
         self._env = env
         self._x_cached: np.ndarray | None = None
-        # 预分配缓存（避免每步重复分配）
+        # 初始缓冲区（update 时由 env 返回值替换）
+        # 优化点：当前 env.get_ee_*() 内部 .copy() 导致每步分配 8 个小数组（~816B）。
+        # 可通过添加 get_ee_*_into(buf) API 实现零拷贝，但 profiling 显示分配仅占
+        # 总 solve 的 0.2-0.5%（mj_forward 和 iLQR 迭代是瓶颈），当前不值得优化。
         self._p_ee: np.ndarray = np.zeros(3)
         self._v_ee: np.ndarray = np.zeros(3)
         self._J_p: np.ndarray = np.zeros((3, env.NQ))
         self._J_r: np.ndarray = np.zeros((3, env.NQ))
         self._n_rack: np.ndarray = np.zeros(3)
         self._J_n: np.ndarray = np.zeros((3, env.NX))
+        self._skew: np.ndarray = np.zeros((3, 3))
 
     def update(self, x: np.ndarray) -> None:
         """设置机器人状态并缓存全部末端 FK 结果。
@@ -121,14 +126,15 @@ class FKContext:
         self._n_rack = self._env.get_ee_normal()
         # 法向量雅可比：J_n = skew(-n_rack) @ J_r，写入 (3, NX) 前 NQ 列
         nx_, ny_, nz_ = -self._n_rack[0], -self._n_rack[1], -self._n_rack[2]
-        skew = np.array([
-            [0.0, -nz_, ny_],
-            [nz_, 0.0, -nx_],
-            [-ny_, nx_, 0.0],
-        ])
-        self._J_n = np.zeros((3, self._env.NX))
-        self._J_n[:, : self._env.NQ] = skew @ self._J_r
-        self._x_cached = x.copy()
+        self._skew[0, 0] = 0.0;  self._skew[0, 1] = -nz_; self._skew[0, 2] = ny_
+        self._skew[1, 0] = nz_;  self._skew[1, 1] = 0.0;  self._skew[1, 2] = -nx_
+        self._skew[2, 0] = -ny_; self._skew[2, 1] = nx_;  self._skew[2, 2] = 0.0
+        self._J_n.fill(0)
+        self._J_n[:, : self._env.NQ] = self._skew @ self._J_r
+        if self._x_cached is None:
+            self._x_cached = x.copy()
+        else:
+            np.copyto(self._x_cached, x)
 
     @property
     def p_ee(self) -> np.ndarray:
@@ -194,6 +200,7 @@ class CompositeCost:
             terminal_terms: 终端代价项列表（实现 TerminalCost）。
         """
         self._env = env
+        self._logger = logging.getLogger(__name__)
         self.fk = FKContext(env)
         self.running_terms = running_terms
         self.terminal_terms = terminal_terms
@@ -412,9 +419,18 @@ class CompositeCost:
             q_des_traj: 期望关节轨迹，或 None 清除。
             Q_joint: 关节级权重 {关节索引: 权重}。
         """
+        found = False
         for t in self.running_terms:
             if isinstance(t, JointTrackUpdatable):
                 t.set_q_des_traj(q_des_traj, Q_joint)
+                found = True
+        if not found and q_des_traj is not None:
+            self._logger.debug(
+                "set_q_des_traj 无 JointTrackUpdatable 项可委托 "
+                "(q_des_traj shape=%s, Q_joint=%s) — 调用为 no-op",
+                getattr(q_des_traj, 'shape', type(q_des_traj)),
+                Q_joint,
+            )
 
     def set_smoothness_scale(self, qdot_scale, qddot_scale, du_scale):
         """委托平滑度缩放更新（SmoothnessTerm 实现 SmoothnessScaleUpdatable）。
@@ -505,12 +521,12 @@ def build_production_cost(
         ),
         TcpSoftTerm(
             Q_tcp_soft=config.Q_tcp_soft,
-            tcp_threshold=0.8 * robot_limits.max_tcp_speed,
+            tcp_threshold=config.tcp_soft_ratio * robot_limits.max_tcp_speed,
             NQ=NQ, NX=NX,
         ),
         QdotLimitTerm(
             Q_qdot_limit=config.Q_qdot_limit,
-            qdot_limit_thresholds=0.8 * robot_limits.qdot_max,
+            qdot_limit_thresholds=config.qdot_limit_ratio * robot_limits.qdot_max,
             NQ=NQ, NX=NX,
         ),
     ]

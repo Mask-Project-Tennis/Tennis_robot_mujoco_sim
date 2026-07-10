@@ -12,7 +12,7 @@ import ctypes
 import logging
 import numpy as np
 from src.sim.env import MujocoEnv
-from src.ilqt.components.protocols import RunningCost
+from src.ilqt.components.protocols import RunningCost, SmoothnessMixin
 
 logger = logging.getLogger(__name__)
 
@@ -209,7 +209,7 @@ else:
         def _running_cost_derivatives(self, cost_fn, X, U):
             l_xs, l_us, l_xxs, l_uxs, l_uus = [], [], [], [], []
             for k in range(len(U)):
-                if k > 0 and hasattr(cost_fn, 'set_u_prev'):
+                if k > 0 and isinstance(cost_fn, SmoothnessMixin):
                     cost_fn.set_u_prev(U[k - 1])
                 lx, lu, lxx, lux, luu = cost_fn.running_derivatives(
                     X[k], U[k], k

@@ -1100,8 +1100,6 @@ def main() -> None:
 
     # 初始化代价函数
     # 终端位置用随挥点 p_follow（略偏球位前方），拍面自然穿越球而非停在球位
-    # 初始化代价函数
-    # 终端位置用随挥点 p_follow（略偏球位前方），拍面自然穿越球而非停在球位
     # 组装：控制代价（含关节级缩放 + R 退火调度）+ 终端击打代价
     # Q_joint=None 时关节跟踪本就为 no-op，故不组装 JointTrackingTerm
     cost_fn = CompositeCost(

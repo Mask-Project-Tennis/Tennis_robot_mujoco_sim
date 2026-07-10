@@ -63,7 +63,11 @@ class SafetyComponent(Protocol):
 
 @runtime_checkable
 class RunningCost(Protocol):
-    """运行代价模块接口 — 每步惩罚项实现此接口。
+    """运行代价模块接口 — solver 调用此接口（CompositeCost 实现）。
+
+    注意：独立惩罚项（ControlEffortTerm 等）的签名多一个 fk 参数
+    （running_cost(self, x, u, k, fk)），不直接满足此 Protocol。
+    CompositeCost 适配两层接口：solver 调 3-arg，内部委托 4-arg 给各惩罚项。
 
     数学含义：运行代价 l_k(x, u)，依赖状态和控制。
     导数返回 5 元组 (l_x, l_u, l_xx, l_ux, l_uu)。
@@ -97,7 +101,10 @@ class RunningCost(Protocol):
 
 @runtime_checkable
 class TerminalCost(Protocol):
-    """终端代价模块接口 — 最终步惩罚项实现此接口。
+    """终端代价模块接口 — solver 调用此接口（CompositeCost 实现）。
+
+    注意：独立惩罚项签名多一个 fk 参数（terminal_cost(self, x, fk)），
+    由 CompositeCost 适配。此 Protocol 描述 solver-facing 接口。
 
     数学含义：终端代价 l_N(x)，仅依赖状态（终端步无控制量）。
     导数返回 2 元组 (l_x, l_xx)。
@@ -174,7 +181,9 @@ class RScheduleUpdatable(Protocol):
 class JointTrackUpdatable(Protocol):
     """关节轨迹跟踪动态更新接口（JointTrackingTerm 实现）。
 
-    活跃调用点：8+ 活跃脚本 MPC 循环（后摆关节跟踪）。
+    当前状态：无具体实现类。活跃脚本调用 set_q_des_traj 时传 Q_joint=None，
+    CompositeCost 中无 JointTrackUpdatable 项，调用为 no-op。
+    如需启用关节跟踪，实现此类并添加到 running_terms。
     """
 
     def set_q_des_traj(
@@ -201,7 +210,8 @@ class SmoothnessScaleUpdatable(Protocol):
 class MidpointUpdatable(Protocol):
     """中途目标动态更新接口（MidpointTerm 实现）。
 
-    活跃调用点：run_20hits_video.py:633（Tube 包装前在 base_cost_fn 上调用）。
+    当前状态：无具体实现类。run_20hits_video.py 调用 set_midpoint_target(None, None)
+    清除目标，为 no-op。如需启用中途目标，实现此类并添加到 running_terms。
     """
 
     def set_midpoint_target(

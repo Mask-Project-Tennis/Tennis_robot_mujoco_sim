@@ -76,6 +76,10 @@ class MPCConfig:
     Q_tcp_soft: float = 0.0
     Q_qdot_limit: float = 0.0
 
+    # ── 软惩罚阈值比例（相对于硬限位的百分比）──
+    tcp_soft_ratio: float = 0.8          # TcpSoftTerm 阈值 = ratio × max_tcp_speed
+    qdot_limit_ratio: float = 0.8        # QdotLimitTerm 阈值 = ratio × qdot_max
+
     # ── Tube 参数 ──
     tube_cfg: TubeConfig = field(default_factory=TubeConfig)
     softmin_beta: float = 5.0

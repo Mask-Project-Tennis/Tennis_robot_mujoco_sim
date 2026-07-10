@@ -12,6 +12,17 @@ import numpy as np
 
 from src.ilqt.cost import RunningDerivatives, TerminalDerivatives
 
+__all__ = [
+    "ControlEffortTerm",
+    "SmoothnessTerm",
+    "QdotLimitTerm",
+    "TcpSoftTerm",
+    "TerminalHitTerm",
+    "JointLimitTerm",
+    "BodyAvoidanceTerm",
+    "XWallTerm",
+]
+
 
 class ControlEffortTerm:
     """控制力矩代价 l = ½ uᵀ R u。
@@ -205,7 +216,7 @@ class SmoothnessTerm:
         if self._Q_qddot_eff > 0 and k is not None:
             qddot = qdot / self._dt
             cost += 0.5 * self._Q_qddot_eff * float(qddot @ qddot)
-        if self._Q_du_eff > 0 and k is not None and self._u_prev is not None:
+        if self._Q_du_eff > 0 and k is not None and k > 0 and self._u_prev is not None:
             du = u - self._u_prev
             cost += 0.5 * self._Q_du_eff * float(du @ du)
         return cost
@@ -250,6 +261,7 @@ class SmoothnessTerm:
         if (
             self._Q_du_eff > 0
             and k is not None
+            and k > 0
             and self._u_prev is not None
             and l_u is not None
             and l_uu is not None
@@ -672,10 +684,22 @@ class JointLimitTerm:
             NQ: 关节维度。
             NX: 状态维度。
         """
-        self._limits = joint_limits
         self._Q = Q_joint_limit
         self._NQ = NQ
-        # Flyweight：预分配导数容器（此项仅依赖状态 x 的关节位置部分）
+        # 预计算向量化数组：将 dict 展开为 (NQ,) 数组
+        # None 边界替换为 ±inf 使 max(0, ...) 自然为零
+        self._lo = np.full(NQ, -np.inf)
+        self._hi = np.full(NQ, np.inf)
+        self._active_lo = np.zeros(NQ, dtype=bool)
+        self._active_hi = np.zeros(NQ, dtype=bool)
+        for j, (lo, hi) in joint_limits.items():
+            if lo is not None:
+                self._lo[j] = lo
+                self._active_lo[j] = True
+            if hi is not None:
+                self._hi[j] = hi
+                self._active_hi[j] = True
+        # Flyweight：预分配导数容器
         self._derivs = RunningDerivatives(
             l_x=np.zeros(NX),
             l_xx=np.zeros((NX, NX)),
@@ -694,13 +718,9 @@ class JointLimitTerm:
             关节超限代价值。
         """
         q = x[:self._NQ]
-        cost = 0.0
-        for j, (lo, hi) in self._limits.items():
-            if lo is not None:
-                cost += 0.5 * self._Q * max(0.0, lo - q[j]) ** 2
-            if hi is not None:
-                cost += 0.5 * self._Q * max(0.0, q[j] - hi) ** 2
-        return cost
+        excess_lo = np.maximum(0.0, self._lo - q) * self._active_lo
+        excess_hi = np.maximum(0.0, q - self._hi) * self._active_hi
+        return 0.5 * self._Q * float(excess_lo @ excess_lo + excess_hi @ excess_hi)
 
     def running_derivatives(self, x, u, k, fk) -> RunningDerivatives:
         """计算关节限位导数。原地更新预分配容器，返回持久引用。
@@ -720,15 +740,20 @@ class JointLimitTerm:
         self._derivs.l_x.fill(0)
         self._derivs.l_xx.fill(0)
         q = x[:self._NQ]
-        for j, (lo, hi) in self._limits.items():
-            if lo is not None and q[j] < lo:
-                margin = lo - q[j]
-                self._derivs.l_x[j] = -self._Q * margin
-                self._derivs.l_xx[j, j] = self._Q
-            if hi is not None and q[j] > hi:
-                margin = q[j] - hi
-                self._derivs.l_x[j] = self._Q * margin
-                self._derivs.l_xx[j, j] = self._Q
+        # 下界违反: margin > 0 时 l_x = -Q·margin, l_xx = Q
+        excess_lo = np.maximum(0.0, self._lo - q) * self._active_lo
+        mask_lo = excess_lo > 0
+        if np.any(mask_lo):
+            self._derivs.l_x[:self._NQ] -= np.where(mask_lo, self._Q * excess_lo, 0.0)
+            diag_idx = np.where(mask_lo)[0]
+            self._derivs.l_xx[diag_idx, diag_idx] = self._Q
+        # 上界违反: margin > 0 时 l_x = +Q·margin, l_xx = Q
+        excess_hi = np.maximum(0.0, q - self._hi) * self._active_hi
+        mask_hi = excess_hi > 0
+        if np.any(mask_hi):
+            self._derivs.l_x[:self._NQ] += np.where(mask_hi, self._Q * excess_hi, 0.0)
+            diag_idx = np.where(mask_hi)[0]
+            self._derivs.l_xx[diag_idx, diag_idx] = self._Q
         return self._derivs
 
 

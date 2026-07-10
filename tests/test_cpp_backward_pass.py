@@ -174,8 +174,8 @@ class TestBackwardIntegration:
         """5 迭代 solve: C++ backward vs Python backward 轨迹 atol=1e-8。
 
         注意：两次 solve 使用独立的 cost_fn 实例，避免 SmoothnessTerm._u_prev
-        状态泄漏导致 k=0 步 Q_du 行为不一致（旧 HittingCost 内部有 k>0 守卫，
-        新 SmoothnessTerm 仅检查 _u_prev is not None）。
+        状态泄漏（防御性隔离，当前 k>0 守卫已阻止 k=0 使用 stale _u_prev，
+        但独立实例可防止未来守卫被移除时测试以困惑方式失败）。
         """
         env = _make_env()
         N = 30
