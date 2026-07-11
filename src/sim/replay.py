@@ -101,11 +101,16 @@ def compute_rebound_velocity(
 
     其中 v_rel_n 为球-拍相对速度沿球拍法线的分量。
 
+    注意：此处的恢复系数 e 描述的是**球拍-球弹性碰撞**（球拍弦床弹性），
+    与 ``src.robot.constants.BOUNCE_RESTITUTION`` 描述的**地面弹跳**恢复系数
+    是完全不同的物理量，不应统一。真实网球拍的恢复系数约 0.8-0.85，
+    硬地场地面弹跳约 0.75。
+
     Args:
         v_ball_pre: 碰撞前球速度，形状 (3,)。
         v_ee: 碰撞瞬间末端执行器（球拍）速度，形状 (3,)。
         n_racket: 球拍法向量（无需归一化），形状 (3,)。
-        e: 恢复系数（0=完全非弹性, 1=完全弹性，默认 0.8）。
+        e: 球拍-球碰撞恢复系数（默认 0.8，与地面弹跳系数不同）。
 
     Returns:
         反弹后球速度，形状 (3,)。
@@ -128,7 +133,7 @@ def apply_elastic_rebound(
     Args:
         env: MuJoCo 环境实例（需已调用 mj_forward 更新接触列表）。
         ball_vel_pre: 碰撞前球速度，形状 (3,)。
-        e: 恢复系数（默认 0.8）。
+        e: 球拍-球碰撞恢复系数（默认 0.8，见 compute_rebound_velocity 说明）。
 
     Returns:
         反弹后球速度（形状 (3,)），无接触时返回 None。
@@ -168,10 +173,7 @@ def replay_trajectory(
         p0: 球初始位置，形状 (3,)。
         v0: 球初始速度，形状 (3,)。
         hit_step: MPC 检测到的击球步（-1 = 未击中）。
-        e: 恢复系数（默认 0.8）。
-
-    Returns:
-        ReplayResult 包含 X_replay、ball_replay、rebound_applied、contact_step。
+        e: 球拍-球碰撞恢复系数（默认 0.8，见 compute_rebound_velocity 说明）。
     """
     # 重置到初始状态
     env.reset(init_q)

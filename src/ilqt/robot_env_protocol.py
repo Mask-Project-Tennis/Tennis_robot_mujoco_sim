@@ -50,3 +50,13 @@ class RobotEnv(Protocol):
     def get_ee_normal(self) -> np.ndarray: ...
 
     def update_kinematics(self) -> None: ...
+
+    def solve_ik(
+        self,
+        target_pos: np.ndarray,
+        q_init: np.ndarray | None = ...,
+        max_iter: int = ...,
+        eps: float = ...,
+        damp: float = ...,
+        step_size: float = ...,
+    ) -> np.ndarray: ...

@@ -613,7 +613,6 @@ rm65_mpc_tube_constraint_realtime.py
 ├── src/cpp/solver_cpp.py          # C++ 加速版求解器（优先使用）
 ├── src/ilqt/robot_limits.py       # 关节约束检查、安全滤波器
 ├── src/ilqt/async_replanner.py    # 异步重规划器（实验性）
-├── src/ilqt/retiming.py           # 轨迹重定时（速度约束平滑）
 ├── src/dynamics/linearize.py      # 动力学线性化（解析/有限差分/快速）
 ├── src/robot/rm65_model.xml       # MuJoCo XML 模型定义
 └── configs/default.yaml           # 默认参数配置

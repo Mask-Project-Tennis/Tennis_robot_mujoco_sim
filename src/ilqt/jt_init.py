@@ -10,10 +10,10 @@ import numpy as np
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from src.sim.rm65_env import RM65Env
+    from src.ilqt.robot_env_protocol import RobotEnv
 
 
-def _get_jnt_range(env: RM65Env) -> tuple[np.ndarray, np.ndarray]:
+def _get_jnt_range(env: RobotEnv) -> tuple[np.ndarray, np.ndarray]:
     """获取右臂关节限位 (jnt_lo, jnt_hi)，各形状 (6,)。"""
     jnt_lo = np.zeros(env.NU)
     jnt_hi = np.zeros(env.NU)
@@ -84,7 +84,7 @@ def compute_joint1_backswing_trajectory(
 
 
 def compute_jacobian_init_control_position(
-    env: RM65Env,
+    env: RobotEnv,
     x0: np.ndarray,
     p_hit: np.ndarray,
     horizon: int,
@@ -102,7 +102,7 @@ def compute_jacobian_init_control_position(
       5. q = 仿真后真实角度
 
     Args:
-        env: RM65Env 实例（需已配置位置模式）。
+        env: RobotEnv 实例（需已配置位置模式）。
         x0: 初始右臂状态 [q, qdot]，形状 (12,)。
         p_hit: 目标击打点位置，形状 (3,)。
         horizon: 控制序列长度。
@@ -122,7 +122,7 @@ def compute_jacobian_init_control_position(
 
     has_collision_ctrl = hasattr(env, "set_arm_collision")
     if has_collision_ctrl:
-        env.set_arm_collision(False)
+        env.set_arm_collision(False)  # type: ignore[attr-defined]
 
     for k in range(horizon):
         env.set_arm_state(x)
@@ -144,12 +144,12 @@ def compute_jacobian_init_control_position(
         x = env.step_from_state(x, q_desired)
 
     if has_collision_ctrl:
-        env.set_arm_collision(True)
+        env.set_arm_collision(True)  # type: ignore[attr-defined]
     return U
 
 
-def _solve_hit_pose(
-    env: RM65Env,
+def solve_hit_pose(
+    env: RobotEnv,
     p_hit: np.ndarray,
     q_init: np.ndarray,
     fix_joint5_angle: float | None,
@@ -197,8 +197,8 @@ def _solve_hit_pose(
     return q_hit
 
 
-def _solve_hit_velocity(
-    env: RM65Env,
+def solve_hit_velocity(
+    env: RobotEnv,
     q_hit: np.ndarray,
     v_hit_desired: np.ndarray,
     max_qdot: float = 3.0,
@@ -228,7 +228,7 @@ def _solve_hit_velocity(
 
 
 def generate_backswing_warm_start_position(
-    env: RM65Env,
+    env: RobotEnv,
     x0: np.ndarray,
     p_hit: np.ndarray,
     v_hit_desired: np.ndarray,
@@ -245,7 +245,7 @@ def generate_backswing_warm_start_position(
     因为 MuJoCo 内部 PD 执行器会自动跟踪。
 
     Args:
-        env: RM65Env 实例（需已配置位置模式）。
+        env: RobotEnv 实例（需已配置位置模式）。
         x0: 初始右臂状态 [q, qdot]，形状 (12,)。
         p_hit: 目标击打点位置，形状 (3,)。
         v_hit_desired: 期望击球速度，形状 (3,)。
@@ -264,8 +264,8 @@ def generate_backswing_warm_start_position(
     if horizon <= 0:
         return np.zeros((0, NU)), np.zeros((0, NQ))
 
-    q_hit = _solve_hit_pose(env, p_hit, x0[:NQ], fix_joint5_angle, n_des)
-    qdot_hit = _solve_hit_velocity(env, q_hit, v_hit_desired)
+    q_hit = solve_hit_pose(env, p_hit, x0[:NQ], fix_joint5_angle, n_des)
+    qdot_hit = solve_hit_velocity(env, q_hit, v_hit_desired)
 
     q1_traj = compute_joint1_backswing_trajectory(
         x0[0], x0[NQ], q_hit[0], qdot_hit[0],

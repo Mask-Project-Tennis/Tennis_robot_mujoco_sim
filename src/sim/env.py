@@ -5,7 +5,7 @@ import mujoco
 from pathlib import Path
 
 from src.utils.mujoco_loader import load_mujoco_model
-from src.robot.constants import BOUNCE_RESTITUTION
+from src.robot.constants import BOUNCE_RESTITUTION as _BR
 
 
 class MujocoEnv:
@@ -20,7 +20,7 @@ class MujocoEnv:
     # 球半径
     BALL_RADIUS: float = 0.033
     # 弹跳恢复系数（来自共享常量，真实网球硬地约 0.75）
-    BOUNCE_RESTITUTION: float = BOUNCE_RESTITUTION
+    BOUNCE_RESTITUTION: float = _BR  # 来自共享常量 src.robot.constants
 
     def __init__(self, model_path: Path, dt: float | None = None) -> None:
         """初始化 MuJoCo 环境。

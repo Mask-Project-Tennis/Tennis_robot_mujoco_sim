@@ -5,7 +5,7 @@
 
 import numpy as np
 
-from src.robot.constants import BOUNCE_RESTITUTION
+from src.robot.constants import BOUNCE_RESTITUTION as _BR
 
 
 class BallPredictor:
@@ -15,7 +15,7 @@ class BallPredictor:
     """
 
     BALL_RADIUS: float = 0.033       # 网球半径 (m)
-    BOUNCE_RESTITUTION: float = BOUNCE_RESTITUTION  # 弹跳恢复系数（来自共享常量）
+    BOUNCE_RESTITUTION: float = _BR  # 弹跳恢复系数（来自共享常量 src.robot.constants）
 
     def __init__(self, dt: float, g: float = 9.81) -> None:
         """初始化球轨迹预测器。

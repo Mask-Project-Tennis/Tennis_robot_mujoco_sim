@@ -4,7 +4,6 @@ import logging
 from collections import deque
 
 import numpy as np
-import mujoco
 from src.ilqt.robot_env_protocol import RobotEnv
 from src.ilqt.components.protocols import RunningCost
 from src.ilqt.robot_limits import (
@@ -12,7 +11,6 @@ from src.ilqt.robot_limits import (
     check_step_feasibility,
     build_qdot_history,
     compute_trajectory_metrics,
-    TrajectoryMetrics,
 )
 
 logger = logging.getLogger(__name__)
@@ -153,11 +151,8 @@ def forward_pass_with_linesearch(
 
     has_collision_ctrl = hasattr(env, "set_arm_collision")
     if has_collision_ctrl:
-        env.set_arm_collision(False)
+        env.set_arm_collision(False)  # type: ignore[attr-defined]
 
-    best_result: tuple[np.ndarray | None, np.ndarray | None, float, str] = (
-        None, None, float("inf"), ""
-    )
     fp_margin = limits.forward_pass_margin if limits is not None else 1.0
     fp_q_tol = limits.forward_pass_q_tol_rad if limits is not None else 0.0
     actuator_mode = getattr(env, 'actuator_mode', 0)
@@ -172,7 +167,6 @@ def forward_pass_with_linesearch(
             build_qdot_history(qdot_hist, X_new[0][6:], limits.qddot_window_size)
 
         valid = True
-        reject_reason = ""
 
         for k in range(N):
             dx = X_new[k] - X[k]
@@ -182,7 +176,6 @@ def forward_pass_with_linesearch(
 
             if not np.all(np.isfinite(X_new[k + 1])):
                 valid = False
-                reject_reason = f"NaN in state at k={k}"
                 break
 
             # 真实机器人硬约束: q/qdot/u 硬检查 + qddot 滑动窗口（Phase1仅日志）
@@ -198,7 +191,6 @@ def forward_pass_with_linesearch(
                 )
                 if not ok:
                     valid = False
-                    reject_reason = reason
                     logger.warning(
                         "[REJECT_LOG] alpha=%.2f rejected at k=%d: %s",
                         alpha, k, reason,

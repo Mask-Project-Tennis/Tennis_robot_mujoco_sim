@@ -3,7 +3,7 @@
 覆盖：
 - 五次多项式后摆轨迹的特征化行为（Phase A）
 - jt_init 与 mpc_helpers 多项式实现的合并安全性证明（Phase A）
-- _solve_hit_pose / _solve_hit_velocity 提取函数（Phase B）
+- solve_hit_pose / solve_hit_velocity 提取函数（Phase B）
 """
 
 from __future__ import annotations
@@ -80,7 +80,7 @@ def test_jt_init_equals_mpc_helpers_polynomial() -> None:
     assert compute_joint1_backswing_trajectory is jt_impl
 
 
-# ── Phase B: _solve_hit_pose / _solve_hit_velocity 测试 ──
+# ── Phase B: solve_hit_pose / solve_hit_velocity 测试 ──
 
 
 @pytest.fixture
@@ -92,28 +92,28 @@ def planning_env() -> PlanningEnv:
 
 
 def test_solve_hit_pose_fk_converges(planning_env: PlanningEnv) -> None:
-    """_solve_hit_pose 返回的 q_hit 做 FK 接近 p_hit。"""
-    from src.ilqt.jt_init import _solve_hit_pose
+    """solve_hit_pose 返回的 q_hit 做 FK 接近 p_hit。"""
+    from src.ilqt.jt_init import solve_hit_pose
 
     p_hit = np.array([0.3, -0.5, 1.2])
     q_init = np.array([-1.5, 1.57, -0.236, 0.404, 0.446, 2.45])
-    q_hit = _solve_hit_pose(planning_env, p_hit, q_init, fix_joint5_angle=None, n_des=None)
+    q_hit = solve_hit_pose(planning_env, p_hit, q_init, fix_joint5_angle=None, n_des=None)
     planning_env.set_arm_state(np.concatenate([q_hit, np.zeros(planning_env.NQ)]))
     p_actual = planning_env.get_ee_pos()
     assert np.linalg.norm(p_actual - p_hit) < 0.01
 
 
 def test_solve_hit_velocity_jacobian_consistent(planning_env: PlanningEnv) -> None:
-    """_solve_hit_velocity 返回的 qdot 满足 J@qdot ≈ v_desired。
+    """solve_hit_velocity 返回的 qdot 满足 J@qdot ≈ v_desired。
 
     v_desired 选小量（|v|≈0.34）避免触发 max_qdot=3.0 的范数裁剪，
     从而隔离测试雅可比伪逆的映射一致性。
     """
-    from src.ilqt.jt_init import _solve_hit_velocity
+    from src.ilqt.jt_init import solve_hit_velocity
 
     q_hit = np.array([-1.5, 1.57, -0.236, 0.404, 0.446, 2.45])
     v_desired = np.array([0.3, 0.15, 0.0])
-    qdot = _solve_hit_velocity(planning_env, q_hit, v_desired)
+    qdot = solve_hit_velocity(planning_env, q_hit, v_desired)
     planning_env.set_arm_state(np.concatenate([q_hit, np.zeros(planning_env.NQ)]))
     J = planning_env.get_ee_jacp()
     v_actual = J @ qdot

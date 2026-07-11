@@ -8,7 +8,6 @@ C++ 模块不可用时自动回退到 Python 实现。
 用法与原始 ILQTSolver 完全一致。
 """
 
-import ctypes
 import logging
 import numpy as np
 from src.ilqt.robot_env_protocol import RobotEnv
@@ -40,7 +39,6 @@ try:
     from src.cpp.iLQR_Core import (
         linearize_analytical_batch,
         forward_pass_single as cpp_forward_pass_single,
-        forward_pass_linesearch as cpp_forward_pass_linesearch,
         backward_pass as cpp_backward_pass,
     )
     _CPP_AVAILABLE = True
@@ -105,7 +103,6 @@ else:
     from src.ilqt.utils import (
         compute_total_cost,
         forward_pass_with_linesearch,
-        forward_pass_single,
     )
 
     class ILQTSolver:

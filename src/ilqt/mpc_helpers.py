@@ -12,8 +12,8 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from src.ilqt.jt_init import (
-    _solve_hit_pose,
-    _solve_hit_velocity,
+    solve_hit_pose,
+    solve_hit_velocity,
     compute_joint1_backswing_trajectory,
     compute_jacobian_init_control_position,
     generate_backswing_warm_start_position,
@@ -226,8 +226,8 @@ def generate_backswing_warm_start(
     if horizon <= 0:
         return np.zeros((0, NU)), np.zeros((0, NQ))
 
-    q_hit = _solve_hit_pose(env, p_hit, x0[:NQ], fix_joint5_angle, n_des)
-    qdot_hit = _solve_hit_velocity(env, q_hit, v_hit_desired)
+    q_hit = solve_hit_pose(env, p_hit, x0[:NQ], fix_joint5_angle, n_des)
+    qdot_hit = solve_hit_velocity(env, q_hit, v_hit_desired)
 
     q1_traj = compute_joint1_backswing_trajectory(
         x0[0], x0[NQ], q_hit[0], qdot_hit[0],

@@ -405,7 +405,7 @@ class CompositeCost:
             if isinstance(t, RScheduleUpdatable):
                 t.set_R_schedule(R_schedule)
 
-    # ── R3b 修复：活跃代码路径额外调用的委托方法 ──
+    # ── R3b 修复：活跃代码路径调用的额外方法（含 no-op 兼容存根） ──
 
     def set_q_des_traj(self, q_des_traj, Q_joint=None):
         """显式 no-op（G5 修复：JointTrackUpdatable Protocol 已删除）。

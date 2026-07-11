@@ -6,7 +6,7 @@
 |------|------|---------|--------|
 | `robot/` | 机器人模型定义（MuJoCo XML + 正运动学） | `rm65_model.xml`, `kinematics.py` | 9 |
 | `sim/` | MuJoCo 环境封装 + 轨迹回放 + 击打检测 | `rm65_env.py`, `env.py`, `viewer.py`, `replay.py`, `hit_detection.py` | 91 |
-| `dynamics/` | 动力学线性化（解析/有限差分） | `linearize.py` | 13 |
+| `dynamics/` | 动力学线性化（解析/有限差分） | `linearize.py` | 5 |
 | `ilqt/` | iLQR 求解器 + MPCController + EpisodeRunner + 可插拔策略 + 可组合组件 | `solver.py`, `mpc_controller.py`, `episode_runner.py`, `strategies/`, `components/` | 160 |
 | `cpp/` | C++ 加速模块（pybind11：线性化、前向传递、约束检查） | `solver_cpp.py`, `mujoco_utils.h`, `cost_params.h` | 91 |
 | `perception/` | 球状态估计（6D 卡尔曼滤波 + 观测门控） | `ball_estimator.py`, `ball_obs_gate.py` | 31 |
