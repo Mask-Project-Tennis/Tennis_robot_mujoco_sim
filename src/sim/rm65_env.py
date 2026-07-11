@@ -14,6 +14,7 @@ from typing import Callable
 
 from src.utils.mujoco_loader import load_mujoco_model
 from src.perception.ball_estimator import BallEstimator
+from src.robot.constants import BOUNCE_RESTITUTION
 
 
 class RM65Env:
@@ -23,7 +24,8 @@ class RM65Env:
     NX: int = 12
     NU: int = 6
     BALL_RADIUS: float = 0.033
-    BOUNCE_RESTITUTION: float = 0.75
+    # 弹跳恢复系数（来自共享常量 src.robot.constants，真实网球硬地约 0.75）
+    BOUNCE_RESTITUTION: float = BOUNCE_RESTITUTION
     LEFT_ARM_NQ: int = 6
     BALL_QPOS_START: int = 12
     BALL_QVEL_START: int = 12

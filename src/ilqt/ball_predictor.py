@@ -5,6 +5,8 @@
 
 import numpy as np
 
+from src.robot.constants import BOUNCE_RESTITUTION
+
 
 class BallPredictor:
     """球轨迹预测器 — 解析抛物线 + 地面弹跳。
@@ -13,7 +15,7 @@ class BallPredictor:
     """
 
     BALL_RADIUS: float = 0.033       # 网球半径 (m)
-    BOUNCE_RESTITUTION: float = 0.8  # 弹跳恢复系数
+    BOUNCE_RESTITUTION: float = BOUNCE_RESTITUTION  # 弹跳恢复系数（来自共享常量）
 
     def __init__(self, dt: float, g: float = 9.81) -> None:
         """初始化球轨迹预测器。

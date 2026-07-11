@@ -40,6 +40,11 @@ KP.flags.writeable = False
 KD = np.array([20.0, 20.0, 10.0, 5.0, 5.0, 2.0], dtype=np.float64)
 KD.flags.writeable = False
 
+# ── 球物理常量 ──
+# 弹跳恢复系数（真实网球硬地约 0.75），规划层与仿真物理共享同一值，
+# 消除 ball_predictor 与 env 的弹跳预测偏差。
+BOUNCE_RESTITUTION: float = 0.75
+
 # NOTE: 以下为共享只读数组；不要重新绑定（如 init_q = init_q + offset），
 # 重新赋值会断开别名共享，使 .flags.writeable 保护失效。
 __all__ = [
@@ -51,4 +56,5 @@ __all__ = [
     "WORKSPACE_RADIUS",
     "KP",
     "KD",
+    "BOUNCE_RESTITUTION",
 ]
