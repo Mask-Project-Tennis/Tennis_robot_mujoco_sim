@@ -25,7 +25,6 @@ from pathlib import Path
 from typing import Optional
 
 import numpy as np
-import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
@@ -33,6 +32,7 @@ from src.tennis.ball import generate_ball_to_target_box, generate_ball_from_serv
 from src.tennis.hitting import find_hitting_point_physics, compute_desired_hit_velocity
 from src.ilqt.mpc_helpers import compute_jacobian_init_control
 from src.robot.constants import SHOULDER_POS, WORKSPACE_RADIUS, INIT_Q
+from src.utils.yaml_utils import load_config, merge_configs
 
 logging.basicConfig(
     level=logging.INFO,
@@ -63,23 +63,6 @@ class BallScanResult:
     ball_was_hit: bool = False
     mpc_success: bool = False
     mpc_time_s: float = float("nan")
-
-
-def load_config(config_path: Path) -> dict:
-    """加载 YAML 配置文件。"""
-    with open(config_path, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
-
-
-def merge_configs(base: dict, override: dict) -> dict:
-    """递归合并两个配置字典。"""
-    result = base.copy()
-    for key, value in override.items():
-        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
-            result[key] = merge_configs(result[key], value)
-        else:
-            result[key] = value
-    return result
 
 
 def serve_box_quick_scan(

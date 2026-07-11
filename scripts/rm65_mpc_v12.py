@@ -28,7 +28,6 @@ import logging
 from pathlib import Path
 
 import numpy as np
-import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -48,6 +47,7 @@ from src.ilqt.components.predictive_safety import PredictiveSafetyFilter
 from src.ilqt.components.sim_component import SimComponent
 from src.real.trajectory_recorder import TrajectoryRecorder
 from src.robot.constants import SHOULDER_POS, WORKSPACE_RADIUS, INIT_Q, INIT_Q_LEFT
+from src.utils.yaml_utils import load_config, merge_configs
 
 logging.basicConfig(
     level=logging.INFO,
@@ -55,27 +55,6 @@ logging.basicConfig(
 )
 logging.getLogger("src.ilqt.robot_limits").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
-
-
-# ==============================================================================
-# 配置加载工具（从 V11 复制）
-# ==============================================================================
-
-def load_config(config_path: Path) -> dict:
-    """加载 YAML 配置文件。"""
-    with open(config_path, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
-
-
-def merge_configs(base: dict, override: dict) -> dict:
-    """递归合并两个配置字典，override 覆盖 base。"""
-    result = base.copy()
-    for key, value in override.items():
-        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
-            result[key] = merge_configs(result[key], value)
-        else:
-            result[key] = value
-    return result
 
 
 # ==============================================================================

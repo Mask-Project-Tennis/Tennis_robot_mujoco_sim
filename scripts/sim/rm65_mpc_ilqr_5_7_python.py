@@ -14,7 +14,6 @@ import time
 import argparse
 import logging
 import numpy as np
-import yaml
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
@@ -32,6 +31,7 @@ from src.ilqt.cost import CompositeCost
 from src.ilqt.cost_terms import ControlEffortTerm, TerminalHitTerm
 from src.ilqt.solver import ILQTSolver
 from src.robot.constants import SHOULDER_POS, WORKSPACE_RADIUS, INIT_Q, INIT_Q_LEFT
+from src.utils.yaml_utils import load_config, merge_configs
 
 logging.basicConfig(
     level=logging.INFO,
@@ -119,23 +119,6 @@ def fix_joint5_control_trajectory(
     if has_collision_ctrl:
         env.set_arm_collision(True)
     return U
-
-
-def load_config(config_path: Path) -> dict:
-    """加载 YAML 配置文件。"""
-    with open(config_path, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
-
-
-def merge_configs(base: dict, override: dict) -> dict:
-    """递归合并两个配置字典，override 覆盖 base。"""
-    result = base.copy()
-    for key, value in override.items():
-        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
-            result[key] = merge_configs(result[key], value)
-        else:
-            result[key] = value
-    return result
 
 
 def compute_jacobian_init_control(

@@ -10,7 +10,6 @@ import sys
 import argparse
 import logging
 import numpy as np
-import yaml
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
@@ -19,18 +18,13 @@ from src.sim.env import MujocoEnv
 from src.tennis.ball import generate_serve_ball
 from src.tennis.hitting import find_hitting_point
 from src.sim.viewer import RealTimeViewer
+from src.utils.yaml_utils import load_config, merge_configs
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger(__name__)
-
-
-def load_config(config_path: Path) -> dict:
-    """加载 YAML 配置文件。"""
-    with open(config_path, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
 
 
 def main() -> None:
@@ -126,17 +120,6 @@ def main() -> None:
             break
 
     logger.info("评估完成")
-
-
-def merge_configs(base: dict, override: dict) -> dict:
-    """递归合并两个配置字典。"""
-    result = base.copy()
-    for key, value in override.items():
-        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
-            result[key] = merge_configs(result[key], value)
-        else:
-            result[key] = value
-    return result
 
 
 if __name__ == "__main__":
