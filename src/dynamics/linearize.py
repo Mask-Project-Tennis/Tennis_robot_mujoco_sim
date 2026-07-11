@@ -2,11 +2,11 @@
 
 import numpy as np
 import mujoco
-from src.sim.env import MujocoEnv
+from src.ilqt.robot_env_protocol import RobotEnv
 
 
 def linearize_dynamics(
-    env: MujocoEnv,
+    env: RobotEnv,
     x: np.ndarray,
     u: np.ndarray,
     eps: float = 1e-5,
@@ -60,7 +60,7 @@ def linearize_dynamics(
 
 
 def linearize_trajectory(
-    env: MujocoEnv,
+    env: RobotEnv,
     X: np.ndarray,
     U: np.ndarray,
     eps: float = 1e-5,
@@ -91,7 +91,7 @@ def linearize_trajectory(
 
 
 def linearize_analytical(
-    env: MujocoEnv,
+    env: RobotEnv,
     x: np.ndarray,
     u: np.ndarray,
     eps: float = 1e-5,
@@ -246,7 +246,7 @@ def linearize_analytical(
 
 
 def linearize_analytical_trajectory(
-    env: MujocoEnv,
+    env: RobotEnv,
     X: np.ndarray,
     U: np.ndarray,
     eps: float = 1e-5,
@@ -289,7 +289,7 @@ def linearize_analytical_trajectory(
 
 
 def linearize_fast_trajectory(
-    env: MujocoEnv,
+    env: RobotEnv,
     X: np.ndarray,
     U: np.ndarray,
     actuator_mode: int = 0,

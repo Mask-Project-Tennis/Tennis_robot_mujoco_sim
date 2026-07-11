@@ -3,7 +3,7 @@
 import logging
 import numpy as np
 from typing import Any
-from src.sim.env import MujocoEnv
+from src.ilqt.robot_env_protocol import RobotEnv
 from src.dynamics.linearize import linearize_trajectory, linearize_analytical_trajectory
 from src.ilqt.components.protocols import RunningCost, SmoothnessMixin
 from src.ilqt.robot_limits import RobotLimits
@@ -45,7 +45,7 @@ class ILQTSolver:
         self.lin_eps = float(config["lin_eps"])
         self.use_analytical = use_analytical
 
-    def _linearize(self, env: MujocoEnv, X: np.ndarray, U: np.ndarray,
+    def _linearize(self, env: RobotEnv, X: np.ndarray, U: np.ndarray,
                    ) -> tuple[list[np.ndarray], list[np.ndarray], list[np.ndarray]]:
         """根据配置选择线性化方法。"""
         if self.use_analytical:
@@ -62,7 +62,7 @@ class ILQTSolver:
 
     def solve(
         self,
-        env: MujocoEnv,
+        env: RobotEnv,
         cost_fn: RunningCost,
         x0: np.ndarray,
         U_init: np.ndarray | None = None,
@@ -151,7 +151,7 @@ class ILQTSolver:
 
     def solve_few_iters(
         self,
-        env: MujocoEnv,
+        env: RobotEnv,
         cost_fn: RunningCost,
         x0: np.ndarray,
         U_init: np.ndarray,
@@ -269,7 +269,7 @@ class ILQTSolver:
         return X, U, cost_history, solver_success
 
     def _rollout(
-        self, env: MujocoEnv, x0: np.ndarray, U: np.ndarray
+        self, env: RobotEnv, x0: np.ndarray, U: np.ndarray
     ) -> np.ndarray:
         """前向仿真获取轨迹（规划期间禁用球拍碰撞，避免干扰球轨迹）。"""
         has_collision_ctrl = hasattr(env, "set_arm_collision")
@@ -305,7 +305,7 @@ class ILQTSolver:
         return l_xs, l_us, l_xxs, l_uxs, l_uus
 
     def _linearize_fast(
-        self, env: MujocoEnv, X: np.ndarray, U: np.ndarray
+        self, env: RobotEnv, X: np.ndarray, U: np.ndarray
     ) -> tuple[list[np.ndarray], list[np.ndarray], list[np.ndarray]]:
         """快速线性化（仅 M^{-1}，跳过 ∂h/∂q, ∂h/∂qdot 有限差分）。"""
         from src.dynamics.linearize import linearize_fast_trajectory

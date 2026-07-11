@@ -2,10 +2,10 @@
 
 import mujoco
 import numpy as np
-from src.sim.env import MujocoEnv
+from src.ilqt.robot_env_protocol import RobotEnv
 
 
-def forward_kinematics(env: MujocoEnv, q: np.ndarray) -> np.ndarray:
+def forward_kinematics(env: RobotEnv, q: np.ndarray) -> np.ndarray:
     """计算给定关节角度下的末端执行器位置。
 
     Args:
@@ -21,7 +21,7 @@ def forward_kinematics(env: MujocoEnv, q: np.ndarray) -> np.ndarray:
     return env.get_ee_pos()
 
 
-def compute_jacobian(env: MujocoEnv, q: np.ndarray) -> np.ndarray:
+def compute_jacobian(env: RobotEnv, q: np.ndarray) -> np.ndarray:
     """计算给定关节角度下的位置雅可比矩阵。
 
     Args:
@@ -37,7 +37,7 @@ def compute_jacobian(env: MujocoEnv, q: np.ndarray) -> np.ndarray:
     return env.get_ee_jacp()
 
 
-def compute_workspace_reach(env: MujocoEnv, n_samples: int = 500) -> float:
+def compute_workspace_reach(env: RobotEnv, n_samples: int = 500) -> float:
     """通过采样估计机械臂的最大可达距离。
 
     Args:

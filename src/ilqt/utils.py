@@ -5,7 +5,7 @@ from collections import deque
 
 import numpy as np
 import mujoco
-from src.sim.env import MujocoEnv
+from src.ilqt.robot_env_protocol import RobotEnv
 from src.ilqt.components.protocols import RunningCost
 from src.ilqt.robot_limits import (
     RobotLimits,
@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 def check_constraints_x(
-    env: MujocoEnv,
+    env: RobotEnv,
     x: np.ndarray,
     joint_limits: dict | None = None,
     x_limit: float | None = None,
@@ -66,7 +66,7 @@ def check_constraints_x(
 
 
 def check_constraints_trajectory_x(
-    env: MujocoEnv,
+    env: RobotEnv,
     X: np.ndarray,
     joint_limits: dict | None = None,
     x_limit: float | None = None,
@@ -94,7 +94,7 @@ def check_constraints_trajectory_x(
 
 
 def compute_total_cost(
-    env: MujocoEnv,
+    env: RobotEnv,
     cost_fn: RunningCost,
     X: np.ndarray,
     U: np.ndarray,
@@ -118,7 +118,7 @@ def compute_total_cost(
 
 
 def forward_pass_with_linesearch(
-    env: MujocoEnv,
+    env: RobotEnv,
     cost_fn: RunningCost,
     X: np.ndarray,
     U: np.ndarray,
@@ -223,7 +223,7 @@ def forward_pass_with_linesearch(
 
 
 def forward_pass_single(
-    env: MujocoEnv,
+    env: RobotEnv,
     cost_fn: RunningCost,
     X: np.ndarray,
     U: np.ndarray,

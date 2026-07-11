@@ -11,7 +11,7 @@ C++ 模块不可用时自动回退到 Python 实现。
 import ctypes
 import logging
 import numpy as np
-from src.sim.env import MujocoEnv
+from src.ilqt.robot_env_protocol import RobotEnv
 from src.ilqt.components.protocols import RunningCost, SmoothnessMixin
 
 logger = logging.getLogger(__name__)
@@ -325,7 +325,7 @@ else:
 
         def solve_few_iters(
             self,
-            env: MujocoEnv,
+            env: RobotEnv,
             cost_fn: RunningCost,
             x0: np.ndarray,
             U_init: np.ndarray,
