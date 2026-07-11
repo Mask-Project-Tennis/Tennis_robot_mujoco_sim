@@ -99,8 +99,7 @@ mujoco_sim/
 │   │   └── kinematics.py              # 正运动学 / 雅可比矩阵工具
 │   ├── dynamics/                      # 动力学计算
 │   │   ├── __init__.py
-│   │   ├── linearize.py               # 动力学线性化（fx, fu），供 iLQR 使用
-│   │   └── simulate.py                # 前向仿真 / rollout
+│   │   └── linearize.py               # 动力学线性化（fx, fu），供 iLQR 使用
 │   ├── ilqt/                          # iLQR + MPC + 管线 + 策略 + 组件
 │   │   ├── __init__.py
 │   │   ├── solver.py                  # iLQR 后向-前向迭代主循环（solve / solve_few_iters）+ build_solver 工厂函数
@@ -108,7 +107,6 @@ mujoco_sim/
 │   │   ├── cost_terms.py              # 独立惩罚项（ControlEffort/Smoothness/QdotLimit/TcpSoft/TerminalHit/JointLimit + 骨架）
 │   │   ├── utils.py                   # 增益计算、线搜索、正则化辅助函数
 │   │   ├── robot_limits.py            # 关节约束 + 安全滤波（RobotLimits, strict_braking_check）
-│   │   ├── retiming.py                # 时间重映射工具
 │   │   ├── async_replanner.py         # 异步重规划器（后台线程 iLQR）
 │   │   ├── jt_init.py                 # 位置模式 JT 初始控制 + 后摆 warm-start
 │   │   ├── robot_env_protocol.py      # RobotEnv Protocol（@runtime_checkable，RM65Env/PlanningEnv 共同接口）

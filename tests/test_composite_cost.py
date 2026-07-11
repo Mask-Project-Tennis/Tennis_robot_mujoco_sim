@@ -173,3 +173,60 @@ def test_composite_cost_no_op_when_term_absent():
     composite.set_q_des_traj(None, None)
     composite.set_smoothness_scale(1.0, 1.0, 1.0)
     composite.set_midpoint_target(None, None)
+
+
+# ── G5 修复特征化测试：set_q_des_traj / set_midpoint_target 为 no-op ──
+# 无 JointTrackUpdatable / MidpointUpdatable 具体实现类，调用不影响 running_cost。
+
+
+@pytest.fixture
+def composite_cost_with_standard_terms():
+    """构建生产路径风格代价（ControlEffortTerm + SmoothnessTerm + TerminalHitTerm）。
+
+    用于特征化测试验证 set_q_des_traj / set_midpoint_target 为 no-op。
+    """
+    env = _MockEnv()
+    ctrl = ControlEffortTerm(R=0.0001, NU=6)
+    smooth = SmoothnessTerm(Q_qdot=0.001, Q_qddot=0.0005, Q_du=0.001)
+    term = TerminalHitTerm(
+        np.array([0.5, -0.5, 1.2]),
+        np.array([0.0, -3.0, 1.0]),
+        np.eye(3) * 50000.0,
+        np.eye(3) * 200.0,
+        Q_n=0.0,
+    )
+    return CompositeCost(env, running_terms=[ctrl, smooth], terminal_terms=[term])
+
+
+def test_set_q_des_traj_is_noop(composite_cost_with_standard_terms):
+    """set_q_des_traj 无 JointTrackUpdatable 实现时为 no-op。
+
+    G5 修复：JointTrackUpdatable Protocol 已删除（零实现类）。
+    方法保留为显式 no-op 以兼容 8+ 活跃脚本调用。
+    """
+    x = np.zeros(12)
+    u = np.zeros(6)
+    k = 5
+    cost_before = composite_cost_with_standard_terms.running_cost(x, u, k)
+    composite_cost_with_standard_terms.set_q_des_traj(
+        np.ones((10, 6)), Q_joint={0: 100.0}
+    )
+    cost_after = composite_cost_with_standard_terms.running_cost(x, u, k)
+    np.testing.assert_allclose(cost_before, cost_after)
+
+
+def test_set_midpoint_target_is_noop(composite_cost_with_standard_terms):
+    """set_midpoint_target 无 MidpointUpdatable 实现时为 no-op。
+
+    G5 修复：MidpointUpdatable Protocol 已删除（零实现类）。
+    方法保留为显式 no-op 以兼容 run_20hits_video.py 调用。
+    """
+    x = np.zeros(12)
+    u = np.zeros(6)
+    k = 5
+    cost_before = composite_cost_with_standard_terms.running_cost(x, u, k)
+    composite_cost_with_standard_terms.set_midpoint_target(
+        5, np.array([1.0, 2.0, 3.0])
+    )
+    cost_after = composite_cost_with_standard_terms.running_cost(x, u, k)
+    np.testing.assert_allclose(cost_before, cost_after)

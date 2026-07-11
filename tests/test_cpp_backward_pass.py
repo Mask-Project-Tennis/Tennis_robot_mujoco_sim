@@ -35,8 +35,9 @@ def _make_solver(N: int = 60) -> ILQTSolver:
 def _make_cost(env: RM65Env, N: int) -> CompositeCost:
     """创建 V11 默认风格代价函数（CompositeCost 组装）。
 
-    关节跟踪（q_des_traj + Q_joint）在新系统中由 JointTrackUpdatable 协议项提供，
-    当前测试无对应具体项类，省略该惩罚（不影响 C++ vs Python 后向传递数值等价验证）。
+    关节跟踪（q_des_traj + Q_joint）当前无对应具体项类（G5 修复后
+    JointTrackUpdatable Protocol 已删除），省略该惩罚（不影响 C++ vs
+    Python 后向传递数值等价验证）。
     """
     return CompositeCost(
         env,

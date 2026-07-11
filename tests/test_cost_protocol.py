@@ -4,7 +4,7 @@ import numpy as np
 from src.ilqt.components.protocols import (
     RunningCost, TerminalCost, SmoothnessMixin,
     TargetUpdatable, WeightUpdatable, RScheduleUpdatable,  # noqa: F401  验证可导入
-    JointTrackUpdatable, SmoothnessScaleUpdatable, MidpointUpdatable,
+    SmoothnessScaleUpdatable,
 )
 
 
@@ -52,35 +52,14 @@ def test_running_cost_not_terminal():
     assert not isinstance(obj, TerminalCost)
 
 
-class _FakeJointTrack:
-    """满足 JointTrackUpdatable 的最小实现。"""
-    def set_q_des_traj(self, q_des_traj, Q_joint=None): pass
-
-
 class _FakeSmoothnessScale:
     """满足 SmoothnessScaleUpdatable 的最小实现。"""
     def set_smoothness_scale(self, qdot_scale, qddot_scale, du_scale): pass
 
 
-class _FakeMidpoint:
-    """满足 MidpointUpdatable 的最小实现。"""
-    def set_midpoint_target(self, step, target, Q_midpoint=None,
-                           v_target=None, Q_midpoint_v=None): pass
-
-
-def test_joint_track_protocol_satisfied():
-    """满足 set_q_des_traj 的类通过 JointTrackUpdatable isinstance 检查。"""
-    assert isinstance(_FakeJointTrack(), JointTrackUpdatable)
-
-
 def test_smoothness_scale_protocol_satisfied():
     """满足 set_smoothness_scale 的类通过 SmoothnessScaleUpdatable isinstance 检查。"""
     assert isinstance(_FakeSmoothnessScale(), SmoothnessScaleUpdatable)
-
-
-def test_midpoint_protocol_satisfied():
-    """满足 set_midpoint_target 的类通过 MidpointUpdatable isinstance 检查。"""
-    assert isinstance(_FakeMidpoint(), MidpointUpdatable)
 
 
 # ── FKContext 测试 ──

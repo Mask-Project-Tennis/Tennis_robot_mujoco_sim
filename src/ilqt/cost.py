@@ -13,9 +13,7 @@ from src.ilqt.components.protocols import (
     TargetUpdatable,
     WeightUpdatable,
     RScheduleUpdatable,
-    JointTrackUpdatable,
     SmoothnessScaleUpdatable,
-    MidpointUpdatable,
 )
 
 
@@ -410,27 +408,18 @@ class CompositeCost:
     # ── R3b 修复：活跃代码路径额外调用的委托方法 ──
 
     def set_q_des_traj(self, q_des_traj, Q_joint=None):
-        """委托关节轨迹跟踪更新（JointTrackingTerm 实现 JointTrackUpdatable）。
+        """显式 no-op（G5 修复：JointTrackUpdatable Protocol 已删除）。
 
-        活跃调用点：8+ 活跃脚本 MPC 循环（后摆关节跟踪）。
-        无 JointTrackingTerm 时静默跳过（isinstance 守卫）。
+        历史上有 JointTrackingTerm 通过 JointTrackUpdatable Protocol 接收
+        期望关节轨迹，当前无任何具体实现类。保留此方法为 no-op 以兼容
+        8+ 活跃脚本的调用（rm65_mpc_ilqr_5_5.py / rm65_evaluate.py /
+        run_20hits_video.py 等 MPC 循环中调用 set_q_des_traj 后摆关节跟踪）。
 
         Args:
-            q_des_traj: 期望关节轨迹，或 None 清除。
-            Q_joint: 关节级权重 {关节索引: 权重}。
+            q_des_traj: 期望关节轨迹（忽略）。
+            Q_joint: 关节级权重（忽略）。
         """
-        found = False
-        for t in self.running_terms:
-            if isinstance(t, JointTrackUpdatable):
-                t.set_q_des_traj(q_des_traj, Q_joint)
-                found = True
-        if not found and q_des_traj is not None:
-            self._logger.debug(
-                "set_q_des_traj 无 JointTrackUpdatable 项可委托 "
-                "(q_des_traj shape=%s, Q_joint=%s) — 调用为 no-op",
-                getattr(q_des_traj, 'shape', type(q_des_traj)),
-                Q_joint,
-            )
+        return
 
     def set_smoothness_scale(self, qdot_scale, qddot_scale, du_scale):
         """委托平滑度缩放更新（SmoothnessTerm 实现 SmoothnessScaleUpdatable）。
@@ -448,19 +437,19 @@ class CompositeCost:
                 t.set_smoothness_scale(qdot_scale, qddot_scale, du_scale)
 
     def set_midpoint_target(self, step, target, **kwargs):
-        """委托中途目标更新（MidpointTerm 实现 MidpointUpdatable）。
+        """显式 no-op（G5 修复：MidpointUpdatable Protocol 已删除）。
 
-        活跃调用点：run_20hits_video.py Tube 包装前在 base_cost_fn 上调用。
-        无 MidpointTerm 时静默跳过。
+        历史上有 MidpointTerm 通过 MidpointUpdatable Protocol 接收中途
+        目标，当前无任何具体实现类。保留此方法为 no-op 以兼容
+        run_20hits_video.py 等脚本在 Tube 包装前的 base_cost_fn 上调用
+        set_midpoint_target(None, None) 清除目标。
 
         Args:
-            step: 目标生效的时间步索引，或 None 清除。
-            target: 期望中途目标位置 (3,)。
-            **kwargs: 额外参数（Q_midpoint / v_target / Q_midpoint_v）。
+            step: 目标生效的时间步索引（忽略）。
+            target: 期望中途目标位置（忽略）。
+            **kwargs: 额外参数（忽略）。
         """
-        for t in self.running_terms:
-            if isinstance(t, MidpointUpdatable):
-                t.set_midpoint_target(step, target, **kwargs)
+        return
 
 
 def build_production_cost(

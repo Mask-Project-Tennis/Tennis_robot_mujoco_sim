@@ -178,22 +178,6 @@ class RScheduleUpdatable(Protocol):
 
 
 @runtime_checkable
-class JointTrackUpdatable(Protocol):
-    """关节轨迹跟踪动态更新接口（JointTrackingTerm 实现）。
-
-    当前状态：无具体实现类。活跃脚本调用 set_q_des_traj 时传 Q_joint=None，
-    CompositeCost 中无 JointTrackUpdatable 项，调用为 no-op。
-    如需启用关节跟踪，实现此类并添加到 running_terms。
-    """
-
-    def set_q_des_traj(
-        self,
-        q_des_traj: NDArray[np.floating] | None,
-        Q_joint: dict[int, float] | None = None,
-    ) -> None: ...
-
-
-@runtime_checkable
 class SmoothnessScaleUpdatable(Protocol):
     """平滑度缩放动态更新接口（SmoothnessTerm 实现）。
 
@@ -203,22 +187,4 @@ class SmoothnessScaleUpdatable(Protocol):
 
     def set_smoothness_scale(
         self, qdot_scale: float, qddot_scale: float, du_scale: float,
-    ) -> None: ...
-
-
-@runtime_checkable
-class MidpointUpdatable(Protocol):
-    """中途目标动态更新接口（MidpointTerm 实现）。
-
-    当前状态：无具体实现类。run_20hits_video.py 调用 set_midpoint_target(None, None)
-    清除目标，为 no-op。如需启用中途目标，实现此类并添加到 running_terms。
-    """
-
-    def set_midpoint_target(
-        self,
-        step: int | None,
-        target: NDArray[np.floating] | None,
-        Q_midpoint: NDArray[np.floating] | None = None,
-        v_target: NDArray[np.floating] | None = None,
-        Q_midpoint_v: NDArray[np.floating] | None = None,
     ) -> None: ...
