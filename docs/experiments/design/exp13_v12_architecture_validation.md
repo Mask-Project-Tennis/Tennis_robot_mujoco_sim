@@ -9,7 +9,7 @@
 
 ## 假设
 
-1. V12 的 `do_replan` 每次构造全新 HittingCost（无状态泄漏），应比 V11 的 inline replan（复用 base_cost_fn）更稳定
+1. V12 的 `do_replan` 每次构造全新 CompositeCost（无状态泄漏），应比 V11 的 inline replan（复用 base_cost_fn）更稳定
 2. V12 统一走 do_replan 无重复代码路径，规划耗时应与 V11 相当或更优
 3. 位置模式下两者表现接近（架构差异主要体现在规划层，执行层差异由 PD 增益主导）
 

@@ -2,7 +2,7 @@
 
 **日期**: 2026-06-18
 **实验编号**: exp13_v12_architecture_validation
-**数据目录**: `experiment_data/v11_v12_comparison/`
+**数据目录**: `experiment_data/exp13_v12_architecture_validation/`
 **CSV**: `results.csv` (403 行, seeds 1-100)
 **运行时间**: ~8 min, 0 failed
 
@@ -159,7 +159,7 @@ V11 命中率 42.9% 的根因是**代价函数状态泄漏**（cost function sta
 
 **控制理论判定**：MPC 要求每次重规划的代价函数精确反映当前控制目标（Mayne, 2014）。复用代价对象违反这一假设，等价于优化一个与实际目标不同的代价函数（cost function mismatch），导致递归可行性条件不成立。
 
-**软件设计判定**：这是实现缺陷（update 不完全重置），非设计选择。V12 的修复方案是每次 replan 构造全新的 `HittingCost` 对象（`replan_core.py:266`），零状态残留，构造开销 <0.1ms 可忽略。
+**软件设计判定**：这是实现缺陷（update 不完全重置），非设计选择。V12 的修复方案是每次 replan 构造全新的 `CompositeCost` 对象（`replan_core.py` 内 `build_production_cost`），零状态残留，构造开销 <0.1ms 可忽略。
 
 #### 2. 与 exp14 PD 参数差异的关联
 

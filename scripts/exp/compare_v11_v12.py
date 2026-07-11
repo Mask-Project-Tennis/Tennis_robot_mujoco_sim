@@ -8,8 +8,8 @@
     python scripts/exp/compare_v11_v12.py [--seeds 100] [--speed 7]
 
 输出:
-    experiment_data/v11_v12_comparison/results.csv
-    experiment_data/v11_v12_comparison/summary.txt
+    experiment_data/exp13_v12_architecture_validation/results.csv
+    experiment_data/exp13_v12_architecture_validation/summary.txt
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ import time
 from pathlib import Path
 
 PROJECT = Path(__file__).resolve().parent.parent.parent
-OUTPUT_DIR = PROJECT / "experiment_data" / "v11_v12_comparison"
+OUTPUT_DIR = PROJECT / "experiment_data" / "exp13_v12_architecture_validation"
 RESULT_FIELDS = [
     "pos_error", "vel_error", "min_dist", "ball_near_ms", "tube_ready_ms",
     "max_tcp", "max_qdot", "max_face", "hit_type", "hit_time_error_ms",

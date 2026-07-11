@@ -601,7 +601,7 @@ tennis_robot/
 │   ├── sim/rm65_env.py            # RM65Env（PD保持 + 解析弹跳 + IK求解器）
 │   ├── dynamics/linearize.py      # 解析线性化（M⁻¹H_q, M⁻¹H_qdot）
 │   ├── ilqt/solver.py            # iLQT 求解器（Riccati + 线搜索）
-│   ├── ilqt/cost.py              # HittingCost（Gauss-Newton 终端代价）
+│   ├── ilqt/cost.py              # CompositeCost + cost_terms.py（组合代价）
 │   ├── ilqt/utils.py             # 前向传递（线搜索 / 固定步长）
 │   ├── tennis/ball.py            # 球轨迹生成 + 反推初速度
 │   └── tennis/hitting.py         # 击打点搜索 + 权重调度

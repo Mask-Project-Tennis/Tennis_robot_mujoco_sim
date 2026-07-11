@@ -1,33 +1,47 @@
-.marscode/
-.pytest_cache/
-.ruff_cache/
+# Python
 __pycache__/
 *.pyc
 *.log
-.vscode/
+.pytest_cache/
+.ruff_cache/
 
+# 环境
 .env
 .venv/
 venv/
 
+# 构建产物
+build/
+src/cpp/*.so
+
+# 输出目录
 results/
 videos/
-build/
 experiment_data/
 figures/
-paper/
-/reference/
-plans/
-.codegraph/
+
+# 媒体
+*.mp4
+*.avi
+
+# MuJoCo 生成文件
 MJMODEL.TXT
 MJDATA.TXT
 MUJOCO_LOG.TXT
-*.mp4
-*.avi
-src/cpp/*.so
 
-memory.md
-scripts/test/test_noise_integration.py
+# 文档/参考资料（不入库）
+paper/
+/reference/
+plans/
+
+# IDE / Agent 工具
+.marscode/
+.vscode/
 .opencode/
 .superpowers/
 .worktrees/
+.codegraph/
+
+# 杂项
+memory.md
+scripts/test/test_noise_integration.py

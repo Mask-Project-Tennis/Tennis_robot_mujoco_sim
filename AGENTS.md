@@ -104,7 +104,8 @@ mujoco_sim/
 │   ├── ilqt/                          # iLQR + MPC + 管线 + 策略 + 组件
 │   │   ├── __init__.py
 │   │   ├── solver.py                  # iLQR 后向-前向迭代主循环（solve / solve_few_iters）+ build_solver 工厂函数
-│   │   ├── cost.py                    # 代价函数（终端击打点代价 + 控制代价 + Tube 代价，max_tcp_speed 已移除）
+│   │   ├── cost.py                    # CompositeCost 聚合器 + FKContext + build_production_cost 工厂
+│   │   ├── cost_terms.py              # 独立惩罚项（ControlEffort/Smoothness/QdotLimit/TcpSoft/TerminalHit/JointLimit + 骨架）
 │   │   ├── utils.py                   # 增益计算、线搜索、正则化辅助函数
 │   │   ├── robot_limits.py            # 关节约束 + 安全滤波（RobotLimits, strict_braking_check）
 │   │   ├── retiming.py                # 时间重映射工具

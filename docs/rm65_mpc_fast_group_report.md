@@ -242,7 +242,7 @@ MPC 每次重规划时，不一定重新生成后摆。当前策略是：
 
 ## 4. 代价函数设定
 
-代价函数由 `src/ilqt/cost.py` 中的 `HittingCost` 实现。整体形式为：
+代价函数由 `src/ilqt/cost.py` 中的 `CompositeCost` 实现。整体形式为：
 
 ```text
 J(X, U) = sum_{k=0}^{N-1} l_k(x_k, u_k) + l_N(x_N)
@@ -318,7 +318,7 @@ dn/dq ≈ skew(-n) * J_omega
 l_k(x_k, u_k) = 0.5 * u_k^T R_k u_k
 ```
 
-`HittingCost` 还支持两个可选运行项：
+`CompositeCost` 还支持两个可选运行项：
 
 ```text
 运行位置代价：0.5 * (p_ee - p_running)^T Q_run (p_ee - p_running)

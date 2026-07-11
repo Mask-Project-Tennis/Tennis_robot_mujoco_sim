@@ -10,7 +10,7 @@
 
 ---
 
-# 一、代价函数设计（`HittingCost`）
+# 一、代价函数设计（`CompositeCost`）
 
 源码位置：
 

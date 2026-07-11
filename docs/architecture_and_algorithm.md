@@ -44,7 +44,7 @@
 │  ① 预测球轨迹 → BallPredictor（解析抛物线）                        │
 │  ② 搜索候选击球窗口 → search_hit_window                           │
 │  ③ 构建击打走廊 → build_hitting_tube                             │
-│  ④ 构建代价函数 → HittingCost / TubeHittingCostWrapper（每次新建）│
+│  ④ 构建代价函数 → CompositeCost / TubeHittingCostWrapper（每次新建）│
 │  ⑤ warm-start 控制序列 → U_prev shift + JT init                  │
 │  ⑥ iLQR 求解 → solve_few_iters（3-30 次迭代）                     │
 │  ⑦ 构建 buffer → U_buffer（供下 20 步执行）                        │
@@ -73,7 +73,7 @@
 | **MPCController** | `ilqt/mpc_controller.py` | EpisodeRunner | MPC 外循环：阶段调度 / 击球点精化 / 随挥 / 重规划调度 |
 | **do_replan** | `ilqt/replan_core.py` | MPCController.step() | 单次重规划：球预测→代价构建→iLQR→buffer |
 | **ILQTSolver** | `ilqt/solver.py` / `cpp/` | do_replan | iLQR 内循环：线性化→代价导数→Riccati→线搜索 |
-| **HittingCost** | `ilqt/cost.py` | do_replan | 代价函数：终端(位置+速度+法向) + 运行(控制+平滑) |
+| **CompositeCost** | `ilqt/cost.py` + `cost_terms.py` | do_replan | 组合代价：FKContext + 独立惩罚项（ControlEffort/Smoothness/TerminalHit 等） |
 | **TubeHittingCostWrapper** | `ilqt/tube_cost.py` | do_replan | 走廊代价：在候选窗口施加空间约束 |
 | **PlanningEnv** | `ilqt/planning_env.py` | do_replan | MuJoCo 纯计算环境（FK / Jacobian / 前向仿真） |
 | **RobotLimits** | `ilqt/robot_limits.py` | do_replan, SafetyFilter | 关节约束 + 安全滤波（beta 递降） |
@@ -608,7 +608,7 @@ rm65_mpc_tube_constraint_realtime.py
 ├── src/sim/rm65_env.py           # MuJoCo 环境封装（正运动学、仿真步进、球状态）
 ├── src/tennis/ball.py             # 球轨迹生成（发球、抛物线预测）
 ├── src/tennis/hitting.py          # 击打点计算、期望击球速度
-├── src/ilqt/cost.py               # 代价函数（HittingCost, TubeHittingCostWrapper）
+├── src/ilqt/cost.py               # 代价函数（CompositeCost + cost_terms 惩罚项, TubeHittingCostWrapper）
 ├── src/ilqt/solver.py             # iLQR 求解器（后向-前向迭代）
 ├── src/cpp/solver_cpp.py          # C++ 加速版求解器（优先使用）
 ├── src/ilqt/robot_limits.py       # 关节约束检查、安全滤波器
