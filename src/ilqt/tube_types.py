@@ -34,7 +34,7 @@ class TubeConfig:
     """Tube 代价聚合模式: 'weighted_sum' 或 'softmin'（暂仅支持 weighted_sum）。"""
 
     tube_cost_ratio: float = 1.0
-    """Tube 代价占总代价的比例（0~1），剩余来自原 HittingCost 终端代价。"""
+    """Tube 代价占总代价的比例（0~1），剩余来自原 CompositeCost 终端代价。"""
 
     softmin_beta: float = 5.0
     """终端 softmin 锐度参数 β。β 越大越接近 hard-min（只选最优候选），

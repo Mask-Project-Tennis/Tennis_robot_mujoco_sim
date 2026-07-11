@@ -30,7 +30,7 @@ def test_merge_configs_not_mutate_input():
     assert override == {"a": {"c": 2}}
 
 
-def test_merge_configs_unscovered_nested_shares_reference():
+def test_merge_configs_uncovered_nested_shares_reference():
     """未被 override 覆盖的嵌套 dict 与 base 共享引用（浅拷贝，当前设计如此）。
 
     此测试锁定浅拷贝行为：result 中未被 override 覆盖的嵌套字典
