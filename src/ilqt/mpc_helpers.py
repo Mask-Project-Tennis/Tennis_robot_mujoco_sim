@@ -12,6 +12,9 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from src.ilqt.jt_init import (
+    _solve_hit_pose,
+    _solve_hit_velocity,
+    compute_joint1_backswing_trajectory,
     compute_jacobian_init_control_position,
     generate_backswing_warm_start_position,
     fix_joint5_control_trajectory_position,
@@ -201,50 +204,6 @@ def compute_jacobian_init_control(
     return U
 
 
-def compute_joint1_backswing_trajectory(
-    q1_current: float,
-    qdot1_current: float,
-    q1_hit: float,
-    qdot1_hit: float,
-    horizon: int,
-    backswing_offset: float = -0.6,
-    backswing_ratio: float = 0.35,
-) -> np.ndarray:
-    """生成关节1的"后摆→前挥"五次多项式轨迹。"""
-    if horizon <= 0:
-        return np.zeros(0)
-
-    T = float(horizon)
-    alpha = float(np.clip(backswing_ratio, 0.05, 0.95))
-    q_mid = q1_current + backswing_offset
-
-    a0 = q1_current
-    a1 = qdot1_current * T
-
-    alpha2, alpha3, alpha4, alpha5 = alpha**2, alpha**3, alpha**4, alpha**5
-
-    A = np.array([
-        [1.0, 1.0, 1.0, 1.0],
-        [2.0, 3.0, 4.0, 5.0],
-        [alpha2, alpha3, alpha4, alpha5],
-        [2 * alpha, 3 * alpha2, 4 * alpha3, 5 * alpha4],
-    ])
-    b = np.array([
-        q1_hit - a0 - a1,
-        qdot1_hit * T - a1,
-        q_mid - a0 - a1 * alpha,
-        -a1,
-    ])
-    coeffs_high = np.linalg.solve(A, b)
-    a2, a3, a4, a5 = coeffs_high[0], coeffs_high[1], coeffs_high[2], coeffs_high[3]
-
-    q1_traj = np.zeros(horizon)
-    for k in range(horizon):
-        tau = (k + 1) / T
-        q1_traj[k] = a0 + a1 * tau + a2 * tau**2 + a3 * tau**3 + a4 * tau**4 + a5 * tau**5
-    return q1_traj
-
-
 def generate_backswing_warm_start(
     env: "RM65Env",
     x0: np.ndarray,
@@ -267,35 +226,8 @@ def generate_backswing_warm_start(
     if horizon <= 0:
         return np.zeros((0, NU)), np.zeros((0, NQ))
 
-    q_hit = env.solve_ik(p_hit, q_init=x0[:NQ], max_iter=200, eps=1e-3)
-    if fix_joint5_angle is not None:
-        q_hit[5] = fix_joint5_angle
-
-    if n_des is not None:
-        wrist_joints = [3, 4, 5]
-        for _ in range(20):
-            env.set_arm_state(np.concatenate([q_hit, np.zeros(NQ)]))
-            n_cur = env.get_ee_normal()
-            n_err = n_cur - n_des
-            err_norm = np.linalg.norm(n_err)
-            if err_norm < 0.01:
-                break
-            J_omega = env.get_ee_jacr()
-            nx, ny, nz = -n_cur[0], -n_cur[1], -n_cur[2]
-            skew = np.array([[0, -nz, ny], [nz, 0, -nx], [-ny, nx, 0]])
-            J_n = skew @ J_omega
-            J_n_wrist = J_n[:, wrist_joints]
-            dq_wrist = -np.linalg.lstsq(J_n_wrist, n_err, rcond=None)[0]
-            dq_wrist *= min(1.0, 0.02 / (np.linalg.norm(dq_wrist) + 1e-12))
-            q_hit[wrist_joints] += dq_wrist
-
-    env.set_arm_state(np.concatenate([q_hit, np.zeros(NQ)]))
-    J_p_hit = env.get_ee_jacp()
-    qdot_hit = np.linalg.lstsq(J_p_hit, v_hit_desired, rcond=None)[0]
-    max_qdot = 3.0
-    qdot_norm = np.linalg.norm(qdot_hit)
-    if qdot_norm > max_qdot:
-        qdot_hit *= max_qdot / qdot_norm
+    q_hit = _solve_hit_pose(env, p_hit, x0[:NQ], fix_joint5_angle, n_des)
+    qdot_hit = _solve_hit_velocity(env, q_hit, v_hit_desired)
 
     q1_traj = compute_joint1_backswing_trajectory(
         x0[0], x0[NQ], q_hit[0], qdot_hit[0],

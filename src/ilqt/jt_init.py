@@ -24,7 +24,7 @@ def _get_jnt_range(env: RM65Env) -> tuple[np.ndarray, np.ndarray]:
     return jnt_lo, jnt_hi
 
 
-def _compute_joint1_backswing_trajectory(
+def compute_joint1_backswing_trajectory(
     q1_current: float,
     qdot1_current: float,
     q1_hit: float,
@@ -35,8 +35,7 @@ def _compute_joint1_backswing_trajectory(
 ) -> np.ndarray:
     """生成关节1的"后摆→前挥"五次多项式轨迹。
 
-    与 V11 中 compute_joint1_backswing_trajectory 相同的算法，
-    此处复制以避免循环依赖。
+    共享实现，供位置模式（jt_init）和力矩模式（mpc_helpers）复用。
 
     Args:
         q1_current: 当前关节1角度。
@@ -149,6 +148,85 @@ def compute_jacobian_init_control_position(
     return U
 
 
+def _solve_hit_pose(
+    env: RM65Env,
+    p_hit: np.ndarray,
+    q_init: np.ndarray,
+    fix_joint5_angle: float | None,
+    n_des: np.ndarray | None,
+) -> np.ndarray:
+    """求解击球时刻的关节角度（IK + 可选腕部法向量对齐）。
+
+    先用阻尼最小二乘 IK 把末端对准 p_hit；若提供 fix_joint5_angle 则强制
+    覆盖第 5 关节；若提供 n_des 则通过 20 次迭代的腕部伪逆对齐拍面法向量。
+
+    Args:
+        env: 满足 RobotEnv 协议的环境（需提供 solve_ik/set_arm_state/
+            get_ee_normal/get_ee_jacr）。
+        p_hit: 目标击打点位置，形状 (3,)。
+        q_init: IK 初值，形状 (NQ,)。
+        fix_joint5_angle: 若非 None，强制第 5 关节为该角度。
+        n_des: 期望拍面法向量，形状 (3,)；None 跳过法向量对齐。
+
+    Returns:
+        q_hit: 击球时刻关节角度，形状 (NQ,)。
+    """
+    NQ = env.NQ
+    q_hit = env.solve_ik(p_hit, q_init=q_init, max_iter=200, eps=1e-3)
+    if fix_joint5_angle is not None:
+        q_hit[5] = fix_joint5_angle
+
+    if n_des is not None:
+        wrist_joints = [3, 4, 5]
+        for _ in range(20):
+            env.set_arm_state(np.concatenate([q_hit, np.zeros(NQ)]))
+            n_cur = env.get_ee_normal()
+            n_err = n_cur - n_des
+            err_norm = np.linalg.norm(n_err)
+            if err_norm < 0.01:
+                break
+            J_omega = env.get_ee_jacr()
+            nx, ny, nz = -n_cur[0], -n_cur[1], -n_cur[2]
+            skew = np.array([[0, -nz, ny], [nz, 0, -nx], [-ny, nx, 0]])
+            J_n = skew @ J_omega
+            J_n_wrist = J_n[:, wrist_joints]
+            dq_wrist = -np.linalg.lstsq(J_n_wrist, n_err, rcond=None)[0]
+            dq_wrist *= min(1.0, 0.02 / (np.linalg.norm(dq_wrist) + 1e-12))
+            q_hit[wrist_joints] += dq_wrist
+
+    return q_hit
+
+
+def _solve_hit_velocity(
+    env: RM65Env,
+    q_hit: np.ndarray,
+    v_hit_desired: np.ndarray,
+    max_qdot: float = 3.0,
+) -> np.ndarray:
+    """通过雅可比伪逆求解击球时刻关节速度。
+
+    在 q_hit 处计算位置雅可比 J_p，用最小二乘解 J_p @ qdot ≈ v_hit_desired，
+    并将结果范数裁剪到 max_qdot 以内。
+
+    Args:
+        env: 满足 RobotEnv 协议的环境。
+        q_hit: 击球时刻关节角度，形状 (NQ,)。
+        v_hit_desired: 期望末端线速度，形状 (3,)。
+        max_qdot: 关节速度范数上限（弧度/秒）。
+
+    Returns:
+        qdot_hit: 击球时刻关节速度，形状 (NQ,)。
+    """
+    NQ = env.NQ
+    env.set_arm_state(np.concatenate([q_hit, np.zeros(NQ)]))
+    J_p_hit = env.get_ee_jacp()
+    qdot_hit = np.linalg.lstsq(J_p_hit, v_hit_desired, rcond=None)[0]
+    qdot_norm = np.linalg.norm(qdot_hit)
+    if qdot_norm > max_qdot:
+        qdot_hit *= max_qdot / qdot_norm
+    return qdot_hit
+
+
 def generate_backswing_warm_start_position(
     env: RM65Env,
     x0: np.ndarray,
@@ -186,37 +264,10 @@ def generate_backswing_warm_start_position(
     if horizon <= 0:
         return np.zeros((0, NU)), np.zeros((0, NQ))
 
-    q_hit = env.solve_ik(p_hit, q_init=x0[:NQ], max_iter=200, eps=1e-3)
-    if fix_joint5_angle is not None:
-        q_hit[5] = fix_joint5_angle
+    q_hit = _solve_hit_pose(env, p_hit, x0[:NQ], fix_joint5_angle, n_des)
+    qdot_hit = _solve_hit_velocity(env, q_hit, v_hit_desired)
 
-    if n_des is not None:
-        wrist_joints = [3, 4, 5]
-        for _ in range(20):
-            env.set_arm_state(np.concatenate([q_hit, np.zeros(NQ)]))
-            n_cur = env.get_ee_normal()
-            n_err = n_cur - n_des
-            err_norm = np.linalg.norm(n_err)
-            if err_norm < 0.01:
-                break
-            J_omega = env.get_ee_jacr()
-            nx, ny, nz = -n_cur[0], -n_cur[1], -n_cur[2]
-            skew = np.array([[0, -nz, ny], [nz, 0, -nx], [-ny, nx, 0]])
-            J_n = skew @ J_omega
-            J_n_wrist = J_n[:, wrist_joints]
-            dq_wrist = -np.linalg.lstsq(J_n_wrist, n_err, rcond=None)[0]
-            dq_wrist *= min(1.0, 0.02 / (np.linalg.norm(dq_wrist) + 1e-12))
-            q_hit[wrist_joints] += dq_wrist
-
-    env.set_arm_state(np.concatenate([q_hit, np.zeros(NQ)]))
-    J_p_hit = env.get_ee_jacp()
-    qdot_hit = np.linalg.lstsq(J_p_hit, v_hit_desired, rcond=None)[0]
-    max_qdot = 3.0
-    qdot_norm = np.linalg.norm(qdot_hit)
-    if qdot_norm > max_qdot:
-        qdot_hit *= max_qdot / qdot_norm
-
-    q1_traj = _compute_joint1_backswing_trajectory(
+    q1_traj = compute_joint1_backswing_trajectory(
         x0[0], x0[NQ], q_hit[0], qdot_hit[0],
         horizon,
         backswing_offset=backswing_offset,
