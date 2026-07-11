@@ -1,4 +1,4 @@
-"""连续运行 20 次 v9 击打仿真并保存 MP4 视频（单进程内循环）。
+"""连续运行 20 次击打仿真并保存 MP4 视频（单进程内循环）。
 
 设计:
   - 单进程内复用 env / solver / cost_fn
@@ -24,17 +24,13 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts" / "archive" / "root"))  # archive/root
 
 from src.sim.rm65_env import RM65Env
 from src.tennis.ball import (
     generate_ball_to_target_box,
     generate_ball_from_serve_box,
 )
-from src.tennis.hitting import (
-    find_hitting_point_physics,
-    compute_desired_hit_velocity,
-)
+from src.tennis.hitting import find_hitting_point_physics
 from src.ilqt.cost import CompositeCost
 from src.ilqt.cost_terms import ControlEffortTerm, SmoothnessTerm, TerminalHitTerm
 from src.ilqt.robot_limits import (
@@ -42,7 +38,7 @@ from src.ilqt.robot_limits import (
     check_one_step_feasibility,
     ExecutionMetrics,
 )
-from src.ilqt.async_replanner import AsyncReplanner, PlanRequest, PlanResult
+from src.ilqt.async_replanner import AsyncReplanner, PlanRequest
 from src.ilqt.mpc_controller import MPCConfig
 from src.robot.constants import SHOULDER_POS, WORKSPACE_RADIUS, INIT_Q, INIT_Q_LEFT
 try:
@@ -50,27 +46,19 @@ try:
 except ImportError:
     from src.ilqt.solver import ILQTSolver
 
-from rm65_mpc_v9 import (
+from src.ilqt.mpc_helpers import (
     fix_joint5_control,
-    fix_joint5_control_trajectory,
-    load_config,
-    merge_configs,
     compute_jacobian_init_control,
     compute_joint1_backswing_trajectory,
     generate_backswing_warm_start,
     resample_control_sequence,
     compute_r_schedule,
-    TubeConfig,
-    TubeHittingCostWrapper,
-    TubeOnlyCost,
-    SoftminOnlyCost,
-    search_hit_window,
-    build_hitting_tube,
-    HitWindow,
-    HittingTube,
-    ReplanState,
-    do_replan,
 )
+from src.ilqt.tube_types import TubeConfig, HitWindow, HittingTube, ReplanState
+from src.ilqt.tube_cost import TubeHittingCostWrapper, TubeOnlyCost, SoftminOnlyCost
+from src.ilqt.tube_builder import search_hit_window, build_hitting_tube
+from src.ilqt.replan_core import do_replan
+from src.utils.yaml_utils import load_config, merge_configs
 
 logging.basicConfig(
     level=logging.INFO,
@@ -78,9 +66,9 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 logging.getLogger("src.ilqt.robot_limits").setLevel(logging.WARNING)
-logger = logging.getLogger("20hits_v9")
+logger = logging.getLogger("20hits_video")
 
-parser = argparse.ArgumentParser(description="V9 连续 20 次击打 + MP4 视频")
+parser = argparse.ArgumentParser(description="连续 20 次击打 + MP4 视频")
 parser.add_argument("--ball-speed", type=float, default=7)
 parser.add_argument("--n-runs", type=int, default=20)
 parser.add_argument("--start-seed", type=int, default=0)
@@ -124,7 +112,7 @@ if args.no_serve_box:
     args.serve_box = False
 
 output_dir = Path(args.output_dir) if args.output_dir else Path(
-    "results/20hits_v9_speed%d" % int(args.ball_speed))
+    "results/20hits_video_speed%d" % int(args.ball_speed))
 output_dir.mkdir(parents=True, exist_ok=True)
 
 SERVE_DIST_MAP = {5: 5.7, 6: 6.8, 7: 8.0, 8: 9.0, 9: 9.5, 10: 10.0}
@@ -296,7 +284,7 @@ def run_batch() -> None:
             env.model.light_active[2] = True
 
         fps = args.fps if args.fps else int(1.0 / dt)
-        video_path = output_dir / "20hits_v9_continuous.mp4"
+        video_path = output_dir / "20hits_video_continuous.mp4"
         writer = imageio.get_writer(
             str(video_path),
             fps=fps,

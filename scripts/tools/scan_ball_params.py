@@ -28,10 +28,10 @@ import numpy as np
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "scripts" / "archive" / "root"))  # archive/root
 
 from src.tennis.ball import generate_ball_to_target_box, generate_ball_from_serve_box
 from src.tennis.hitting import find_hitting_point_physics, compute_desired_hit_velocity
+from src.ilqt.mpc_helpers import compute_jacobian_init_control
 from src.robot.constants import SHOULDER_POS, WORKSPACE_RADIUS, INIT_Q
 
 logging.basicConfig(
@@ -358,7 +358,6 @@ def run_mpc_evaluation(
         x0[:env.NQ] = init_q
 
         # 简单雅可比初始控制
-        from rm65_mpc_tube import compute_jacobian_init_control
         U_init = compute_jacobian_init_control(
             env, x0, hit_info["p_hit"], 40, gain=30.0,
         )
