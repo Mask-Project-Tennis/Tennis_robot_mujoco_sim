@@ -41,14 +41,25 @@ class FileSource:
     内部用 TrajectoryRecorder.load() 加载，支持新旧格式。
     """
 
-    def __init__(self, path: Path | str) -> None:
+    def __init__(self, path: Path | str, use_actual: bool = False) -> None:
         """加载轨迹文件。
 
         Args:
             path: 轨迹文件路径（.npz 或 .pkl）。
+            use_actual: True 时使用 q_actual（仿真实际执行的关节角度），
+                False 时使用 q_desired（MPC 命令）。真机重演推荐 True，
+                因为位置模式 MPC 的 q_desired 可能超出真机限位。
         """
         traj = TrajectoryRecorder.load(Path(path))
-        self._q_desired = np.asarray(traj.q_desired, dtype=float)
+        if use_actual:
+            if len(traj.q_actual) == 0:
+                raise ValueError(
+                    f"use_actual=True 但轨迹 q_actual 为空（旧格式或未记录），"
+                    f"无法重演。去掉 use_actual 用 q_desired，或重新生成轨迹。文件: {path}"
+                )
+            self._q_desired = np.asarray(traj.q_actual, dtype=float)
+        else:
+            self._q_desired = np.asarray(traj.q_desired, dtype=float)
         self._timestamps = np.asarray(traj.timestamps, dtype=float)
 
     def __iter__(self) -> Iterator[tuple[np.ndarray, float]]:

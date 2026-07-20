@@ -541,6 +541,11 @@ class MPCController:
         else:
             u_cmd = self._compute_buffer_fallback(arm_state)
 
+        # ── 3.5 递减 k_hit（每步减 1，触发随挥 should_trigger 的 k_hit<=1 条件）──
+        # 不递减则 k_hit 保持在最近一次 replan 的值，随挥永远不触发，
+        # 而 post-hit replan 会判定球不可达 → _done=True → 提前结束。
+        self._k_hit = max(0, self._k_hit - 1)
+
         # ── 4. 确定阶段 → PhaseSchedule ──
         phase = self._phase_schedule.classify(self._k_hit)
 

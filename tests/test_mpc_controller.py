@@ -166,7 +166,7 @@ class TestDependencyDirection:
         import ast
         from pathlib import Path
 
-        source = Path("src/ilqt/mpc_controller.py").read_text()
+        source = Path("src/ilqt/mpc_controller.py").read_text(encoding="utf-8")
         tree = ast.parse(source)
         violations = []
         for node in ast.walk(tree):

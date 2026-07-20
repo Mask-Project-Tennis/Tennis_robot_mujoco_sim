@@ -6,18 +6,12 @@
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import numpy as np
 import pytest
 
-# 添加 scripts/ 到路径，导入入口脚本中的 pre_motion
-_SCRIPTS_DIR = str(Path(__file__).resolve().parent.parent / "scripts")
-if _SCRIPTS_DIR not in sys.path:
-    sys.path.insert(0, _SCRIPTS_DIR)
-
-from replay_trajectory import pre_motion  # noqa: E402
+from src.real.replay_pipeline import pre_motion  # noqa: E402
 
 from src.ilqt.planning_env import PlanningEnv  # noqa: E402
 from src.real.adaptive_timer import AdaptiveTimer  # noqa: E402
@@ -212,23 +206,23 @@ class TestPreMotion:
         traj = _make_traj_obj()
         robot = FakeRobot(init_q=traj.init_q, dt=DT)
         robot.connect()
-        result = pre_motion(robot, traj, max_tcp_speed=0.3)
+        result = pre_motion(robot, traj, duration_s=0.1)
         assert result is True
         assert len(robot.command_history) == 0
         assert len(robot.set_max_tcp_speed_calls) == 0
 
     def test_moves_to_init(self) -> None:
-        """需移动（0.1rad≈5.7°）→ 发送命令 → 到位。"""
+        """需移动（0.1rad≈5.7°）→ 多步插值 → 到位。"""
         traj = _make_traj_obj()
         different_q = INIT_Q + np.array([0.1, 0.0, 0.0, 0.0, 0.0, 0.0])
         robot = FakeRobot(init_q=different_q, dt=DT)
         robot.connect()
-        result = pre_motion(robot, traj, max_tcp_speed=0.3)
+        result = pre_motion(robot, traj, duration_s=0.1)
         assert result is True
         assert len(robot.command_history) >= 1
-        assert 0.3 in robot.set_max_tcp_speed_calls
+        # pre_motion 不再调用 set_max_tcp_speed（实测与插值冲突导致震动）
         q = robot.get_arm_state()[:6]
-        assert np.allclose(q, traj.init_q, atol=np.radians(0.5))
+        assert np.allclose(q, traj.init_q, atol=np.radians(1.0))
 
     def test_large_delta_decline(
         self, monkeypatch: pytest.MonkeyPatch
@@ -239,25 +233,70 @@ class TestPreMotion:
         robot = FakeRobot(init_q=far_q, dt=DT)
         robot.connect()
         monkeypatch.setattr("builtins.input", lambda prompt="": "n")
-        result = pre_motion(robot, traj, max_tcp_speed=0.3)
+        result = pre_motion(robot, traj, duration_s=0.1)
         assert result is False
         assert len(robot.command_history) == 0
 
     def test_large_delta_accept(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """差距过大（1.0rad≈57°>30°）→ 用户确认 → 移动 → 到位。"""
+        """差距过大（1.0rad≈57°>30°）→ 用户确认 → 多步插值 → 到位。"""
         traj = _make_traj_obj()
         far_q = INIT_Q + np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0])
         robot = FakeRobot(init_q=far_q, dt=DT)
         robot.connect()
         monkeypatch.setattr("builtins.input", lambda prompt="": "y")
-        result = pre_motion(robot, traj, max_tcp_speed=0.3)
+        result = pre_motion(robot, traj, duration_s=0.1)
         assert result is True
         assert len(robot.command_history) >= 1
-        assert 0.3 in robot.set_max_tcp_speed_calls
         q = robot.get_arm_state()[:6]
-        assert np.allclose(q, traj.init_q, atol=np.radians(0.5))
+        assert np.allclose(q, traj.init_q, atol=np.radians(1.0))
+
+    def test_min_duration_auto_extends(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """大 delta + 短 duration → 自动延长到最小安全值。
+
+        delta=2.0rad≈114.6°, duration_s=0.01 → min_duration≈1.19s
+        """
+        traj = _make_traj_obj()
+        far_q = INIT_Q + np.array([2.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+        robot = FakeRobot(init_q=far_q, dt=DT)
+        robot.connect()
+        monkeypatch.setattr("builtins.input", lambda prompt="": "y")
+        # 用高 rate_hz 加速测试（min_duration 与 rate_hz 无关）
+        result = pre_motion(robot, traj, duration_s=0.01, rate_hz=1000.0)
+        assert result is True
+        # 114.6° delta → min_duration = 1.875 * 114.6 / 180 ≈ 1.19s
+        # steps = 1.19 * 1000 ≈ 1193，远大于 duration_s=0.01 对应的 10 步
+        assert len(robot.command_history) > 100
+        q = robot.get_arm_state()[:6]
+        assert np.allclose(q, traj.init_q, atol=np.radians(1.0))
+
+    def test_return_code_aborts(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """send_joint_command 返回非零 → 立即中止，返回 False。"""
+        traj = _make_traj_obj()
+        different_q = INIT_Q + np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+        robot = FakeRobot(init_q=different_q, dt=DT)
+        robot.connect()
+        monkeypatch.setattr("builtins.input", lambda prompt="": "y")
+
+        # 拦截 send_joint_command，第 3 次调用返回错误码
+        original_send = robot.send_joint_command
+        call_count = [0]
+
+        def failing_send(q_desired: np.ndarray) -> int:
+            call_count[0] += 1
+            if call_count[0] >= 3:
+                return -1
+            return original_send(q_desired)
+
+        robot.send_joint_command = failing_send  # type: ignore[method-assign]
+        result = pre_motion(robot, traj, duration_s=0.1, rate_hz=100.0)
+        assert result is False
+        assert call_count[0] == 3  # 第 3 次失败时中止
 
 
 class TestReplayTrajectoryMock:

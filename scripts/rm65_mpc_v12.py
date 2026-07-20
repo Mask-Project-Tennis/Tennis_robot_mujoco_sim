@@ -271,7 +271,6 @@ def main() -> None:
     # ==========================================================================
     init_q = INIT_Q
     init_q_left = INIT_Q_LEFT
-
     fix_joint5_angle: float | None = init_q[5] if args.fix_joint5 else None
     use_backswing = args.use_backswing
     backswing_offset = -abs(args.backswing)
@@ -326,6 +325,18 @@ def main() -> None:
         except (FileNotFoundError, ValueError) as e:
             parser.error(f"--limits-config 加载失败: {e}")
         robot_limits = _brl(env, _real_cfg)
+        # 真机限位模式：切换到真机初始姿势（J2=80° 有 10° 裕度，vs INIT_Q J2=90° 在限位边界）
+        from src.robot.constants import INIT_Q_REAL
+        init_q = INIT_Q_REAL.copy()
+        logger.info("真机限位模式: init_q 切换到 INIT_Q_REAL (J2=%.1f°)", np.degrees(init_q[1]))
+        # I5: 未显式 --max-tcp 警告。real_robot.yaml 的 TCP=1.0 会锁死仿真安全滤波加速，
+        # 须用 --max-tcp 1.8 覆盖（exp16: TCP 1.0 命中率 30% vs 1.8 = 78%）。
+        if args.max_tcp is None:
+            logger.warning(
+                "--limits-config 加载真机限位（TCP=%.1f m/s），仿真生成轨迹需显式 --max-tcp 1.8，"
+                "当前未指定，安全滤波可能锁死加速 → 轨迹无效。建议追加 --max-tcp 1.8",
+                _real_cfg.max_tcp_speed,
+            )
     else:
         rl_cfg = config_dict.get("robot_limits", {})
         robot_limits = RobotLimits.from_config(

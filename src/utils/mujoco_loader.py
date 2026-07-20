@@ -10,9 +10,11 @@ MuJoCo 底层 C 函数 mj_loadXML 在 Windows 上不支持路径中包含非 ASC
 
 import atexit
 import logging
+import os
 import shutil
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 import mujoco
@@ -22,6 +24,9 @@ logger = logging.getLogger(__name__)
 # 模块级缓存：同一进程只复制一次
 _cached_tmp_dir: Path | None = None
 _cached_src_hash: str | None = None
+
+# 崩溃残留目录的判定年龄（秒）：超过此值的 mj_model_* 目录视为上次崩溃残留
+_STALE_AGE_S: int = 3600
 
 
 def _is_ascii_path(path: Path) -> bool:
@@ -46,21 +51,33 @@ def _compute_dir_signature(project_root: Path) -> str:
 
 
 def _setup_temp_copy(project_root: Path) -> Path:
-    """将 src/robot/ 和 assets/ 复制到临时 ASCII 目录，返回临时目录路径。
+    """将 src/robot/ 和 assets/ 复制到系统临时目录下的唯一子目录。
 
-    使用模块级缓存避免重复复制。
+    每进程生成独立目录（PID 前缀 + mkdtemp 随机串）避免并发进程竞态；
+    启动时清理超过 _STALE_AGE_S 的旧崩溃残留目录；atexit 正常退出时清理本进程目录。
     """
     global _cached_tmp_dir, _cached_src_hash
 
     sig = _compute_dir_signature(project_root)
     if _cached_tmp_dir is not None and _cached_src_hash == sig:
-        logger.debug("复用缓存的临时模型目录: %s", _cached_tmp_dir)
-        return _cached_tmp_dir
+        if _cached_tmp_dir.exists():
+            logger.debug("复用缓存的临时模型目录: %s", _cached_tmp_dir)
+            return _cached_tmp_dir
+        logger.warning("缓存临时目录已被删除: %s，重新复制", _cached_tmp_dir)
+        _cached_tmp_dir = None
 
-    if _cached_tmp_dir is not None:
-        shutil.rmtree(_cached_tmp_dir, ignore_errors=True)
+    # 清理崩溃残留：超过 _STALE_AGE_S 的同类 mj_model_* 目录
+    tmp_root = Path(tempfile.gettempdir())
+    stale_threshold = time.time() - _STALE_AGE_S
+    for old in tmp_root.glob("mj_model_*"):
+        try:
+            if old.is_dir() and old.stat().st_mtime < stale_threshold:
+                shutil.rmtree(old, ignore_errors=True)
+        except OSError:
+            pass
 
-    tmp = Path(tempfile.mkdtemp(prefix="mj_model_"))
+    # 每进程唯一目录：mkdtemp 自带随机串，PID 前缀便于人工识别/清理
+    tmp = Path(tempfile.mkdtemp(prefix=f"mj_model_{os.getpid()}_"))
     logger.info("复制模型文件到临时目录: %s", tmp)
 
     robot_dst = tmp / "src" / "robot"
@@ -73,8 +90,6 @@ def _setup_temp_copy(project_root: Path) -> Path:
 
     _cached_tmp_dir = tmp
     _cached_src_hash = sig
-
-    atexit.register(_cleanup_temp)
     return tmp
 
 
@@ -84,6 +99,11 @@ def _cleanup_temp() -> None:
     if _cached_tmp_dir is not None:
         shutil.rmtree(_cached_tmp_dir, ignore_errors=True)
         _cached_tmp_dir = None
+
+
+# 模块导入时注册一次（而非每次 _setup_temp_copy 注册），避免长生命周期进程
+# 中签名变化导致多次注册。_cleanup_temp 在 _cached_tmp_dir=None 时安全 no-op。
+atexit.register(_cleanup_temp)
 
 
 def load_mujoco_model(model_path: Path) -> mujoco.MjModel:

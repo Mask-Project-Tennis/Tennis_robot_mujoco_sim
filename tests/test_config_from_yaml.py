@@ -126,3 +126,41 @@ class TestConfigNoCanfdFields:
         assert "control_mode" not in names
         assert "canfd_trajectory_mode" not in names
         assert "canfd_smooth_radio" not in names
+
+
+def test_dataclass_defaults_match_default_yaml() -> None:
+    """dataclass 默认值必须与 configs/real_robot.yaml 逐字段一致（防安全参数漂移）。
+
+    背景（I2）：
+        inspect_trajectory 用 RealRobotConfig() 默认值（_load_limits None 分支），
+        run_replay 用 RealRobotConfig.from_yaml(...) 加载 YAML。两源不一致会导致
+        预检安全卡片与运行时强制限位脱节。本测试作为 CI 兜底，catch 任何
+        安全参数（关节限位/TCP 速度/PD 增益等）的静默漂移。
+
+    排除字段：
+        robot_ip — 网络配置非安全参数。dataclass 默认 .18（左臂，历史/测试默认），
+        YAML 默认 .19（右臂，真机部署默认）。这是设计性差异（见 real_robot.yaml:18
+        注释"左臂 192.168.1.18 / 右臂 192.168.1.19"），不属于漂移范畴。
+    """
+    from dataclasses import fields as dc_fields
+
+    # 排除非安全参数字段
+    EXCLUDE_FIELDS = {"robot_ip"}
+
+    default_yaml_path = (
+        Path(__file__).resolve().parent.parent / "configs" / "real_robot.yaml"
+    )
+    yaml_cfg = RealRobotConfig.from_yaml(default_yaml_path)
+    defaults_cfg = RealRobotConfig()
+
+    for f in dc_fields(RealRobotConfig):
+        if f.name in EXCLUDE_FIELDS:
+            continue
+        yaml_val = getattr(yaml_cfg, f.name)
+        default_val = getattr(defaults_cfg, f.name)
+        if isinstance(yaml_val, np.ndarray):
+            np.testing.assert_array_equal(
+                yaml_val, default_val, err_msg=f"字段 {f.name} 漂移"
+            )
+        else:
+            assert yaml_val == default_val, f"字段 {f.name} 漂移"
