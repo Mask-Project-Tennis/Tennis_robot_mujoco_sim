@@ -286,7 +286,7 @@ def main() -> None:
         format="%(asctime)s [%(levelname)s] %(message)s",
     )
 
-    dt = DT
+    dt = DT  # DT=0.005 与 configs/real_robot.yaml control.dt 一致，sim/real 通用
     backend = BackendType(args.backend)
 
     # 构造 adapter（real 模式在此处校验 --i-understand-real-risk）

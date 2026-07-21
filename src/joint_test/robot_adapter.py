@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 import numpy as np
 
@@ -26,7 +27,7 @@ class RobotAdapter:
 
     def __init__(
         self,
-        robot,  # RM65Env | FakeRobot | RobotInterface（避免循环导入，用 duck typing）
+        robot: Any,  # duck-typing: RM65Env | FakeRobot | RobotInterface（三后端无公共 Protocol）
         backend: BackendType,
         safety_guard: JointSafetyGuard | None = None,
     ) -> None:
@@ -82,8 +83,15 @@ class RobotAdapter:
 
         # 安全裁剪（在读取当前状态之前）
         if self._safety is not None:
-            current_state = self._robot.get_arm_state()
-            q_current = current_state[:6]
+            try:
+                current_state = self._robot.get_arm_state()
+                q_current = current_state[:6]
+            except Exception:
+                try:
+                    self.emergency_stop()
+                except Exception as estop_err:
+                    logger.error("急停也失败: %s", estop_err)
+                raise RuntimeError("读取机器人状态失败") from None
             q_des = self._safety.clip_command(q_des, q_current)
 
         if self._is_env:

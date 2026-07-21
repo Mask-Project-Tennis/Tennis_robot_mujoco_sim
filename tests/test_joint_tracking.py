@@ -1044,6 +1044,60 @@ class TestCommFailureAdapter:
         assert robot.emergency_stop_count == 1
 
 
+class _GetArmStateFailStubRobot:
+    """get_arm_state 失败桩机器人。
+
+    get_arm_state 固定抛异常，模拟 SDK 通信中断场景。
+    """
+
+    def __init__(self) -> None:
+        self._q = np.zeros(6)
+        self._qdot = np.zeros(6)
+        self.emergency_stop_count = 0
+
+    def get_arm_state(self) -> np.ndarray:
+        raise ConnectionError("模拟 SDK 通信中断")
+
+    def send_joint_command(self, q_desired: np.ndarray) -> int:
+        return 0
+
+    def emergency_stop(self) -> None:
+        self.emergency_stop_count += 1
+
+
+class TestGetArmStateFailureAdapter:
+    """get_arm_state 失败场景的适配器测试（M9 修复）。"""
+
+    def test_step_with_safety_raises_on_state_read_failure(self):
+        """有 safety → get_arm_state 失败 → RuntimeError + 急停。"""
+        from src.joint_test.robot_adapter import RobotAdapter
+        from src.joint_test.safety import JointSafetyGuard
+
+        robot = _GetArmStateFailStubRobot()
+        guard = JointSafetyGuard(
+            q_lower=np.full(6, -1.0),
+            q_upper=np.full(6, 1.0),
+            qdot_max=np.full(6, 3.0),
+        )
+        adapter = RobotAdapter(
+            robot, backend=BackendType.REAL, safety_guard=guard,
+        )
+        with pytest.raises(RuntimeError) as exc_info:
+            adapter.step(np.zeros(6))
+        assert "读取机器人状态失败" in str(exc_info.value)
+        assert robot.emergency_stop_count == 1
+
+    def test_step_without_safety_skips_state_read(self):
+        """无 safety → 不读状态，get_arm_state 不会被调用（不抛异常）。"""
+        from src.joint_test.robot_adapter import RobotAdapter
+
+        robot = _GetArmStateFailStubRobot()
+        adapter = RobotAdapter(robot, backend=BackendType.REAL)
+        # 无 safety → step() 跳过 get_arm_state 调用，应正常完成
+        adapter.step(np.zeros(6))
+        assert robot.emergency_stop_count == 0
+
+
 class TestResultPlotter:
     """结果绘图器测试。"""
 

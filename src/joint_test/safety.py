@@ -1,4 +1,9 @@
-"""真机模式软件层安全防护。"""
+"""真机模式软件层安全防护。
+
+与 src/real/safety_monitor.py 的 SafetyMonitor 分工：
+  - SafetyMonitor：面向 MPC Pipeline 真机部署，含 TCP 速度检查 + slow_stop 委托
+  - JointSafetyGuard：面向单关节跟踪实验，含幅值/频率预检 + 指令裁剪 + NaN/Inf 防护
+"""
 from __future__ import annotations
 
 import logging
