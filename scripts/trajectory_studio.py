@@ -140,7 +140,7 @@ def _safety_card(
     peak_tcp = float(tcp_speeds.max()) if len(tcp_speeds) > 0 else 0.0
     if tcp_warnings:
         for w in tcp_warnings:
-            lines.append(f"  {'✗'} {w.strip()}")
+            lines.append(f"  ✗ {w.strip()}")
     else:
         lines.append(f"  ✓ TCP峰值: {peak_tcp:.2f} m/s")
     lines.append(f"  → 建议 speed ≤ {rec_speed:.2f}")
@@ -452,6 +452,15 @@ def _compare_submenu(
 def main() -> None:
     """主入口：扫描 → 列表 → 详情菜单循环。"""
     import argparse
+
+    # I3 修复：中文 Windows GBK 控制台无法编码 ✗⚠→╔ 等符号，
+    # 强制 stdout 走 UTF-8（errors="replace" 容错）。
+    # 修复方式与 tests/test_run_20hits_video.py 一致。
+    if sys.platform == "win32":
+        import io
+        sys.stdout = io.TextIOWrapper(
+            sys.stdout.buffer, encoding="utf-8", errors="replace"
+        )
 
     parser = argparse.ArgumentParser(
         description="轨迹工作台 — 交互式浏览/检查/预览/重演",

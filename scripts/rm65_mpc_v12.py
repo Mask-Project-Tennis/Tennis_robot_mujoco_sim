@@ -271,7 +271,10 @@ def main() -> None:
     # ==========================================================================
     init_q = INIT_Q
     init_q_left = INIT_Q_LEFT
-    fix_joint5_angle: float | None = init_q[5] if args.fix_joint5 else None
+    # M1 注：fix_joint5_angle 赋值移到 --limits-config 块之后（line ~340），
+    # 确保 init_q 已切换到 INIT_Q_REAL 后再读取 init_q[5]。
+    # 此前在 INIT_Q_REAL 切换前赋值是巧合无害（INIT_Q[5] == INIT_Q_REAL[5]），
+    # 但属于时序耦合，未来 INIT_Q_REAL[5] 变化时会变成潜在 bug。
     use_backswing = args.use_backswing
     backswing_offset = -abs(args.backswing)
     backswing_ratio = args.bs_ratio
@@ -349,6 +352,10 @@ def main() -> None:
         robot_limits.terminal_exempt_steps = args.terminal_exempt_steps
     if args.dq_max_fraction is not None:
         robot_limits.dq_max = robot_limits.qdot_max * dt * args.dq_max_fraction
+
+    # M1: fix_joint5_angle 在 --limits-config 切换 init_q 之后赋值
+    # （读取已切换后的 init_q[5]，避免时序耦合）
+    fix_joint5_angle: float | None = init_q[5] if args.fix_joint5 else None
 
     logger.info(
         "关节限位: %s, TCP=%.1f m/s, terminal_exempt=%d",

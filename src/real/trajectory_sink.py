@@ -90,14 +90,16 @@ class RobotSink:
             5. state.tcp_pos = env.get_ee_pos()
             6. 安全检查失败 → robot.slow_stop(); return False
             7. robot.send_joint_command(state.q_desired)
+               返回非 0 → robot.slow_stop(); return False（C1 修复）
             8. sleep_dt = timer.tick_end(); if > 0: time.sleep(sleep_dt)
             9. return True
 
-        安全失败或机器人通信异常时不调 tick_end（立即返回，主循环 break）。
+        安全失败 / 通信异常 / SDK 非零返回码时不调 tick_end（立即返回，主循环 break）。
         通信异常时尝试缓停（best-effort），不重新抛出异常。
 
         Returns:
-            True 表示成功下发，False 表示安全检查失败或通信异常（已尝试缓停）。
+            True 表示成功下发，False 表示安全检查失败、通信异常或 SDK 返回非零
+            （均已尝试缓停）。
         """
         self._timer.tick_start()
         try:
@@ -123,7 +125,19 @@ class RobotSink:
                 self._robot.slow_stop()
                 return False
 
-            self._robot.send_joint_command(state.q_desired)
+            # C1 修复：必须检查返回码（与 pre_motion 行为一致）
+            # 原实现仅 Exception 触发 abort，SDK 通过非零返回码报错时被静默吞掉，
+            # 100Hz 主循环会继续推进 setpoint → 控制器保持上一帧 + Sink 推进 → 物理风险
+            ret = self._robot.send_joint_command(state.q_desired)
+            if ret != 0:
+                logger.error(
+                    "send_joint_command 返回错误码 %d, 执行缓停", ret,
+                )
+                try:
+                    self._robot.slow_stop()
+                except Exception:
+                    pass
+                return False
         except Exception:
             # 机器人通信异常：尝试缓停，不调 tick_end（episode 已终止）
             try:

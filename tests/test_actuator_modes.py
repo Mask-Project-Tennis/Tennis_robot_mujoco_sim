@@ -958,13 +958,19 @@ class TestV11Integration:
     @staticmethod
     def _run_v11(args: list[str], timeout: int = 300) -> tuple[int, str, str]:
         """运行 V11 主脚本并返回 (returncode, stdout, stderr)。"""
+        import os
         import subprocess
         import sys
         from pathlib import Path
         script = Path(__file__).resolve().parent.parent / "scripts" / "rm65_mpc_v11.py"
+        # G1 修复：强制子进程用 UTF-8 输出，避免 Windows 控制台代码页（GBK/CP936）
+        # 解码中文 stdout/stderr 失败（与 4e1b8382 的 test_run_20hits_video 同类 bug）
+        env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
         result = subprocess.run(
             [sys.executable, str(script)] + args,
             capture_output=True, text=True, timeout=timeout,
+            encoding="utf-8",
+            env=env,
         )
         return result.returncode, result.stdout, result.stderr
 

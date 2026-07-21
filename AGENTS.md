@@ -463,6 +463,9 @@ mujoco_sim/
 - MuJoCo 模型定义在 `src/robot/rm65_model.xml`，是 DOF 数和关节顺序的唯一事实来源
 - 可调参数放在 `configs/*.yaml` 中，不要硬编码
 - 日志使用 Python `logging` 模块，不要用 `print`
+  - **例外（CLI/TUI 工具）**: `scripts/` 下的交互式工具（如 `trajectory_studio.py`、`inspect_trajectory.py`、`replay_trajectory.py`）可用 `print()` 输出用户界面。
+    理由: `logging` 走 stderr，会污染用户交互体验；CLI 工具的 stdout 是用户界面的一部分。
+    约束: 仅限操作员面向的提示、菜单、报告输出；错误诊断/调试信息仍应用 `logging`。
 - 测试文件与 `src/` 结构对应，放在 `tests/` 下
 - 导入使用绝对路径：`from src.ilqt.solver import ILQTSolver`
 - 文件路径使用 `pathlib.Path`，不拼接字符串

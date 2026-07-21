@@ -193,3 +193,43 @@ class TestSpeedWarning:
         assert msg_below is None
 
 
+class TestUtf8StdoutSafety:
+    """I3 回归测试：中文 Windows GBK 控制台无法编码 ✗⚠→ 等符号。
+
+    验证 _safety_card 输出的字符串可被 UTF-8 编码（间接验证 main 启动时的
+    TextIOWrapper 包装生效）。完整端到端验证需在 GBK 终端跑 main()，
+    此处仅锁住"输出字符串本身可编码"这一基础契约。
+    """
+
+    def test_safety_card_output_encodes_utf8(self, tmp_path: Path) -> None:
+        """_safety_card 返回的所有行必须可 UTF-8 编码。"""
+        from trajectory_studio import _safety_card
+        from src.real.trajectory_types import ReplayTrajectory
+
+        # 构造一个会触发超限告警的轨迹（J6 超上限）
+        n = 10
+        q = np.zeros((n, 6))
+        q[:, 5] = np.radians(200)  # J6 远超 180°
+        tcp_pos = np.zeros((n, 3))
+        tcp_pos[:, 0] = np.arange(n) * 0.3  # TCP 高速
+
+        traj = ReplayTrajectory(
+            q_desired=q.copy(),
+            q_actual=q.copy(),
+            timestamps=np.arange(n) * 0.005,
+            tcp_pos=tcp_pos,
+            ball_pos=np.zeros((n, 3)),
+            init_q=np.zeros(6),
+            init_q_left=np.zeros(6),
+            dt=0.005,
+            hit_step=-1,
+            metadata={"is_position_mode": True},
+        )
+
+        lines, _, _, _ = _safety_card(traj, q, config_path=None)
+        assert len(lines) > 0
+        # 每行都必须可 UTF-8 编码（GBK 终端场景下若已包装则不会崩）
+        for line in lines:
+            line.encode("utf-8", errors="strict")  # 不抛 UnicodeEncodeError
+
+

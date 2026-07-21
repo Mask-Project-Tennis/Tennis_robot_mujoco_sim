@@ -13,6 +13,7 @@ venv/
 # 构建产物
 build/
 src/cpp/*.so
+src/cpp/*.pyd
 
 # 输出目录
 results/
@@ -28,11 +29,13 @@ figures/
 MJMODEL.TXT
 MJDATA.TXT
 MUJOCO_LOG.TXT
+.mj_cache
 
 # 文档/参考资料（不入库）
 paper/
 /reference/
 plans/
+docs/superpowers/
 
 # IDE / Agent 工具
 .marscode/
@@ -44,4 +47,5 @@ plans/
 
 # 杂项
 memory.md
+test.md
 scripts/test/test_noise_integration.py

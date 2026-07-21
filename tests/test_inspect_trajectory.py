@@ -189,6 +189,45 @@ class TestCheckTcpSpeed:
         # firmware=0.5, peak=2.0 → rec_speed = 0.5/2.0 = 0.25
         assert np.isclose(rec_speed, 0.25)
 
+    def test_boundary_at_threshold(self) -> None:
+        """I5 回归：峰值 == max_tcp 时应告警（`>=` 严格语义）。
+
+        实现层用 `peak_tcp >= max_tcp`（inspect_trajectory.py:123），
+        意味着恰好等于阈值也告警（保守策略）。
+        本测试用 math.nextafter 锁定 ULP 级边界，防止未来误改为 `>`
+        导致边界轨迹静默通过。
+        """
+        from math import nextafter
+
+        # 情况 1: peak 恰好 == max_tcp → 应告警（>= 语义）
+        speeds_equal = np.array([2.0])
+        warnings_eq, _ = check_tcp_speed(
+            speeds_equal, max_tcp=2.0, firmware_tcp=1.0
+        )
+        assert len(warnings_eq) == 1, (
+            "peak == max_tcp 应触发告警（>= 语义），实际无告警"
+        )
+        assert "超限" in warnings_eq[0]
+
+        # 情况 2: peak 刚好低于 max_tcp 1 ULP → 不告警
+        # nextafter(2.0, -inf) 返回小于 2.0 的最大浮点数（ULP 级差）
+        speeds_below = np.array([nextafter(2.0, -float("inf"))])
+        warnings_below, _ = check_tcp_speed(
+            speeds_below, max_tcp=2.0, firmware_tcp=1.0
+        )
+        assert warnings_below == [], (
+            "peak < max_tcp（ULP 级差）不应触发告警，实际触发"
+        )
+
+        # 情况 3: peak 刚好高于 max_tcp 1 ULP → 应告警
+        speeds_above = np.array([nextafter(2.0, float("inf"))])
+        warnings_above, _ = check_tcp_speed(
+            speeds_above, max_tcp=2.0, firmware_tcp=1.0
+        )
+        assert len(warnings_above) == 1, (
+            "peak > max_tcp（ULP 级差）应触发告警，实际无告警"
+        )
+
 
 # ============================================================================
 # _load_limits 回归（防 RealRobotConfig 默认值漂移）
@@ -196,14 +235,39 @@ class TestCheckTcpSpeed:
 
 
 class TestLoadLimitsDefaults:
-    """_load_limits 无 --config 时返回 RealRobotConfig 默认值（防硬编码漂移）。"""
+    """_load_limits 默认值测试（防硬编码漂移）。
+
+    M5 修复后行为：
+        - _load_limits(None) 默认加载 configs/real_robot.yaml（操作员编辑生效）
+        - _load_limits(None, no_config=True) 用 dataclass 默认（逃生口）
+        - _load_limits(path) 加载指定 YAML
+    """
 
     def test_defaults_match_known_values(self) -> None:
-        """无 --config 返回的限位应与项目既定值一致（J2 upper=90° 等）。"""
+        """无 --config 返回的限位应与项目既定值一致（J2 upper=90° 等）。
+
+        M5 后默认加载 configs/real_robot.yaml，但因 drift test 保证
+        YAML == dataclass default，结果与之前一致。
+        """
         from inspect_trajectory import _load_limits
         q_lower_deg, q_upper_deg, firmware_tcp = _load_limits(None)
-        # 这些值来自 RealRobotConfig dataclass 默认（src/real/config.py:46-55）
-        # 与 configs/real_robot.yaml 一致。断言关键 J2 上限 90°。
+        # 这些值来自 configs/real_robot.yaml（drift test 保证 == dataclass 默认）
+        # 断言关键 J2 上限 90°。
         assert q_upper_deg[1] == 90.0  # J2 upper
         assert q_lower_deg[1] == -270.0  # J2 lower
         assert firmware_tcp == 1.0  # max_tcp_speed 默认
+
+    def test_no_config_uses_dataclass_defaults(self) -> None:
+        """--no-config 强制使用 dataclass 默认（不读 YAML）。
+
+        回归保护：M5 新增 --no-config 逃生口必须可达，
+        防止未来误删或重命名。
+        """
+        from inspect_trajectory import _load_limits
+        q_lower_deg, q_upper_deg, firmware_tcp = _load_limits(
+            None, no_config=True
+        )
+        # RealRobotConfig dataclass 默认值
+        assert q_upper_deg[1] == 90.0  # J2 upper
+        assert q_lower_deg[1] == -270.0  # J2 lower
+        assert firmware_tcp == 1.0

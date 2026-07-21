@@ -29,20 +29,45 @@ from src.real.trajectory_safety import _JOINT_NAMES, check_joint_limits
 from src.real.trajectory_types import ReplayTrajectory
 
 
-def _load_limits(config_path: str | None) -> tuple[np.ndarray, np.ndarray, float]:
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+_DEFAULT_CONFIG_PATH = _PROJECT_ROOT / "configs" / "real_robot.yaml"
+
+
+def _load_limits(
+    config_path: str | None,
+    no_config: bool = False,
+) -> tuple[np.ndarray, np.ndarray, float]:
     """加载关节限位与固件 TCP 限制。
 
-    无 --config 时用 RealRobotConfig 内置默认值（与 configs/real_robot.yaml 一致）；
-    有 --config 时从 YAML 加载。消除限位硬编码与 YAML 不一致风险。
+    优先级（M5 修复）：
+        1. config_path 显式给定 → 加载该 YAML
+        2. no_config=True → 用 RealRobotConfig dataclass 默认（不读 YAML）
+        3. 默认 → 加载 _DEFAULT_CONFIG_PATH（configs/real_robot.yaml）
+
+    原 M5 问题：config_path=None 时直接走 dataclass 默认，
+    操作员若在 real_robot.yaml 中收紧限位（如 J2 改为 85°），运行
+    inspect_trajectory 不带 --config 时拿到的是 dataclass 默认（90°），
+    导致预检结果与实际部署限位脱节。
 
     Args:
         config_path: YAML 路径或 None。
+        no_config: True 时强制使用 dataclass 默认（逃生口，测试用）。
 
     Returns:
         (q_lower_deg, q_upper_deg, firmware_tcp) 三元组。
     """
     from src.real.config import RealRobotConfig
-    cfg = RealRobotConfig.from_yaml(config_path) if config_path else RealRobotConfig()
+
+    # M5: 默认加载项目 YAML，让操作员的 YAML 编辑生效
+    effective_path = config_path
+    if effective_path is None and not no_config:
+        effective_path = str(_DEFAULT_CONFIG_PATH)
+
+    cfg = (
+        RealRobotConfig.from_yaml(effective_path)
+        if effective_path
+        else RealRobotConfig()
+    )
     return np.degrees(cfg.q_lower), np.degrees(cfg.q_upper), float(cfg.max_tcp_speed)
 
 
@@ -212,7 +237,12 @@ def _parse_args() -> argparse.Namespace:
         "--config",
         type=str,
         default=None,
-        help="真机配置 YAML（读取 q_lower/q_upper），默认用内置限位",
+        help="真机配置 YAML（读取 q_lower/q_upper）。默认加载 configs/real_robot.yaml",
+    )
+    parser.add_argument(
+        "--no-config",
+        action="store_true",
+        help="强制使用 dataclass 内置限位（不读 YAML），测试或快速检查用",
     )
     parser.add_argument(
         "--no-plot",
@@ -258,7 +288,9 @@ def main() -> None:
         print(f"metadata.{k}: {v}")
 
     # 关节限位 + 固件 TCP（统一从 RealRobotConfig 取，消除硬编码漂移）
-    q_lower_deg, q_upper_deg, firmware_tcp = _load_limits(args.config)
+    q_lower_deg, q_upper_deg, firmware_tcp = _load_limits(
+        args.config, no_config=args.no_config
+    )
 
     print(f"\n--- 1. 关节限位检查 (裕度 {args.margin_deg}°) ---")
     limit_warnings = check_joint_limits(

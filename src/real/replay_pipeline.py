@@ -12,6 +12,22 @@ ReplayConfig 参数容器。
     # Studio 内调用
     cfg = ReplayConfig(..., mock=True)  # FakeRobot 验证
     steps = run_replay(cfg)
+
+TCP 速度安全链（自外向内三层防御）:
+    Layer 1 (固件, connect 时下发):
+        RobotInterface.connect() 调用 rm_set_arm_max_line_speed(config.max_tcp_speed)
+        控制器固件实时裁剪，主循环无法绕过。真机默认 1.0 m/s（不可提高）。
+    Layer 2 (TcpSpeedLimiter 装饰器, 可选):
+        cfg.max_tcp_speed > 0 时包装 Source 链，迭代前 set_max_tcp_speed，
+        迭代后 restore_speed（如 cfg.max_tcp_speed=0.5 限制到 0.5 m/s）。
+        用于慢速重演（--speed 0.5 之外的额外硬限制）。
+    Layer 3 (SafetyMonitor 软件):
+        RobotSink.send 每步检查 |jacp @ qdot|，超限 slow_stop。
+        注: 使用 build_robot_limits 的 tightened values（含 q_margin_deg 收紧），
+        比纯 YAML 限位严格 ~2°。
+
+注: pre_motion 不调用 set_max_tcp_speed（实测与五次多项式插值冲突会震动，
+见 commit 4e1b8382 Bug 2）。pre_motion 速度由多项式插值峰值因子 1.875 控制。
 """
 
 from __future__ import annotations
@@ -43,6 +59,7 @@ from src.real.trajectory_source import (
     TrajectorySource,
 )
 from src.real.trajectory_types import ReplayTrajectory, StepState
+from src.utils.math_utils import QUINTIC_SMOOTHSTEP_PEAK_FACTOR, quintic_smoothstep
 
 logger = logging.getLogger(__name__)
 
@@ -155,7 +172,12 @@ def pre_motion(
         True 表示成功到达初始位置，False 表示失败/用户拒绝/通信错误。
     """
     q_current = robot.get_arm_state()[:6]
-    delta_rad = np.abs(traj.init_q - q_current)
+    # I1 修复：用最短角路径计算 delta（J6 ±180° wrap-around）。
+    # 注：max_delta_deg 与下方插值用同一 delta_q，避免"判断走长弧、插值走短弧"的不一致。
+    delta_q_init = np.arctan2(
+        np.sin(traj.init_q - q_current), np.cos(traj.init_q - q_current)
+    )
+    delta_rad = np.abs(delta_q_init)
     max_delta_deg = float(np.degrees(np.max(delta_rad)))
 
     if max_delta_deg < 0.5:
@@ -172,8 +194,7 @@ def pre_motion(
             return False
 
     # 最小安全 duration（五次多项式峰值速度因子 1.875，在 s=0.5 处取到）
-    PEAK_FACTOR = 1.875
-    min_duration = PEAK_FACTOR * max_delta_deg / max_qdot_deg_s
+    min_duration = QUINTIC_SMOOTHSTEP_PEAK_FACTOR * max_delta_deg / max_qdot_deg_s
     effective_duration = max(duration_s, min_duration)
     if effective_duration > duration_s:
         logger.info(
@@ -189,11 +210,21 @@ def pre_motion(
         n_steps, rate_hz, effective_duration, max_delta_deg,
     )
 
-    # 多步五次多项式插值: f(s) = 10s³ - 15s⁴ + 6s⁵
+    # I1 修复：用最短角路径插值，避免 J6（±180°）等 wrap-around 关节大回旋。
+    # arctan2(sin, cos) 将 delta 折回 [-π, π]：
+    #   - 对非 wrap 关节（J1/J2/J3/J4/J5）等价于原 delta（idempotent）
+    #   - 对 J6 等边界 wrap 关节，自动选择短弧（如 +170° → -170° 走 20° 而非 340°）
+    # 注：原实现 `q_current + s * (init_q - q_current)` 在 J6 手动 jog 到负角度后
+    # 会触发 280°+ 大回旋，存在物理风险。
+    # delta_q_init 已在 max_delta_deg 计算时折回，此处直接复用保持一致。
+    delta_q = delta_q_init
+
+    # 多步五次多项式插值: s(t) = quintic_smoothstep(t) = 10t³-15t⁴+6t⁵
+    # M2: 公式从 math_utils.py 引用（消除内联魔法数字，便于复用）
     for i in range(1, n_steps + 1):
         alpha = i / n_steps
-        s = 10 * alpha**3 - 15 * alpha**4 + 6 * alpha**5
-        q_target = q_current + s * (traj.init_q - q_current)
+        s = float(quintic_smoothstep(alpha))
+        q_target = q_current + s * delta_q
         ret = robot.send_joint_command(q_target)
         if ret != 0:
             logger.error("预运动发送失败: step %d/%d, 错误码 %d", i, n_steps, ret)
@@ -207,7 +238,9 @@ def pre_motion(
     t0 = time.perf_counter()
     while time.perf_counter() - t0 < timeout:
         q = robot.get_arm_state()[:6]
-        if float(np.max(np.abs(q - traj.init_q))) < tolerance:
+        # I1 修复：轮询到位判断也用最短角路径（与插值一致）
+        delta_poll = np.arctan2(np.sin(traj.init_q - q), np.cos(traj.init_q - q))
+        if float(np.max(np.abs(delta_poll))) < tolerance:
             logger.info(
                 "预运动到位 (delta=%.1f° → 0°, 耗时 %.1fs)",
                 max_delta_deg, effective_duration + time.perf_counter() - t0,
@@ -215,7 +248,12 @@ def pre_motion(
             return True
         time.sleep(poll_interval)
 
-    final_delta = float(np.degrees(np.max(np.abs(robot.get_arm_state()[:6] - traj.init_q))))
+    # I1 修复：final_delta 也用最短角路径计算
+    q_final = robot.get_arm_state()[:6]
+    delta_final = np.arctan2(
+        np.sin(traj.init_q - q_final), np.cos(traj.init_q - q_final)
+    )
+    final_delta = float(np.degrees(np.max(np.abs(delta_final))))
     logger.warning("预运动到位偏差: %.2f° (容差 1.0°)", final_delta)
     return final_delta < 2.0
 
@@ -333,6 +371,11 @@ def run_replay(cfg: ReplayConfig) -> ReplayResult:
 
     # 安全监控
     robot_limits = build_robot_limits(env, config)
+    # M4 说明：safety_cfg 用 robot_limits 的 tightened values 而非直接传 config，
+    # 这是 by-design 的深度防御层：
+    #   build_robot_limits 在 from_config 时应用了 q_margin_deg=[2,1,3,3,3,3]
+    #   收紧裕度（q_min += 2°, q_max -= 1° 等），让 SafetyMonitor 比纯 YAML 限位
+    #   严格 ~2°。直接传 config 会丢失这层收紧。看似冗余的 round-trip 是有意的。
     safety_cfg = RealRobotConfig()
     safety_cfg.q_lower = robot_limits.q_lower.copy()
     safety_cfg.q_upper = robot_limits.q_upper.copy()

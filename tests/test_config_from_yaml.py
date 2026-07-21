@@ -164,3 +164,56 @@ def test_dataclass_defaults_match_default_yaml() -> None:
             )
         else:
             assert yaml_val == default_val, f"字段 {f.name} 漂移"
+
+
+def test_dataclass_fields_exist_in_default_yaml() -> None:
+    """I4 回归测试：dataclass 字段必须在 default YAML 中显式声明。
+
+    背景（I4）：
+        test_dataclass_defaults_match_default_yaml 通过比较 yaml_cfg.x == defaults_cfg.x
+        来检测漂移。但 RealRobotConfig.from_yaml 对 YAML 中缺失的 key 会回退到
+        dataclass 默认值，导致：
+            - 新增 dataclass 字段 max_jerk: float = 50.0
+            - YAML 未同步添加 max_jerk
+            - yaml_cfg.max_jerk = 50.0（回退）== defaults_cfg.max_jerk = 50.0
+            - 漂移测试通过 — 安全参数新增但 YAML 不可见
+
+    本测试断言每个 dataclass 字段（除 EXCLUDE_FIELDS）都在 YAML 中显式声明，
+    catch "新增字段未同步 YAML" 这类静默漂移。
+
+    排除字段：
+        robot_ip — 同 test_dataclass_defaults_match_default_yaml 的设计性差异理由。
+    """
+    import yaml
+    from dataclasses import fields as dc_fields
+
+    EXCLUDE_FIELDS = {"robot_ip"}
+
+    default_yaml_path = (
+        Path(__file__).resolve().parent.parent / "configs" / "real_robot.yaml"
+    )
+    with open(default_yaml_path, encoding="utf-8") as f:
+        raw = yaml.safe_load(f)
+
+    # 收集 YAML 中所有 key（包括嵌套 section 内的 + 别名映射后的）
+    yaml_keys: set[str] = set()
+    aliases = RealRobotConfig._YAML_ALIASES  # {"ip": "robot_ip", "port": "robot_port"}
+    for top_key, top_value in raw.items():
+        if isinstance(top_value, dict):
+            for k in top_value.keys():
+                yaml_keys.add(aliases.get(k, k))
+        else:
+            yaml_keys.add(aliases.get(top_key, top_key))
+
+    missing = []
+    for f in dc_fields(RealRobotConfig):
+        if f.name in EXCLUDE_FIELDS:
+            continue
+        if f.name not in yaml_keys:
+            missing.append(f.name)
+
+    assert not missing, (
+        f"dataclass 字段未在 {default_yaml_path.name} 中声明: {missing}。"
+        "新增安全参数必须同步到 YAML，否则 from_yaml 会静默回退到默认值，"
+        "drift 测试无法检测。"
+    )
