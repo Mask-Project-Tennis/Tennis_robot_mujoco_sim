@@ -98,6 +98,22 @@ class JointSafetyGuard:
                 f"[{self._q_lo[j]:.3f}, {self._q_hi[j]:.3f}] rad"
             )
 
+        # 检查 4: STEP 波形瞬时跳变速度预估（仅真机模式有风险）
+        if config.waveform == WaveformType.STEP and A > 0:
+            step_target = (
+                config.step_target_rad
+                if config.step_target_rad is not None
+                else offset + A
+            )
+            step_delta = abs(step_target - offset)
+            approx_qdot = step_delta / 0.005  # 保守以 dt=5ms 估计一阶差分
+            if approx_qdot > self._qdot_max[j]:
+                warnings.append(
+                    f"STEP 幅值跳变 {step_delta:.3f} rad 可能产生 "
+                    f"~{approx_qdot:.1f} rad/s 速度，超关节 {j} 上限 "
+                    f"{self._qdot_max[j]:.1f} rad/s"
+                )
+
         return warnings
 
     def check_runtime_state(

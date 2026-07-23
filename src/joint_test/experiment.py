@@ -5,6 +5,9 @@ import logging
 import time
 from typing import Callable
 
+import numpy as np
+from src.real.adaptive_timer import AdaptiveTimer
+
 from src.joint_test.types import (
     BackendType,
     Metrics,
@@ -51,9 +54,6 @@ class TrackingExperiment:
         backend: BackendType = BackendType.SIM,
     ) -> None:
         """初始化编排器，根据 backend 和 speed_ratio 配置 timer。"""
-        import numpy as np
-        from src.real.adaptive_timer import AdaptiveTimer
-
         if not 0.0 < speed_ratio <= 1.0:
             raise ValueError(
                 f"speed_ratio 必须在 (0, 1.0]，得到 {speed_ratio}"
@@ -229,8 +229,6 @@ class TrackingExperiment:
         Returns:
             SweepResult 聚合结果。
         """
-        import numpy as np
-
         individual_metrics: list[Metrics] = []
         amp_ratios: list[float] = []
         phase_lags: list[float] = []
@@ -261,8 +259,8 @@ class TrackingExperiment:
 
             _, m = self.run_single(cfg)
             individual_metrics.append(m)
-            amp_ratios.append(m.amplitude_ratio or 0.0)
-            phase_lags.append(m.phase_lag_deg or 0.0)
+            amp_ratios.append(m.amplitude_ratio if m.amplitude_ratio is not None else 0.0)
+            phase_lags.append(m.phase_lag_deg if m.phase_lag_deg is not None else 0.0)
             rmses.append(m.rmse_rad)
 
         sweep = SweepResult(

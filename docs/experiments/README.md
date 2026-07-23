@@ -37,6 +37,7 @@ docs/experiments/
 | exp14 | V12 位置模式 PD 扫描 | [design](design/exp14_v12_pd_scan.md) | [2026-06-22](reports/2026-06-22_exp14_v12_pd_scan.md) | ✅ |
 | exp15 | V12 多球速鲁棒性 | [design](design/exp15_v12_speed_sweep.md) | [2026-06-22](reports/2026-06-22_exp15_v12_speed_sweep.md) | ✅ |
 | exp16 | 真机限位对比 | [design](design/exp16_limits_comparison.md) | [2026-07-09](reports/2026-07-09_exp16_v12_limits_comparison.md) | ✅ |
+| exp17 | 单关节跟踪带宽表征 | [design](design/exp17_joint_bandwidth.md) | — | ✅ |
 
 ## 文档类型说明
 

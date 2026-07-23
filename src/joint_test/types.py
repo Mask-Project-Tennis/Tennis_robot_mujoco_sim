@@ -83,11 +83,7 @@ class TrackingResult:
     def __post_init__(self) -> None:
         """自动计算 tracking_error = q_desired[:, joint_idx] - q_actual[:, joint_idx]。"""
         j = self.config.joint_idx
-        object.__setattr__(
-            self,
-            "tracking_error",
-            self.q_desired[:, j] - self.q_actual[:, j],
-        )
+        self.tracking_error = self.q_desired[:, j] - self.q_actual[:, j]
 
 
 @dataclass
