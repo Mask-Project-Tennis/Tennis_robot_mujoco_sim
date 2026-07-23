@@ -6,7 +6,9 @@
 import argparse
 import logging
 import sys
+import time
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -224,6 +226,63 @@ def pre_motion_check(
                     pass
 
     return True, "✅ 预检通过"
+
+
+def home_to_pose(
+    ri: RobotInterface,
+    monitor: SafetyMonitor,
+    algo: Any,
+    q_target: np.ndarray,
+    duration: float = 1.0,
+    hz: float = 100.0,
+    n_path_samples: int = 15,
+) -> None:
+    """流式线性插值回到目标位姿。
+
+    从当前关节角度流式插值到目标角度，内置安全预检。
+    不通过预检时抛 SystemExit。
+
+    Args:
+        ri: RobotInterface 实例。
+        monitor: SafetyMonitor 实例。
+        algo: Algo 实例或 None。
+        q_target: (6,) 目标关节角度，弧度。
+        duration: 插值总时长（秒），默认 1.0。
+        hz: 发送频率（Hz），默认 100.0。
+        n_path_samples: 预检路径采样点数，默认 15。
+
+    Raises:
+        SystemExit: 预检不通过时。
+    """
+    arm_state = ri.get_arm_state()
+    q_current = arm_state[:6].copy()
+
+    ok, msg = pre_motion_check(ri, monitor, q_target, arm_state, algo, n_path_samples)
+    if not ok:
+        raise SystemExit(f"归位预检失败: {msg}")
+
+    dt = 1.0 / hz
+    n_steps = int(duration * hz)
+
+    try:
+        for i in range(1, n_steps + 1):
+            alpha = i / n_steps
+            q = q_current * (1 - alpha) + q_target * alpha
+            ri.send_joint_command(q)
+            time.sleep(dt)
+
+        ri.send_joint_command(q_target)
+        time.sleep(0.2)
+    except KeyboardInterrupt:
+        ri.slow_stop()
+        raise
+
+    final_state = ri.get_arm_state()
+    q_final = final_state[:6]
+    error_deg = np.degrees(q_final - q_target)
+    print(f"最终角度（度）: {np.degrees(q_final).round(2)}")
+    print(f"跟踪误差（度）: {error_deg.round(2)}")
+    print(f"最大误差: {np.max(np.abs(error_deg)):.2f}°")
 
 
 def safe_disconnect(ri: RobotInterface) -> None:

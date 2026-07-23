@@ -92,6 +92,53 @@ class TestTypes:
         assert m.overshoot_pct is None
         assert m.steady_state_error_rad is None
 
+    def test_tracking_result_wall_time_defaults_none(self):
+        """TrackingResult 默认构造时 wall_time 为 None（向后兼容）。"""
+        cfg = WaveformConfig(
+            waveform=WaveformType.SINE,
+            joint_idx=2,
+            frequency_hz=1.0,
+            amplitude_rad=0.1,
+            offset_rad=0.0,
+            duration_s=1.0,
+        )
+        n = 5
+        result = TrackingResult(
+            config=cfg,
+            backend=BackendType.SIM,
+            dt=0.1,
+            time=np.arange(n) * 0.1,
+            q_desired=np.zeros((n, 6)),
+            q_actual=np.zeros((n, 6)),
+            qdot_actual=np.zeros((n, 6)),
+        )
+        assert result.wall_time is None
+
+    def test_tracking_result_wall_time_stores_array(self):
+        """TrackingResult 传入 wall_time 数组正确存储。"""
+        cfg = WaveformConfig(
+            waveform=WaveformType.SINE,
+            joint_idx=2,
+            frequency_hz=1.0,
+            amplitude_rad=0.1,
+            offset_rad=0.0,
+            duration_s=1.0,
+        )
+        n = 5
+        wall = np.array([0.001, 0.101, 0.201, 0.301, 0.401])
+        result = TrackingResult(
+            config=cfg,
+            backend=BackendType.SIM,
+            dt=0.1,
+            time=np.arange(n) * 0.1,
+            q_desired=np.zeros((n, 6)),
+            q_actual=np.zeros((n, 6)),
+            qdot_actual=np.zeros((n, 6)),
+            wall_time=wall,
+        )
+        assert result.wall_time is not None
+        assert np.allclose(result.wall_time, wall)
+
 
 class TestWaveformGenerator:
     """波形生成器测试。"""
@@ -595,7 +642,7 @@ class TestTrackingRecorder:
 
         # 加载验证（np.loadtxt 对单行 CSV 返回 1D，强制 2D）
         data = np.atleast_2d(np.loadtxt(str(csv_path), delimiter=",", skiprows=1))
-        assert data.shape == (1, 5)  # 1 行 5 列
+        assert data.shape == (1, 6)  # 1 行 6 列（含 wall_time_s）
         assert np.isclose(data[0, 0], 0.0)  # time
         assert np.isclose(data[0, 1], 0.5)  # q_des joint 2
         assert np.isclose(data[0, 2], 0.45)  # q_act joint 2
@@ -609,6 +656,55 @@ class TestTrackingRecorder:
         result = rec.finalize()
         # joint_idx=2, q_des[2]=0.5, q_act[2]=0.45 → error=0.05
         assert np.allclose(result.tracking_error, [0.05])
+
+    def test_record_without_wall_ts_falls_back_to_t(self):
+        """不传 wall_ts → wall_time 用 t 回退填充。"""
+        rec = self._make_recorder(duration_s=0.2, dt=0.1)  # 容量 2
+        rec.record(0.0, np.zeros(6), np.zeros(6), np.zeros(6))
+        rec.record(0.1, np.zeros(6), np.zeros(6), np.zeros(6))
+        result = rec.finalize()
+        assert result.wall_time is not None
+        assert np.allclose(result.wall_time, [0.0, 0.1])
+
+    def test_record_with_wall_ts_stores_value(self):
+        """传入 wall_ts → wall_time 存入传入值。"""
+        rec = self._make_recorder(duration_s=0.2, dt=0.1)  # 容量 2
+        rec.record(0.0, np.zeros(6), np.zeros(6), np.zeros(6), wall_ts=100.5)
+        rec.record(0.1, np.zeros(6), np.zeros(6), np.zeros(6), wall_ts=100.6)
+        result = rec.finalize()
+        assert result.wall_time is not None
+        assert np.allclose(result.wall_time, [100.5, 100.6])
+
+    def test_save_npz_includes_wall_time(self, tmp_path: Path):
+        """save_npz 输出包含 wall_time 字段。"""
+        rec = self._make_recorder(duration_s=0.2, dt=0.1)  # 容量 2
+        rec.record(0.0, np.array([0.1]*6), np.array([0.05]*6), np.zeros(6), wall_ts=100.1)
+        rec.record(0.1, np.array([0.2]*6), np.array([0.15]*6), np.zeros(6), wall_ts=100.2)
+        result = rec.finalize()
+
+        npz_path = tmp_path / "test_wall.npz"
+        TrackingRecorder.save_npz(result, npz_path)
+        assert npz_path.exists()
+
+        data = np.load(str(npz_path))
+        assert "wall_time" in data
+        assert np.allclose(data["wall_time"], [100.1, 100.2])
+
+    def test_save_csv_includes_wall_time_s_column(self, tmp_path: Path):
+        """save_csv 输出包含 wall_time_s 列。"""
+        rec = self._make_recorder(duration_s=0.2, dt=0.1)  # 容量 2
+        rec.record(0.0, np.array([0.0, 0.0, 0.5, 0.0, 0.0, 0.0]),
+                   np.array([0.0, 0.0, 0.45, 0.0, 0.0, 0.0]), np.zeros(6))
+        rec.record(0.1, np.array([0.0, 0.0, 0.6, 0.0, 0.0, 0.0]),
+                   np.array([0.0, 0.0, 0.55, 0.0, 0.0, 0.0]), np.zeros(6))
+        result = rec.finalize()
+
+        csv_path = tmp_path / "test_wall.csv"
+        TrackingRecorder.save_csv(result, csv_path)
+        assert csv_path.exists()
+
+        data = np.atleast_2d(np.loadtxt(str(csv_path), delimiter=",", skiprows=1))
+        assert data.shape[1] == 6  # 原有 5 列 + wall_time_s
 
 
 class TestMetricsAnalyzer:
@@ -821,11 +917,13 @@ class TestRobotAdapter:
         adapter = RobotAdapter(fake, backend=BackendType.FAKE)
         adapter.reset(np.zeros(6))
         q_des = np.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6])
-        adapter.step(q_des)
-        q, qdot = adapter.get_q_qdot()
+        q, qdot, wall_ts = adapter.step(q_des)
         assert np.allclose(q, q_des)
         # FakeRobot qdot = (q_des - q_old) / dt
         assert qdot.shape == (6,)
+        # wall_ts 应为正 float
+        assert isinstance(wall_ts, float)
+        assert wall_ts > 0
 
     def test_env_adapter_step_calls_mujoco(self):
         """RM65Env 适配器调用 step（集成测试）。"""
@@ -981,6 +1079,69 @@ class TestRobotAdapter:
         q2, _ = adapter.get_q_qdot()
         assert q2[0] != 999.0  # 内部状态未被影响
 
+    # ── Task 2: step() 返回值 (2 tests) ──
+
+    def test_step_returns_correct_types(self):
+        """step() 在 FakeRobot 上返回 (q, qdot, wall_ts) 三元组，类型正确。"""
+        from src.joint_test.robot_adapter import RobotAdapter
+        from src.real.fake_robot import FakeRobot
+
+        fake = FakeRobot(np.zeros(6), dt=0.005)
+        adapter = RobotAdapter(fake, backend=BackendType.FAKE)
+        adapter.reset(np.zeros(6))
+        q_des = np.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6])
+        result = adapter.step(q_des)
+        assert isinstance(result, tuple)
+        assert len(result) == 3
+        q, qdot, wall_ts = result
+        assert isinstance(q, np.ndarray)
+        assert isinstance(qdot, np.ndarray)
+        assert isinstance(wall_ts, float)
+        assert q.shape == (6,)
+        assert qdot.shape == (6,)
+
+    def test_step_wall_ts_positive(self):
+        """step() 返回的 wall_ts 是正 float。"""
+        from src.joint_test.robot_adapter import RobotAdapter
+        from src.real.fake_robot import FakeRobot
+
+        fake = FakeRobot(np.zeros(6), dt=0.005)
+        adapter = RobotAdapter(fake, backend=BackendType.FAKE)
+        adapter.reset(np.zeros(6))
+        _, _, wall_ts = adapter.step(np.ones(6) * 0.1)
+        assert isinstance(wall_ts, float)
+        assert wall_ts > 0
+
+    # ── Task 2: reset() 真机模式 no-op (1 test) ──
+
+    def test_reset_real_skip_and_warn(self, caplog):
+        """REAL 后端 + 非 env + 非 fake → reset() 不调用底层，打印警告。"""
+        import logging
+        from src.joint_test.robot_adapter import RobotAdapter
+
+        class _RealStubRobot:
+            """真机桩 — 无 _q 属性（不匹配 FakeRobot），有 send_joint_command（不匹配 _is_env）。"""
+
+            def __init__(self) -> None:
+                self.emergency_stop_count = 0
+
+            def get_arm_state(self) -> np.ndarray:
+                return np.concatenate([np.zeros(6), np.zeros(6)])
+
+            def send_joint_command(self, q_desired: np.ndarray) -> int:
+                return 0
+
+            def emergency_stop(self) -> None:
+                self.emergency_stop_count += 1
+
+        robot = _RealStubRobot()
+        adapter = RobotAdapter(robot, backend=BackendType.REAL)
+        with caplog.at_level(logging.WARNING):
+            adapter.reset(np.array([0.1] * 6))
+        assert "真机" in caplog.text
+        assert "home_to_pose" in caplog.text
+        assert robot.emergency_stop_count == 0  # 未调用急停
+
     # ── 通信失败处理 (C2, 1 test) ──
 
     def test_step_raises_on_comm_failure(self):
@@ -1088,14 +1249,36 @@ class TestGetArmStateFailureAdapter:
         assert robot.emergency_stop_count == 1
 
     def test_step_without_safety_skips_state_read(self):
-        """无 safety → 不读状态，get_arm_state 不会被调用（不抛异常）。"""
+        """无 safety → 安全裁剪跳过，但 step() 返回值仍读取状态。"""
         from src.joint_test.robot_adapter import RobotAdapter
 
-        robot = _GetArmStateFailStubRobot()
+        class _WorkingStub:
+            """get_arm_state 正常工作的桩。"""
+
+            def __init__(self) -> None:
+                self._q = np.zeros(6)
+                self._qdot = np.zeros(6)
+                self.emergency_stop_count = 0
+
+            def get_arm_state(self) -> np.ndarray:
+                return np.concatenate([self._q.copy(), self._qdot.copy()])
+
+            def send_joint_command(self, q_desired: np.ndarray) -> int:
+                self._qdot = (np.asarray(q_desired) - self._q) / 0.005
+                self._q = np.asarray(q_desired).copy()
+                return 0
+
+            def emergency_stop(self) -> None:
+                self.emergency_stop_count += 1
+
+        robot = _WorkingStub()
         adapter = RobotAdapter(robot, backend=BackendType.REAL)
-        # 无 safety → step() 跳过 get_arm_state 调用，应正常完成
-        adapter.step(np.zeros(6))
+        # 无 safety → step() 跳过安全裁剪，但 post-step 读状态用于返回值
+        q, qdot, wall_ts = adapter.step(np.zeros(6))
         assert robot.emergency_stop_count == 0
+        assert q.shape == (6,)
+        assert qdot.shape == (6,)
+        assert isinstance(wall_ts, float)
 
 
 class TestResultPlotter:
@@ -1363,6 +1546,86 @@ class TestTrackingExperiment:
             backend=BackendType.REAL, speed_ratio=1.0,
         )
         assert exp.timer is not None
+
+    # ── Task 2: ri/monitor/algo 移除 → pre_sweep_home 回调 (2 tests) ──
+
+    def test_init_without_ri_monitor_algo_no_error(self):
+        """ri/monitor/algo 参数已移除 → 不传即可构造。"""
+        import numpy as np
+        from src.real.fake_robot import FakeRobot
+        import tempfile
+
+        fake = FakeRobot(np.zeros(6), dt=0.005)
+        adapter = RobotAdapter(fake, backend=BackendType.FAKE)
+        exp = TrackingExperiment(
+            adapter, MetricsAnalyzer(),
+            ResultPlotter(Path(tempfile.mkdtemp()), backend="Agg"),
+            dt=0.005, base_q=np.zeros(6),
+        )
+        # 构造成功即通过
+        assert exp is not None
+
+    def test_run_sweep_pre_sweep_home_callback(self):
+        """pre_sweep_home 回调在扫频中被调用（真机后端）。"""
+        import numpy as np
+        from src.real.fake_robot import FakeRobot
+        import tempfile
+
+        fake = FakeRobot(np.zeros(6), dt=0.005)
+        adapter = RobotAdapter(fake, backend=BackendType.REAL)
+        exp = TrackingExperiment(
+            adapter, MetricsAnalyzer(),
+            ResultPlotter(Path(tempfile.mkdtemp()), backend="Agg"),
+            dt=0.005, base_q=np.zeros(6),
+            speed_ratio=1.0, backend=BackendType.REAL,
+        )
+
+        call_count = [0]
+
+        def _home_cb() -> None:
+            call_count[0] += 1
+
+        # 单频率扫频 → 应触发 1 次回调
+        exp.run_sweep(
+            joint_idx=2,
+            frequencies_hz=[1.0],
+            amplitude_rad=0.1,
+            duration_s=0.1,
+            pre_sweep_home=_home_cb,
+        )
+        assert call_count[0] == 1, f"pre_sweep_home 应被调用 1 次，实际 {call_count[0]} 次"
+
+    def test_run_single_does_not_call_reset(self):
+        """run_single() 不再调用 adapter.reset()（回归测试）。
+
+        验证: 注入记录 reset 调用的 adapter，run_single 后计数器仍为 0。
+        """
+        import tempfile
+        from src.real.fake_robot import FakeRobot
+
+        class _ResetCountingAdapter(RobotAdapter):
+            """记录 reset() 调用次数的适配器子类。"""
+
+            def __init__(self, robot, backend):
+                super().__init__(robot, backend)
+                self._reset_called = 0
+
+            def reset(self, q0):
+                self._reset_called += 1
+                super().reset(q0)
+
+        fake = FakeRobot(np.zeros(6), dt=0.005)
+        adapter = _ResetCountingAdapter(fake, BackendType.FAKE)
+        exp = TrackingExperiment(
+            adapter, MetricsAnalyzer(),
+            ResultPlotter(Path(tempfile.mkdtemp()), backend="Agg"),
+            dt=0.005, base_q=np.zeros(6),
+        )
+        cfg = self._make_test_config()
+        exp.run_single(cfg)
+        assert adapter._reset_called == 0, (
+            f"run_single 不应调用 reset()，但调用了 {adapter._reset_called} 次"
+        )
 
 
 # ── subprocess + path 准备 ──

@@ -23,9 +23,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _connect import (
     add_algo_check_arg,
     add_config_arg,
+    home_to_pose,
     init_algo,
     load_and_connect,
-    pre_motion_check,
     safe_disconnect,
 )
 from src.real.safety_monitor import SafetyMonitor
@@ -64,51 +64,23 @@ def main():
     print(f"最大变化: {np.max(np.abs(q_deg_current)):.1f}°")
     print(f"插值时长: {args.duration:.1f}s ({args.hz:.0f}Hz)")
 
-    # 2. 安全预检
-    ok, msg = pre_motion_check(ri, monitor, q_target, state, algo)
-    print(f"\n预检结果: {msg}")
-    if not ok:
-        print("已取消")
-        safe_disconnect(ri)
-        return
-
-    # 3. YES 确认
+    # 2. YES 确认
     confirm = input("\n即将回到零位，输入 YES 确认: ")
     if confirm.strip().upper() != "YES":
         print("已取消")
         safe_disconnect(ri)
         return
 
-    # 4. 流式插值
-    dt = 1.0 / args.hz
-    n_steps = int(args.duration * args.hz)
-    print(f"\n开始运动（{n_steps} 步）...")
-
+    # 3. 流式插值回到目标位姿（内置预检）
     try:
-        for i in range(1, n_steps + 1):
-            alpha = i / n_steps
-            q = q_current * (1 - alpha) + q_target * alpha
-            ri.send_joint_command(q)
-            time.sleep(dt)
-
-        # 保持目标位置
-        ri.send_joint_command(q_target)
-        time.sleep(0.2)
-
-        # 读最终角度
-        final_state = ri.get_arm_state()
-        q_final = final_state[:6]
-        error_deg = np.degrees(q_final - q_target)
-        print(f"\n运动完成")
-        print(f"最终角度（度）: {np.degrees(q_final).round(2)}")
-        print(f"跟踪误差（度）: {error_deg.round(2)}")
-        print(f"最大误差: {np.max(np.abs(error_deg)):.2f}°")
-
+        home_to_pose(ri, monitor, algo, q_target,
+                     duration=args.duration, hz=args.hz)
+    except SystemExit as e:
+        print(f"\n{e}")
     except KeyboardInterrupt:
         print("\n\n⚠️ Ctrl+C — 正在缓停...")
         ri.slow_stop()
         print("已缓停")
-
     finally:
         safe_disconnect(ri)
 

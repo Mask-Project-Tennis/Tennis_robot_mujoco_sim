@@ -115,8 +115,9 @@ class ResultPlotter:
 
         # 保存
         fname = (
-            f"tracking_{wf.value}_j{j}_"
-            f"f{result.config.frequency_hz:.2f}.png"
+            f"tracking_{result.backend.value}_{wf.value}_j{j}_"
+            f"f{result.config.frequency_hz:.2f}_"
+            f"A{result.config.amplitude_rad:.3f}.png"
         )
         out_path = self._out / fname
         fig.savefig(str(out_path), dpi=120, bbox_inches="tight")

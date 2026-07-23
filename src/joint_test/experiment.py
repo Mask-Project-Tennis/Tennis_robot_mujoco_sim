@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import time
+from typing import Callable
 
 from src.joint_test.types import (
     BackendType,
@@ -65,7 +66,6 @@ class TrackingExperiment:
         self._base_q = np.asarray(base_q, dtype=float)
         self._speed_ratio = speed_ratio
         self._backend = backend
-
         # 根据 backend 和 speed_ratio 配置 AdaptiveTimer
         timer: AdaptiveTimer | None
         if backend == BackendType.REAL:
@@ -106,11 +106,7 @@ class TrackingExperiment:
             wcfg.amplitude_rad, config.backend.value,
         )
 
-        # 3. 重置机器人到 q_traj[0]
-        if len(q_traj) > 0:
-            self._adapter.reset(q_traj[0])
-
-        # 4. 主循环：逐步下发 + 记录 + 节奏控制
+        # 3. 主循环：逐步下发 + 记录 + 节奏控制
         # 真机模式必须捕获 KeyboardInterrupt，否则 Ctrl+C 会跳过急停直接退出，
         # 留下机器人继续执行最后一条指令，存在物理安全风险。
         try:
@@ -118,9 +114,8 @@ class TrackingExperiment:
                 if self._timer is not None:
                     self._timer.tick_start()
 
-                self._adapter.step(q_traj[k])
-                q_act, qdot_act = self._adapter.get_q_qdot()
-                recorder.record(k * self._dt, q_traj[k], q_act, qdot_act)
+                q_act, qdot_act, wall_ts = self._adapter.step(q_traj[k])
+                recorder.record(k * self._dt, q_traj[k], q_act, qdot_act, wall_ts)
 
                 # 运行时安全监控：每步检查实际 q/qdot 是否越限（真机必备）
                 guard = self._adapter.safety_guard
@@ -170,9 +165,8 @@ class TrackingExperiment:
         if len(q_traj) > 0:
             adapter.reset(q_traj[0])
         for k in range(len(q_traj)):
-            adapter.step(q_traj[k])
-            q, qd = adapter.get_q_qdot()
-            recorder.record(k * self._dt, q_traj[k], q, qd)
+            q, qd, wall_ts = adapter.step(q_traj[k])
+            recorder.record(k * self._dt, q_traj[k], q, qd, wall_ts)
 
         return recorder.finalize()
 
@@ -218,6 +212,7 @@ class TrackingExperiment:
         compare_fake: bool = False,
         save_npz: bool = False,
         print_metrics: bool = False,
+        pre_sweep_home: Callable[[], None] | None = None,
     ) -> SweepResult:
         """批量扫频，生成 Bode 图数据。
 
@@ -259,6 +254,11 @@ class TrackingExperiment:
                 print_metrics=print_metrics,
                 compare_fake=compare_fake,
             )
+
+            # 真机扫频：每频点前归位到 base_q，消除上一轮残余误差
+            if self._backend == BackendType.REAL and pre_sweep_home is not None:
+                pre_sweep_home()
+
             _, m = self.run_single(cfg)
             individual_metrics.append(m)
             amp_ratios.append(m.amplitude_ratio or 0.0)

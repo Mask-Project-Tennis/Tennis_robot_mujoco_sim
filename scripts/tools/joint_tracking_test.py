@@ -6,25 +6,25 @@ analyzer/plotter/robot_adapter/experiment），按命令行参数构造对应后
 
 用法示例:
   # 仿真单次正弦测试
-  python scripts/tools/joint_tracking_test.py --backend sim \\
+  python scripts/tools/joint_tracking_test.py --backend sim \
       --waveform sine --joint 2 --freq 1.0 --amplitude 0.2 --duration 5.0
 
   # 仿真 + FakeRobot 对比
-  python scripts/tools/joint_tracking_test.py --backend sim --compare-fake \\
-      --waveform chirp --joint 2 --freq 0.1 --end-freq 5.0 \\
+  python scripts/tools/joint_tracking_test.py --backend sim --compare-fake \
+      --waveform chirp --joint 2 --freq 0.1 --end-freq 5.0 \
       --amplitude 0.2 --duration 10.0
 
   # 批量扫频（生成 Bode 图）
-  python scripts/tools/joint_tracking_test.py --backend sim --sweep \\
+  python scripts/tools/joint_tracking_test.py --backend sim --sweep \
       --joint 2 --sweep-freqs 0.1,0.2,0.5,1.0,2.0,3.0,5.0 --amplitude 0.1
 
   # 慢动作（便于观察）
-  python scripts/tools/joint_tracking_test.py --backend sim --speed 0.5 \\
+  python scripts/tools/joint_tracking_test.py --backend sim --speed 0.5 \
       --waveform sine --joint 2 --freq 1.0 --amplitude 0.2 --duration 3.0
 
-  # 真机测试（强制安全参数）
-  python scripts/tools/joint_tracking_test.py --backend real \\
-      --i-understand-real-risk \\
+  # 真机测试（强制安全参数，交互式确认）
+  python scripts/tools/joint_tracking_test.py --backend real \
+      --i-understand-real-risk \
       --waveform sine --joint 2 --freq 0.5 --amplitude 0.05 --duration 3.0
 """
 from __future__ import annotations
@@ -33,6 +33,8 @@ import sys
 import argparse
 import logging
 from pathlib import Path
+
+import numpy as np
 
 # sys.path 注入（参考 rm65_joint_viewer.py / scan_joint_safety.py 风格）
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
@@ -48,7 +50,7 @@ from src.joint_test.plotter import ResultPlotter  # noqa: E402
 from src.joint_test.experiment import TrackingExperiment  # noqa: E402
 from src.joint_test.robot_adapter import RobotAdapter  # noqa: E402
 from src.joint_test.safety import JointSafetyGuard  # noqa: E402
-from src.robot.constants import INIT_Q, DT, KP, KD  # noqa: E402
+from src.robot.constants import INIT_Q, INIT_Q_REAL, DT, KP, KD  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -73,71 +75,105 @@ def speed_type(x: str) -> float:
     return v
 
 
-def build_robot_adapter(
-    args: argparse.Namespace,
-    dt: float,
-) -> RobotAdapter:
-    """根据 --backend 构造对应的 RobotAdapter。
-
-    三种后端:
-        - sim:  RM65Env（MuJoCo 双臂 + 球拍模型），位置模式启动
-        - fake: FakeRobot（完美跟踪 Mock，零硬件依赖）
-        - real: RobotInterface（真机 SDK），强制 --i-understand-real-risk
+def build_sim_adapter(dt: float) -> RobotAdapter:
+    """构造仿真 adapter（RM65Env，位置模式）。
 
     Args:
-        args: 已解析的命令行参数。
         dt: 控制时间步长 (s)。
 
     Returns:
-        RobotAdapter 包装的机器人实例。
-
-    Raises:
-        SystemExit: 真机模式未加风险确认 flag、配置缺失或连接失败。
-        ValueError: 未知 backend 名称。
+        RobotAdapter 包装的 MuJoCo 仿真环境。
     """
-    if args.backend == "sim":
-        # 仿真后端：RM65Env（位置模式，参考 V11 配置）
-        from src.sim.rm65_env import RM65Env
+    from src.sim.rm65_env import RM65Env
 
-        model_path = (
-            Path(__file__).resolve().parent.parent.parent
-            / "src" / "robot" / "rm65_model.xml"
+    model_path = (
+        Path(__file__).resolve().parent.parent.parent
+        / "src" / "robot" / "rm65_model.xml"
+    )
+    env = RM65Env(model_path=model_path, dt=dt)
+    try:
+        env.configure_actuator_mode("position", kp=KP, kd=KD)
+    except Exception as e:  # pragma: no cover - 兜底
+        logger.warning("configure_actuator_mode 失败（可能已默认位置模式）: %s", e)
+    return RobotAdapter(env, BackendType.SIM, safety_guard=None)
+
+
+def build_fake_adapter(dt: float) -> RobotAdapter:
+    """构造 FakeRobot adapter（完美跟踪 Mock，零硬件依赖）。
+
+    Args:
+        dt: 控制时间步长 (s)。
+
+    Returns:
+        RobotAdapter 包装的 FakeRobot 实例。
+    """
+    from src.real.fake_robot import FakeRobot
+
+    fake_robot = FakeRobot(INIT_Q.copy(), dt=dt)
+    return RobotAdapter(fake_robot, BackendType.FAKE, safety_guard=None)
+
+
+def _run_real_backend(args: argparse.Namespace) -> None:
+    """真机后端编排：连接 → 预检 → 归位 → 运行实验。
+
+    整个真机操作从连接后到断开前被 try/finally 保护，
+    pre_motion_check 的 SystemExit 和 Ctrl+C 都能触发安全断开。
+
+    Args:
+        args: 解析后的命令行参数。
+    """
+    if not args.i_understand_real_risk:
+        raise SystemExit(
+            "真机模式必须加 --i-understand-real-risk 表示已理解风险"
         )
-        env = RM65Env(model_path=model_path, dt=dt)
-        try:
-            # 位置模式需要 kp/kd，传入共享常量（参考 V11 配置）
-            env.configure_actuator_mode("position", kp=KP, kd=KD)
-        except Exception as e:  # pragma: no cover - 兜底
-            logger.warning("configure_actuator_mode 失败（可能已默认位置模式）: %s", e)
-        return RobotAdapter(env, BackendType.SIM, safety_guard=None)
 
-    elif args.backend == "fake":
-        # Fake 后端：FakeRobot（零硬件依赖，完美跟踪）
-        from src.real.fake_robot import FakeRobot
+    from scripts.tools.test_real_robot._connect import (
+        load_and_connect, init_algo, home_to_pose, safe_disconnect,
+    )
+    from src.real.safety_monitor import SafetyMonitor
 
-        fake_robot = FakeRobot(INIT_Q.copy(), dt=dt)
-        return RobotAdapter(fake_robot, BackendType.FAKE, safety_guard=None)
+    # ① 连接
+    ri, cfg = load_and_connect(args.config)
+    try:
+        monitor = SafetyMonitor(cfg, ri)
+        algo = None if args.no_algo_check else init_algo()
 
-    elif args.backend == "real":
-        if not args.i_understand_real_risk:
-            raise SystemExit(
-                "真机模式必须加 --i-understand-real-risk 表示已理解风险"
+        # ② 显示当前角度
+        state = ri.get_arm_state()
+        print(f"\n当前关节角度 (度): {np.degrees(state[:6]).round(2)}")
+
+        # ③ YES 确认（归位）
+        confirm = input(
+            "\n即将归位到 INIT_Q_REAL 并运行跟踪实验，输入 YES 确认: "
+        )
+        if confirm.strip().upper() != "YES":
+            return
+
+        # ④ 归位
+        base_q = INIT_Q_REAL.copy()
+        home_to_pose(ri, monitor, algo, base_q, duration=1.0)
+
+        # ⑤ 确认到位
+        final_state = ri.get_arm_state()
+        error_deg = np.degrees(final_state[:6] - base_q)
+        print(f"\n到位误差 (度): {error_deg.round(2)}")
+
+        # ⑥ 非扫频模式加二次确认
+        if not args.sweep:
+            offset_val = (
+                args.offset if args.offset is not None
+                else float(base_q[args.joint])
             )
-        from src.real.config import RealRobotConfig
-        from src.real.robot_interface import RobotInterface
+            confirm2 = input(
+                f"\n即将运行 {args.waveform} J{args.joint} 跟踪, "
+                f"频率 {args.freq} Hz, 幅值 {args.amplitude} rad, "
+                f"偏置 {offset_val:.3f} rad, "
+                f"持续 {args.duration}s. 输入 YES 确认: "
+            )
+            if confirm2.strip().upper() != "YES":
+                return
 
-        cfg_path = (
-            Path(__file__).resolve().parent.parent.parent
-            / "configs" / "real_robot.yaml"
-        )
-        if not cfg_path.exists():
-            raise SystemExit(f"真机配置文件不存在: {cfg_path}")
-        cfg = RealRobotConfig.from_yaml(str(cfg_path))
-        real_robot = RobotInterface(cfg)
-        if not real_robot.connect():
-            raise SystemExit("真机连接失败")
-
-        # 构造保守安全防护（注意 RealRobotConfig 字段为 q_lower/q_upper/max_qdot）
+        # ⑦ 构造组件
         guard = JointSafetyGuard(
             q_lower=cfg.q_lower,
             q_upper=cfg.q_upper,
@@ -145,16 +181,166 @@ def build_robot_adapter(
             max_amplitude_rad=args.max_real_amplitude,
             max_frequency_hz=args.max_real_freq,
         )
-        return RobotAdapter(
-            real_robot, BackendType.REAL, safety_guard=guard,
+        adapter = RobotAdapter(ri, BackendType.REAL, safety_guard=guard)
+
+        # ⑧ 构造 experiment
+        dt = DT
+        analyzer = MetricsAnalyzer()
+        plotter = ResultPlotter(
+            Path(args.output_dir),
+            backend="Agg" if args.no_plot else "TkAgg",
+        )
+        experiment = TrackingExperiment(
+            adapter, analyzer, plotter, dt, base_q,
+            speed_ratio=args.speed, backend=BackendType.REAL,
         )
 
+        # ⑨ 运行
+        if args.sweep:
+            freqs = [float(x.strip()) for x in args.sweep_freqs.split(",")]
+            offset = float(base_q[args.joint])
+
+            # 扫频预检查：对每个频率做安全校验
+            for f in freqs:
+                wcfg_check = WaveformConfig(
+                    waveform=WaveformType(args.waveform),
+                    joint_idx=args.joint,
+                    frequency_hz=f,
+                    amplitude_rad=args.amplitude,
+                    offset_rad=offset,
+                    duration_s=args.duration,
+                )
+                warnings = guard.check_preconditions(wcfg_check)
+                if warnings:
+                    print(f"\n⚠️  频率 {f} Hz 安全预检查未通过:")
+                    for w in warnings:
+                        print(f"   - {w}")
+                    raise SystemExit("拒绝运行（安全预检查失败）")
+
+            sweep = experiment.run_sweep(
+                joint_idx=args.joint,
+                frequencies_hz=freqs,
+                amplitude_rad=args.amplitude,
+                waveform=WaveformType(args.waveform),
+                duration_s=args.duration,
+                compare_fake=args.compare_fake,
+                pre_sweep_home=lambda: home_to_pose(ri, monitor, algo, base_q),
+            )
+            print(f"\n扫频完成: {len(freqs)} 个频率点，Bode 图已保存")
+            for f, rmse in zip(sweep.frequencies_hz, sweep.rmses_rad):
+                print(f"  f={f:.3f} Hz  RMSE={rmse:.6f} rad")
+        else:
+            offset = (
+                args.offset if args.offset is not None
+                else float(base_q[args.joint])
+            )
+            wcfg = WaveformConfig(
+                waveform=WaveformType(args.waveform),
+                joint_idx=args.joint,
+                frequency_hz=args.freq,
+                amplitude_rad=args.amplitude,
+                offset_rad=offset,
+                duration_s=args.duration,
+                end_frequency_hz=args.end_freq,
+                step_target_rad=args.step_target,
+            )
+            # 单次模式预检查
+            warnings = guard.check_preconditions(wcfg)
+            if warnings:
+                print("\n⚠️  真机安全预检查未通过:")
+                for w in warnings:
+                    print(f"   - {w}")
+                raise SystemExit("拒绝运行（安全预检查失败）")
+
+            cfg_test = TestConfig(
+                waveform_cfg=wcfg,
+                backend=BackendType.REAL,
+                realtime_plot=args.realtime and not args.no_plot,
+                save_npz=args.save_npz,
+                save_csv=args.save_csv,
+                save_png=args.save_png,
+                print_metrics=not args.no_metrics,
+                compare_fake=args.compare_fake,
+            )
+            result, metrics = experiment.run_single(cfg_test)
+            print(f"\n实验完成: RMSE={metrics.rmse_rad:.6f} rad")
+    finally:
+        safe_disconnect(ri)
+
+
+def _run_sim_backend(args: argparse.Namespace) -> None:
+    """sim/fake 后端编排：构造适配器 → 运行实验。
+
+    Args:
+        args: 解析后的命令行参数。
+    """
+    dt = DT
+    backend = BackendType(args.backend)
+    analyzer = MetricsAnalyzer()
+    plotter = ResultPlotter(
+        Path(args.output_dir),
+        backend="Agg" if args.no_plot else "TkAgg",
+    )
+
+    adapter = (
+        build_sim_adapter(dt) if backend == BackendType.SIM
+        else build_fake_adapter(dt)
+    )
+    base_q = INIT_Q.copy()
+
+    experiment = TrackingExperiment(
+        adapter, analyzer, plotter, dt,
+        base_q=base_q,
+        speed_ratio=args.speed,
+        backend=backend,
+    )
+
+    if args.sweep:
+        freqs = [float(x) for x in args.sweep_freqs.split(",")]
+        sweep = experiment.run_sweep(
+            joint_idx=args.joint,
+            frequencies_hz=freqs,
+            amplitude_rad=args.amplitude,
+            waveform=WaveformType(args.waveform),
+            duration_s=args.duration,
+            compare_fake=args.compare_fake,
+        )
+        print(f"\n扫频完成: {len(freqs)} 个频率点，Bode 图已保存")
+        for f, rmse in zip(sweep.frequencies_hz, sweep.rmses_rad):
+            print(f"  f={f:.3f} Hz  RMSE={rmse:.6f} rad")
     else:
-        raise ValueError(f"未知 backend: {args.backend}")
+        offset = (
+            args.offset if args.offset is not None
+            else float(base_q[args.joint])
+        )
+        wcfg = WaveformConfig(
+            waveform=WaveformType(args.waveform),
+            joint_idx=args.joint,
+            frequency_hz=args.freq,
+            amplitude_rad=args.amplitude,
+            offset_rad=offset,
+            duration_s=args.duration,
+            end_frequency_hz=args.end_freq,
+            step_target_rad=args.step_target,
+        )
+        cfg_test = TestConfig(
+            waveform_cfg=wcfg,
+            backend=backend,
+            realtime_plot=args.realtime and not args.no_plot,
+            save_npz=args.save_npz,
+            save_csv=args.save_csv,
+            save_png=args.save_png,
+            print_metrics=not args.no_metrics,
+            compare_fake=args.compare_fake,
+        )
+        result, metrics = experiment.run_single(cfg_test)
+        print(f"\n实验完成: RMSE={metrics.rmse_rad:.6f} rad")
 
 
 def main() -> None:
     """CLI 主入口：解析参数 → 构造组件 → 运行实验。"""
+    from scripts.tools.test_real_robot import _connect
+
     parser = argparse.ArgumentParser(
         description="单关节跟踪实验",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -200,7 +386,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--offset", type=float, default=None,
-        help="直流偏置 rad（默认 INIT_Q[joint]）",
+        help="直流偏置 rad（默认 base_q[joint]）",
     )
 
     # ── 模式 ──
@@ -272,6 +458,11 @@ def main() -> None:
         "--max-real-freq", type=float, default=1.0,
         help="真机模式频率硬上限 Hz（默认 1.0）",
     )
+    _connect.add_config_arg(parser)
+    parser.add_argument(
+        "--no-algo-check", action="store_true", default=False,
+        help="跳过 SDK Algo 自碰撞/奇异性检查",
+    )
 
     # ── 其他 ──
     parser.add_argument(
@@ -286,92 +477,10 @@ def main() -> None:
         format="%(asctime)s [%(levelname)s] %(message)s",
     )
 
-    dt = DT  # DT=0.005 与 configs/real_robot.yaml control.dt 一致，sim/real 通用
-    backend = BackendType(args.backend)
-
-    # 构造 adapter（real 模式在此处校验 --i-understand-real-risk）
-    adapter = build_robot_adapter(args, dt)
-
-    # 构造其他组件
-    analyzer = MetricsAnalyzer()
-    plotter = ResultPlotter(
-        Path(args.output_dir),
-        backend="Agg" if args.no_plot else "TkAgg",
-    )
-
-    # 真机模式预检查（幅值/频率/限位）
-    if backend == BackendType.REAL and adapter.safety_guard is not None:
-        offset = (
-            args.offset if args.offset is not None
-            else float(INIT_Q[args.joint])
-        )
-        wcfg_check = WaveformConfig(
-            waveform=WaveformType(args.waveform),
-            joint_idx=args.joint,
-            frequency_hz=args.freq,
-            amplitude_rad=args.amplitude,
-            offset_rad=offset,
-            duration_s=args.duration,
-            end_frequency_hz=args.end_freq,
-            step_target_rad=args.step_target,
-        )
-        warnings = adapter.safety_guard.check_preconditions(wcfg_check)
-        if warnings:
-            print("\n⚠️  真机安全预检查未通过:")
-            for w in warnings:
-                print(f"   - {w}")
-            raise SystemExit("拒绝运行（安全预检查失败）")
-
-    # 构造 experiment
-    experiment = TrackingExperiment(
-        adapter, analyzer, plotter, dt,
-        base_q=INIT_Q.copy(),
-        speed_ratio=args.speed,
-        backend=backend,
-    )
-
-    # 运行：扫频 or 单次
-    if args.sweep:
-        freqs = [float(x) for x in args.sweep_freqs.split(",")]
-        sweep = experiment.run_sweep(
-            joint_idx=args.joint,
-            frequencies_hz=freqs,
-            amplitude_rad=args.amplitude,
-            waveform=WaveformType(args.waveform),
-            duration_s=args.duration,
-            compare_fake=args.compare_fake,
-        )
-        print(f"\n扫频完成: {len(freqs)} 个频率点，Bode 图已保存")
-        # 打印各频率 RMSE 摘要
-        for f, rmse in zip(sweep.frequencies_hz, sweep.rmses_rad):
-            print(f"  f={f:.3f} Hz  RMSE={rmse:.6f} rad")
+    if args.backend == "real":
+        _run_real_backend(args)
     else:
-        offset = (
-            args.offset if args.offset is not None
-            else float(INIT_Q[args.joint])
-        )
-        wcfg = WaveformConfig(
-            waveform=WaveformType(args.waveform),
-            joint_idx=args.joint,
-            frequency_hz=args.freq,
-            amplitude_rad=args.amplitude,
-            offset_rad=offset,
-            duration_s=args.duration,
-            end_frequency_hz=args.end_freq,
-            step_target_rad=args.step_target,
-        )
-        cfg = TestConfig(
-            waveform_cfg=wcfg,
-            backend=backend,
-            realtime_plot=args.realtime and not args.no_plot,
-            save_npz=args.save_npz,
-            save_csv=args.save_csv,
-            save_png=args.save_png,
-            print_metrics=not args.no_metrics,
-            compare_fake=args.compare_fake,
-        )
-        result, metrics = experiment.run_single(cfg)
-        print(f"\n实验完成: RMSE={metrics.rmse_rad:.6f} rad")
+        _run_sim_backend(args)
 
 
 if __name__ == "__main__":

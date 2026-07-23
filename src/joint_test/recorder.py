@@ -39,6 +39,7 @@ class TrackingRecorder:
         self._q_des = np.zeros((self._n, 6))
         self._q_act = np.zeros((self._n, 6))
         self._qdot_act = np.zeros((self._n, 6))
+        self._wall_time = np.zeros(self._n)
         self._k = 0  # 已记录的步数
 
     def record(
@@ -47,6 +48,7 @@ class TrackingRecorder:
         q_des: np.ndarray,
         q_actual: np.ndarray,
         qdot_actual: np.ndarray,
+        wall_ts: float | None = None,
     ) -> None:
         """记录单步数据。
 
@@ -57,6 +59,7 @@ class TrackingRecorder:
             q_des: 期望关节角度 (6,)。
             q_actual: 实际关节角度 (6,)。
             qdot_actual: 实际关节速度 (6,)。
+            wall_ts: 墙钟时间戳 (s)，默认 None 回退为 t。
         """
         if self._k >= self._n:
             return  # 超容量，静默丢弃
@@ -64,6 +67,7 @@ class TrackingRecorder:
         self._q_des[self._k] = q_des
         self._q_act[self._k] = q_actual
         self._qdot_act[self._k] = qdot_actual
+        self._wall_time[self._k] = wall_ts if wall_ts is not None else t
         self._k += 1
 
     def finalize(self) -> TrackingResult:
@@ -81,6 +85,7 @@ class TrackingRecorder:
             q_desired=self._q_des[:n].copy(),
             q_actual=self._q_act[:n].copy(),
             qdot_actual=self._qdot_act[:n].copy(),
+            wall_time=self._wall_time[:n].copy(),
         )
 
     @staticmethod
@@ -100,6 +105,7 @@ class TrackingRecorder:
             q_actual=result.q_actual,
             qdot_actual=result.qdot_actual,
             tracking_error=result.tracking_error,
+            wall_time=result.wall_time if result.wall_time is not None else np.array([]),
             dt=result.dt,
             joint_idx=result.config.joint_idx,
             waveform=result.config.waveform.value,
@@ -119,12 +125,18 @@ class TrackingRecorder:
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         j = result.config.joint_idx
+        wall_time_col = (
+            result.wall_time
+            if result.wall_time is not None
+            else np.full(len(result.time), np.nan)
+        )
         data = np.column_stack([
             result.time,
             result.q_desired[:, j],
             result.q_actual[:, j],
             result.qdot_actual[:, j],
             result.tracking_error,
+            wall_time_col,
         ])
-        header = "time_s,q_desired_rad,q_actual_rad,qdot_actual_rad,tracking_error_rad"
+        header = "time_s,q_desired_rad,q_actual_rad,qdot_actual_rad,tracking_error_rad,wall_time_s"
         np.savetxt(str(path), data, delimiter=",", header=header, comments="")

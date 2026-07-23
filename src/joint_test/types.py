@@ -62,11 +62,12 @@ class TrackingResult:
         config: 波形配置。
         backend: 执行后端。
         dt: 控制周期（秒）。
-        time: 时间序列 (N,)。
+        time: 时间序列 (N,)，仿真存 k*dt（合成世界时间）。
         q_desired: 指令关节角 (N, 6)。
         q_actual: 实际关节角 (N, 6)。
         qdot_actual: 实际关节速度 (N, 6)。
         tracking_error: 目标关节跟踪误差 (N,)，由 __post_init__ 自动计算。
+        wall_time: 墙钟时间戳 (N,)。仿真存 k*dt（合成世界时间），真机存 perf_counter()（观测时刻）。默认 None 保持向后兼容。
     """
 
     config: WaveformConfig
@@ -77,6 +78,7 @@ class TrackingResult:
     q_actual: np.ndarray              # (N, 6)
     qdot_actual: np.ndarray           # (N, 6)
     tracking_error: np.ndarray = field(init=False)  # (N,) 自动计算
+    wall_time: np.ndarray | None = None  # (N,) 墙钟时间戳，向后兼容
 
     def __post_init__(self) -> None:
         """自动计算 tracking_error = q_desired[:, joint_idx] - q_actual[:, joint_idx]。"""
@@ -163,6 +165,8 @@ class TestConfig:
         print_metrics: 是否打印指标摘要。
         compare_fake: 是否同时跑 FakeRobot 作对照。
     """
+
+    __test__ = False
 
     waveform_cfg: WaveformConfig
     backend: BackendType

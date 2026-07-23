@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import numpy as np
+from scipy.signal import sawtooth, square, chirp
 
 from src.joint_test.types import WaveformConfig, WaveformType
 
@@ -50,16 +51,10 @@ class WaveformGenerator:
         if self._cfg.waveform == WaveformType.SINE:
             traj[:, j] = offset + A * np.sin(2 * np.pi * f * t)
         elif self._cfg.waveform == WaveformType.TRIANGLE:
-            from scipy.signal import sawtooth
-
             traj[:, j] = offset + A * sawtooth(2 * np.pi * f * t, width=0.5)
         elif self._cfg.waveform == WaveformType.SQUARE:
-            from scipy.signal import square
-
             traj[:, j] = offset + A * square(2 * np.pi * f * t)
         elif self._cfg.waveform == WaveformType.CHIRP:
-            from scipy.signal import chirp
-
             f1 = self._cfg.end_frequency_hz if self._cfg.end_frequency_hz is not None else (f * 10)
             traj[:, j] = offset + A * chirp(
                 t, f0=f, f1=f1, t1=t[-1] if len(t) > 0 else 1.0, method="linear"
