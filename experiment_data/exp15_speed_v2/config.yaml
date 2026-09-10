@@ -1,0 +1,5 @@
+# 由 batch_runner 自动生成
+# experiment: exp15_speed_v2
+# grid_size: 1800
+# report_ref: 2026-06-22 报告: 7/9/12/15 m/s → 78/90/86/58%, 50 seeds
+# config_ids: ['ballspeed10__noplot__servebox', 'ballspeed11__noplot__servebox', 'ballspeed12__noplot__servebox', 'ballspeed13__noplot__servebox', 'ballspeed14__noplot__servebox', 'ballspeed15__noplot__servebox', 'ballspeed7__noplot__servebox', 'ballspeed8__noplot__servebox', 'ballspeed9__noplot__servebox']

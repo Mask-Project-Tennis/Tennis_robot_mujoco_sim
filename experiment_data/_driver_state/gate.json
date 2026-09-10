@@ -1,0 +1,161 @@
+{
+  "gate_pass": true,
+  "timestamp": "2026-09-09 23:39:58",
+  "checks": [
+    {
+      "name": "cpp",
+      "pass": true,
+      "detail": "iLQR C++ 模块已加载"
+    },
+    {
+      "name": "repro",
+      "pass": true,
+      "detail": "9m/s 10/10 (报告 90%), 7m/s 8/10 (报告 85.7%)",
+      "results": {
+        "speed9": {
+          "hits": 10,
+          "n": 10,
+          "errors": 0,
+          "details": [
+            {
+              "seed": 1,
+              "hit": true,
+              "error": "",
+              "pos_error": 0.06683
+            },
+            {
+              "seed": 2,
+              "hit": true,
+              "error": "",
+              "pos_error": 0.101154
+            },
+            {
+              "seed": 3,
+              "hit": true,
+              "error": "",
+              "pos_error": 0.136368
+            },
+            {
+              "seed": 4,
+              "hit": true,
+              "error": "",
+              "pos_error": 0.124027
+            },
+            {
+              "seed": 5,
+              "hit": true,
+              "error": "",
+              "pos_error": 0.102937
+            },
+            {
+              "seed": 6,
+              "hit": true,
+              "error": "",
+              "pos_error": 0.10185
+            },
+            {
+              "seed": 7,
+              "hit": true,
+              "error": "",
+              "pos_error": 0.102696
+            },
+            {
+              "seed": 8,
+              "hit": true,
+              "error": "",
+              "pos_error": 0.144057
+            },
+            {
+              "seed": 9,
+              "hit": true,
+              "error": "",
+              "pos_error": 0.137241
+            },
+            {
+              "seed": 10,
+              "hit": true,
+              "error": "",
+              "pos_error": 0.099045
+            }
+          ],
+          "report_ref": "90.0%",
+          "elapsed_s": 21.2
+        },
+        "speed7": {
+          "hits": 8,
+          "n": 10,
+          "errors": 0,
+          "details": [
+            {
+              "seed": 1,
+              "hit": true,
+              "error": "",
+              "pos_error": 0.063337
+            },
+            {
+              "seed": 2,
+              "hit": true,
+              "error": "",
+              "pos_error": 0.102455
+            },
+            {
+              "seed": 3,
+              "hit": true,
+              "error": "",
+              "pos_error": 0.109543
+            },
+            {
+              "seed": 4,
+              "hit": true,
+              "error": "",
+              "pos_error": 0.138839
+            },
+            {
+              "seed": 5,
+              "hit": true,
+              "error": "",
+              "pos_error": 0.12829
+            },
+            {
+              "seed": 6,
+              "hit": true,
+              "error": "",
+              "pos_error": 0.06403
+            },
+            {
+              "seed": 7,
+              "hit": true,
+              "error": "",
+              "pos_error": 0.097377
+            },
+            {
+              "seed": 8,
+              "hit": false,
+              "error": "",
+              "pos_error": 0.358096
+            },
+            {
+              "seed": 9,
+              "hit": false,
+              "error": "",
+              "pos_error": 0.330493
+            },
+            {
+              "seed": 10,
+              "hit": true,
+              "error": "",
+              "pos_error": 0.062241
+            }
+          ],
+          "report_ref": "85.7%",
+          "elapsed_s": 22.9
+        }
+      }
+    },
+    {
+      "name": "limits",
+      "pass": true,
+      "detail": "real 组 max_tcp=[1.0, 1.0, 1.0]（预期 <1.05; sim 默认约 1.8）"
+    }
+  ]
+}

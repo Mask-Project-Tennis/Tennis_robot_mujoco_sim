@@ -1,0 +1,5 @@
+# 由 batch_runner 自动生成
+# experiment: exp16_limits_v2
+# grid_size: 400
+# report_ref: 2026-07-09 报告: real(TCP1.0) 30% vs sim(TCP1.8) 78%; 注意旧 --sim-limits 已废弃, 现默认即 sim 行为, real 走 --limits-config
+# config_ids: ['ballspeed7__limitsconfigconfigs_real_robot.yaml__noplot__servebox', 'ballspeed7__noplot__servebox']

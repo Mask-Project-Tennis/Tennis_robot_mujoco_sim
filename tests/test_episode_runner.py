@@ -32,10 +32,17 @@ class FakeMPC:
 
 
 class FakePerception:
-    """Mock 感知 — 总返回 (zeros(3), zeros(3))。"""
+    """Mock 感知 — 总返回 (zeros(3), zeros(3))。
 
-    def get_ball_state(self):
+    与 SimPerception 新接口对齐: get_ball_state(step) + reset()。
+    """
+
+    def get_ball_state(self, step: int = 0):
         return np.zeros(3), np.zeros(3)
+
+    def reset(self) -> None:
+        """空操作（无门控状态）。"""
+
 
 
 class FakeExecutor:

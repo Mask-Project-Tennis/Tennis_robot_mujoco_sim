@@ -1,0 +1,5 @@
+# 由 batch_runner 自动生成
+# experiment: exp13_arch
+# grid_size: 400
+# report_ref: 2026-06-18 报告: V12 力矩 85.7% / 位置 23.7%; V11 侧引用报告存档（旧 V11 已重构为 V12 薄壳, stale cost 行为不可复现, 不重跑）
+# config_ids: ['ballspeed7__noplot__positionmode__servebox', 'ballspeed7__noplot__servebox']

@@ -751,9 +751,9 @@ def main() -> None:
         pos_error = pos_error_plan
     vel_error = float(np.linalg.norm(v_ee_final - v_hit_at_contact))
 
-    # Tube 指标
+    # Tube 指标（大噪声下 episode 可能极早退出，采样序列为空 → min_dist 记 inf）
     d_arr = np.array(distances_history)
-    min_dist = float(np.min(d_arr))
+    min_dist = float(np.min(d_arr)) if d_arr.size else float("inf")
     ball_near_duration = int(np.sum(np.array(ball_near_history, dtype=bool)))
     ball_near_ms = ball_near_duration * dt * 1000
     tube_ready_duration = int(np.sum(np.array(tube_ready_history, dtype=bool)))

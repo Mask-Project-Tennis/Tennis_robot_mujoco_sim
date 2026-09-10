@@ -84,9 +84,13 @@ class EpisodeRunner:
         """
         from src.ilqt.step_context import StepContext
 
+        # 0. 重置门控状态（BallObservationGate 的 last_obs 等跨 episode 残留）
+        if hasattr(self._perception, "reset"):
+            self._perception.reset()
+
         # 1. 读取初始状态
         arm_state = self._executor.get_arm_state()
-        ball = self._perception.get_ball_state()
+        ball = self._perception.get_ball_state(step=0)
         if ball is None:
             logger.error("EpisodeRunner: 初始球状态不可用")
             return {"total_steps": 0, "safe_steps": 0, "error": "no_ball"}
@@ -100,8 +104,8 @@ class EpisodeRunner:
         hook_metrics: dict = {}  # hook 追加的持久化指标
 
         while not self._mpc.done and step_count < max_steps:
-            # 感知
-            ball = self._perception.get_ball_state()
+            # 感知（step 透传给观测门控做观测间隔判定）
+            ball = self._perception.get_ball_state(step=step_count)
             arm_state = self._executor.get_arm_state()
 
             if ball is None:

@@ -1,0 +1,51 @@
+{
+  "exp13_arch": {
+    "configs": 2,
+    "runs": 397,
+    "hits": 216,
+    "errors": 6,
+    "hit_rate": 54.4
+  },
+  "exp15_speed_v2": {
+    "configs": 9,
+    "runs": 1784,
+    "hits": 1452,
+    "errors": 19,
+    "hit_rate": 81.4
+  },
+  "exp16_limits_v2": {
+    "configs": 2,
+    "runs": 397,
+    "hits": 242,
+    "errors": 6,
+    "hit_rate": 61.0
+  },
+  "exp14_pd_v2": {
+    "configs": 32,
+    "runs": 1507,
+    "hits": 984,
+    "errors": 96,
+    "hit_rate": 65.3
+  },
+  "exp17a_noise": {
+    "configs": 54,
+    "runs": 5276,
+    "hits": 2083,
+    "errors": 130,
+    "hit_rate": 39.5
+  },
+  "exp17b_perturb": {
+    "configs": 40,
+    "runs": 3923,
+    "hits": 3120,
+    "errors": 80,
+    "hit_rate": 79.5
+  },
+  "exp17c_obsfreq": {
+    "configs": 30,
+    "runs": 2943,
+    "hits": 1632,
+    "errors": 63,
+    "hit_rate": 55.5
+  }
+}

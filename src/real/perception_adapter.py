@@ -30,11 +30,17 @@ class PerceptionAdapter:
         """
         self._perceiver = perceiver
 
-    def get_ball_state(self) -> tuple[NDArray[np.floating], NDArray[np.floating]] | None:
+    def get_ball_state(
+        self, step: int = 0,
+    ) -> tuple[NDArray[np.floating], NDArray[np.floating]] | None:
         """更新并返回滤波后的球状态。
 
         先调用 ``perceiver.update()`` 触发一次观测+KF 更新，
         再返回最近一次滤波结果（不重复观测）。
+
+        Args:
+            step: 当前物理步数（真机感知按自身节拍观测，此参数仅
+                保持 PerceptionComponent Protocol 兼容，不使用）。
 
         Returns:
             (filtered_pos(3,), filtered_vel(3,)) 或 None（无数据时）。

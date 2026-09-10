@@ -1,0 +1,60 @@
+{
+  "phases": {
+    "P0_gate": {
+      "status": "pass",
+      "detail": "复现性抽查通过",
+      "time": "09-09 23:36:33"
+    },
+    "exp13_arch": {
+      "status": "done",
+      "detail": "exit=0",
+      "time": "09-09 23:37:14"
+    },
+    "exp15_speed_v2": {
+      "status": "done",
+      "detail": "exit=0",
+      "time": "09-09 23:40:54"
+    },
+    "exp16_limits_v2": {
+      "status": "done",
+      "detail": "exit=0",
+      "time": "09-09 23:41:46"
+    },
+    "exp14_pd_v2": {
+      "status": "done",
+      "detail": "exit=0",
+      "time": "09-09 23:43:44"
+    },
+    "exp17a_noise": {
+      "status": "done",
+      "detail": "exit=0",
+      "time": "09-09 23:52:29"
+    },
+    "exp17b_perturb": {
+      "status": "done",
+      "detail": "exit=0",
+      "time": "09-10 00:00:31"
+    },
+    "exp17c_obsfreq": {
+      "status": "done",
+      "detail": "exit=0",
+      "time": "09-10 00:05:45"
+    },
+    "P3_summary": {
+      "status": "done",
+      "detail": "summary.md 已生成",
+      "time": "09-10 00:05:45"
+    },
+    "P3_git": {
+      "status": "failed",
+      "detail": "git 提交异常（可能无可提交变更）",
+      "time": "09-10 00:05:45"
+    },
+    "driver": {
+      "status": "done",
+      "detail": "全部阶段结束, 见 summary.md",
+      "time": "09-10 00:05:45"
+    }
+  },
+  "updated": "2026-09-10 00:05:45"
+}
