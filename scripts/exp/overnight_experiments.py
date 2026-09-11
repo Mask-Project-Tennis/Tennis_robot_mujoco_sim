@@ -36,6 +36,7 @@ from scripts.exp.batch_runner import ExperimentSpec
 SEEDS_P1 = 200   # P1 主线统一 200 seeds（加菜 C）
 SEEDS_P2 = 100   # P2 网格实验 100 seeds
 SEEDS_EXP14 = 50 # exp14 32 组合, 50 seeds 足够
+MODES_MECHANISM = ("full", "tube_only", "softmin_only", "none")  # 四档机制消融
 
 V12 = "scripts/rm65_mpc_v12.py"
 
@@ -139,6 +140,40 @@ def _obsfreq_grid() -> list[dict[str, Any]]:
     return grid
 
 
+def _perturb_cells(speed: int, cells: list[tuple[int, float]],
+                   modes: tuple[str, ...], seeds: int,
+                   start: int = 1) -> list[dict[str, Any]]:
+    """指定 (t_max_ms, s_max_m) 角点的高 seeds 复测网格（exp17g 用）。
+
+    Args:
+        speed: 球速（m/s）。
+        cells: 角点列表 [(t_max_ms, s_max_m), ...]。
+        modes: 消融档。
+        seeds: 每格 seed 数。
+        start: 起始 seed。
+
+    Returns:
+        参数字典列表。
+    """
+    grid: list[dict[str, Any]] = []
+    for t_max_ms, s_max_m in cells:
+        for mode in modes:
+            base: dict[str, Any] = {
+                "--serve-box": None, "--ball-speed": speed,
+                "--ablation": mode, "--no-plot": None,
+                "--random-perturb": None, "--perturb-sign": "random",
+            }
+            if t_max_ms > 0:
+                base["--time-perturb-ms"] = t_max_ms
+                base["--time-perturb-min-ms"] = 0
+            if s_max_m > 0:
+                base["--space-perturb-m"] = s_max_m
+                base["--space-perturb-min-m"] = 0.0
+            grid.extend({**base, "--seed": s}
+                        for s in range(start, start + seeds))
+    return grid
+
+
 EXPERIMENTS: dict[str, ExperimentSpec] = {
     "exp13_arch": ExperimentSpec(
         name="exp13_arch",
@@ -234,6 +269,17 @@ EXPERIMENTS: dict[str, ExperimentSpec] = {
         report_ref="机制归因补测: tube_only/softmin_only × 扰动网格 @9 m/s; "
                    "标称四档（exp17d）显示 softmin 主导, 需在扰动下分离走廊贡献",
         grid=_perturb_grid(speed=9, modes=("tube_only", "softmin_only")),
+    ),
+    "exp17g_spatial_power": ExperimentSpec(
+        name="exp17g_spatial_power",
+        script=V12,
+        report_ref="强化版机制归因: s=0.2 角点高 seeds（t=0/s=0.2 × 3000, "
+                   "t=50/s=0.2 × 1500, 各 4 档 = 18000 runs）—— 目标: 把走廊 vs "
+                   "时间窗的空间鲁棒差异（~3pp）做到统计显著（n≥3000/格, 功效 ~85%）",
+        grid=(
+            _perturb_cells(9, [(0, 0.2)], MODES_MECHANISM, 3000)
+            + _perturb_cells(9, [(50, 0.2)], MODES_MECHANISM, 1500)
+        ),
     ),
 }
 

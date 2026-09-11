@@ -63,6 +63,7 @@ if [ "${SPRINT_TMUX:-0}" = "1" ]; then
   run_batch exp17d_mechanism
   run_batch exp17e_perturb7
   run_batch exp17f_mechanism_perturb   # 机制归因补测（标称四档发现 softmin 主导后追加）
+  run_batch exp17g_spatial_power       # 强化版: s=0.2 角点高 seeds（走廊空间鲁棒性显著性）
   echo "════════ sprint 补跑全部完成 $(date) ════════" | tee -a "$LOG"
   exit 0
 fi
