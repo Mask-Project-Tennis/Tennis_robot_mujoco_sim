@@ -1,0 +1,61 @@
+
+========================================
+  RM-65 击打成功！（主动击球，pos_error=0.0668m）
+  [V12 EpisodeRunner 管线架构]
+  ablation: full
+  击打目标位置: [-0.706 -0.238  0.893]
+  末端实际位置: [-0.654 -0.352  0.916]
+  规划跟踪误差: 0.1279 m
+  速度误差: 1.9694 m/s
+  MPC 总步数: 261
+  --- Tube 专用指标 ---
+  最小球拍-球距离: 0.0668 m
+  ball_near 步数: 8 = 40.0 ms
+  tube_ready 步数: 21 = 105.0 ms
+  击打时间误差: 15.0 ms
+  击打位置误差: 0.0668 m
+  --- 计算性能 ---
+  总墙钟时间: 1.10s (MPC=1.10s)
+  --- 执行层约束 ---
+  max_qdot=1.00x, max_tcp=1.8m/s, max_face=1.4m/s
+  击球类型: 主动击球
+========================================
+
+__RESULT__: pos_error=0.066830 vel_error=1.969450 min_dist=0.066830 ball_near_ms=40.0 tube_ready_ms=105.0 max_tcp=1.81 max_qdot=1.00 max_face=1.4 hit_type=active hit_time_error_ms=15.0 hit_pos_error=0.066830 v_racket_at_hit=1.633
+2026-09-10 17:48:30,262 [INFO] __main__: [ablation] mode=full
+2026-09-10 17:48:30,268 [INFO] __main__: serve-box auto params: horizon=120, iter=10, first_plan_iters=30, total_horizon=250, replan_interval=20, near_plan_iters=5
+2026-09-10 17:48:30,288 [INFO] __main__: 关节限位: 仿真默认(default.yaml), TCP=1.8 m/s, terminal_exempt=20
+2026-09-10 17:48:30,288 [INFO] __main__: 球拍初始位置: [-0.24136342  0.63027058  1.45576659]
+2026-09-10 17:48:30,295 [INFO] __main__: 击打步数: 180, 击打位置: [-0.70593564 -0.23755927  0.89325228]
+2026-09-10 17:48:30,295 [INFO] __main__: 随挥方向: [-0.1   -0.976  0.191], 随挥步数: 60
+2026-09-10 17:48:30,312 [INFO] __main__: 候选窗口已构建: best_k=180, candidates=21
+2026-09-10 17:48:30,313 [INFO] src.cpp.solver_cpp: iLQR C++ 加速模块已加载
+2026-09-10 17:48:30,313 [INFO] __main__: 开始 V12 EpisodeRunner，总步数=310 (MPC=250, 随挥=60)，击打步数=180
+2026-09-10 17:48:30,313 [INFO] src.ilqt.async_replanner: AsyncReplanner: 后台规划线程已启动
+2026-09-10 17:48:30,333 [INFO] src.ilqt.async_replanner: AsyncReplanner: 规划环境已创建（独立 MjData）
+2026-09-10 17:48:30,335 [INFO] src.ilqt.async_replanner: AsyncReplanner: 规划环境已创建（独立 MjData）
+2026-09-10 17:48:31,256 [INFO] src.ilqt.mpc_controller: REPLAN step=0 k_hit=180 iters=30 horizon=120 t=923ms
+2026-09-10 17:48:31,257 [INFO] src.ilqt.mpc_controller: MPCController.start 完成: k_hit=180, p_hit=[-0.706 -0.238  0.893], buffer=120
+2026-09-10 17:48:31,311 [INFO] src.ilqt.strategies.hit_point_refiner: [HIT_LOCK] k_hit=60 ≤ 60, 锁定击球点不再替换
+2026-09-10 17:48:31,356 [INFO] src.ilqt.components.predictive_safety: [SAFETY_FILTER] beta=0.0: qdot entering overspeed, joint=5, |qdot|=5.82 > 3.93
+2026-09-10 17:48:31,385 [INFO] src.ilqt.components.predictive_safety: [SAFETY_FILTER] beta=0.6: qdot entering overspeed, joint=0, |qdot|=3.38 > 3.14
+2026-09-10 17:48:31,385 [INFO] src.ilqt.components.predictive_safety: [SAFETY_FILTER] beta=0.2: qdot entering overspeed, joint=0, |qdot|=3.61 > 3.14
+2026-09-10 17:48:31,386 [INFO] src.ilqt.components.predictive_safety: [SAFETY_FILTER] beta=0.2: qdot entering overspeed, joint=0, |qdot|=3.46 > 3.14
+2026-09-10 17:48:31,386 [INFO] src.ilqt.components.predictive_safety: [SAFETY_FILTER] beta=0.2: qdot entering overspeed, joint=0, |qdot|=3.41 > 3.14
+2026-09-10 17:48:31,387 [INFO] src.ilqt.components.predictive_safety: [SAFETY_FILTER] beta=0.8: qdot entering overspeed, joint=0, |qdot|=3.17 > 3.14
+2026-09-10 17:48:31,387 [INFO] src.ilqt.components.predictive_safety: [SAFETY_FILTER] beta=0.4: qdot entering overspeed, joint=0, |qdot|=3.23 > 3.14
+2026-09-10 17:48:31,388 [INFO] src.ilqt.components.predictive_safety: [SAFETY_FILTER] beta=0.2: qdot entering overspeed, joint=0, |qdot|=3.47 > 3.14
+2026-09-10 17:48:31,388 [INFO] src.ilqt.components.predictive_safety: [SAFETY_FILTER] beta=0.2: qdot entering overspeed, joint=0, |qdot|=3.42 > 3.14
+2026-09-10 17:48:31,389 [INFO] src.ilqt.components.predictive_safety: [SAFETY_FILTER] beta=0.4: qdot entering overspeed, joint=0, |qdot|=3.20 > 3.14
+2026-09-10 17:48:31,389 [INFO] src.ilqt.components.predictive_safety: [SAFETY_FILTER] beta=0.2: qdot entering overspeed, joint=0, |qdot|=3.43 > 3.14
+2026-09-10 17:48:31,390 [INFO] src.ilqt.components.predictive_safety: [SAFETY_FILTER] beta=0.2: qdot entering overspeed, joint=0, |qdot|=3.19 > 3.14
+2026-09-10 17:48:31,390 [INFO] src.ilqt.components.predictive_safety: [SAFETY_FILTER] beta=0.2: qdot entering overspeed, joint=0, |qdot|=3.43 > 3.14
+2026-09-10 17:48:31,391 [INFO] src.ilqt.components.predictive_safety: [SAFETY_FILTER] beta=0.2: qdot entering overspeed, joint=0, |qdot|=3.76 > 3.14
+2026-09-10 17:48:31,391 [INFO] src.ilqt.components.predictive_safety: [SAFETY_FILTER] beta=0.2: qdot entering overspeed, joint=0, |qdot|=3.58 > 3.14
+2026-09-10 17:48:31,392 [INFO] src.ilqt.components.predictive_safety: [SAFETY_FILTER] beta=0.0: qdot entering overspeed, joint=0, |qdot|=3.85 > 3.14
+2026-09-10 17:48:31,393 [INFO] src.ilqt.components.predictive_safety: [SAFETY_FILTER] beta=0.2: qdot entering overspeed, joint=0, |qdot|=3.70 > 3.14
+2026-09-10 17:48:31,394 [INFO] src.ilqt.components.predictive_safety: [SAFETY_FILTER] beta=0.2: qdot entering overspeed, joint=0, |qdot|=3.79 > 3.14
+2026-09-10 17:48:31,394 [INFO] src.ilqt.strategies.follow_through: 随挥触发: step=179, steps=60
+2026-09-10 17:48:31,411 [INFO] src.ilqt.async_replanner: AsyncReplanner: 后台规划线程已停止
+2026-09-10 17:48:31,411 [INFO] src.ilqt.episode_runner: EpisodeRunner 完成: total_steps=241 safe_steps=241 mpc_done=True
+2026-09-10 17:48:31,411 [INFO] __main__: 击打后继续仿真 20 步...

@@ -163,7 +163,11 @@ def main() -> None:
     parser.add_argument("--warn-margin", type=float, default=None, help="IK 警告裕度 (度)")
     parser.add_argument("--j1-warn", type=float, default=None, help="关节1 警告裕度 (度)")
     parser.add_argument("--refiner-window", type=int, default=None, help="Refiner 搜索窗口半宽 (步)")
+    parser.add_argument("--log-level", default="INFO",
+                        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+                        help="日志级别（默认 INFO; 计时分析需 DEBUG 以输出稳态 REPLAN）")
     args = parser.parse_args()
+    logging.getLogger().setLevel(getattr(logging, args.log_level))
 
     # ==========================================================================
     # 2. 消融模式推导 + 随机扰动（与 V11 一致）

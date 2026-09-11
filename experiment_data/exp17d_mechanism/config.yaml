@@ -1,0 +1,5 @@
+# 由 batch_runner 自动生成
+# experiment: exp17d_mechanism
+# grid_size: 600
+# report_ref: 四档消融补齐: tube_only/softmin_only × 3 球速 × 100 seeds; full/none 复用 exp17b 基线格, 合并供 fig6 机制归因
+# config_ids: ['ablationsoftmin_only__ballspeed12__noplot__servebox', 'ablationsoftmin_only__ballspeed7__noplot__servebox', 'ablationsoftmin_only__ballspeed9__noplot__servebox', 'ablationtube_only__ballspeed12__noplot__servebox', 'ablationtube_only__ballspeed7__noplot__servebox', 'ablationtube_only__ballspeed9__noplot__servebox']

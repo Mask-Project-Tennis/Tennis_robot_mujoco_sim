@@ -1,0 +1,396 @@
+{
+  "generated": "2026-09-10 17:50:56",
+  "config": {
+    "--serve-box": null,
+    "--ball-speed": 9,
+    "--no-plot": null
+  },
+  "sync": {
+    "episodes": 30,
+    "async_mode": false,
+    "n_replans": 291,
+    "n_first_plan": 56,
+    "all": {
+      "n": 291,
+      "mean_ms": 96.9,
+      "median_ms": 4,
+      "p95_ms": 927,
+      "max_ms": 948,
+      "min_ms": 3
+    },
+    "first_plan": {
+      "n": 56,
+      "mean_ms": 465.3,
+      "median_ms": 456.5,
+      "p95_ms": 943,
+      "max_ms": 948,
+      "min_ms": 3
+    },
+    "steady_state": {
+      "n": 235,
+      "mean_ms": 9.2,
+      "median_ms": 4,
+      "p95_ms": 33,
+      "max_ms": 42,
+      "min_ms": 3
+    },
+    "by_iters": {
+      "0": {
+        "n": 200,
+        "mean_ms": 3.5,
+        "median_ms": 3.0,
+        "p95_ms": 4,
+        "max_ms": 6,
+        "min_ms": 3
+      },
+      "5": {
+        "n": 63,
+        "mean_ms": 24.9,
+        "median_ms": 26,
+        "p95_ms": 38,
+        "max_ms": 42,
+        "min_ms": 4
+      },
+      "30": {
+        "n": 28,
+        "mean_ms": 926.5,
+        "median_ms": 927.0,
+        "p95_ms": 943,
+        "max_ms": 948,
+        "min_ms": 907
+      }
+    },
+    "per_episode": [
+      {
+        "seed": 1,
+        "n_replans": 10,
+        "wall_s": 1.3,
+        "mean_ms": 101.5,
+        "hit_type": "active"
+      },
+      {
+        "seed": 2,
+        "n_replans": 10,
+        "wall_s": 1.29,
+        "mean_ms": 98.4,
+        "hit_type": "active"
+      },
+      {
+        "seed": 3,
+        "n_replans": 10,
+        "wall_s": 1.31,
+        "mean_ms": 101.1,
+        "hit_type": "active"
+      },
+      {
+        "seed": 4,
+        "n_replans": 10,
+        "wall_s": 1.28,
+        "mean_ms": 99.4,
+        "hit_type": "active"
+      },
+      {
+        "seed": 5,
+        "n_replans": 11,
+        "wall_s": 1.29,
+        "mean_ms": 90.8,
+        "hit_type": "active"
+      },
+      {
+        "seed": 6,
+        "n_replans": 10,
+        "wall_s": 1.28,
+        "mean_ms": 99.4,
+        "hit_type": "active"
+      },
+      {
+        "seed": 7,
+        "n_replans": 10,
+        "wall_s": 1.3,
+        "mean_ms": 101.5,
+        "hit_type": "active"
+      },
+      {
+        "seed": 8,
+        "n_replans": 11,
+        "wall_s": 1.35,
+        "mean_ms": 95.3,
+        "hit_type": "active"
+      },
+      {
+        "seed": 9,
+        "n_replans": 10,
+        "wall_s": 1.28,
+        "mean_ms": 99.0,
+        "hit_type": "active"
+      },
+      {
+        "seed": 10,
+        "n_replans": 10,
+        "wall_s": 1.29,
+        "mean_ms": 99.6,
+        "hit_type": "active"
+      },
+      {
+        "seed": 11,
+        "n_replans": 11,
+        "wall_s": 1.3,
+        "mean_ms": 90.7,
+        "hit_type": "active"
+      },
+      {
+        "seed": 12,
+        "n_replans": 10,
+        "wall_s": 1.29,
+        "mean_ms": 100.1,
+        "hit_type": "active"
+      },
+      {
+        "seed": 13,
+        "n_replans": 11,
+        "wall_s": 1.37,
+        "mean_ms": 96.2,
+        "hit_type": "active"
+      },
+      {
+        "seed": 14,
+        "n_replans": 10,
+        "wall_s": 1.28,
+        "mean_ms": 99.6,
+        "hit_type": "active"
+      },
+      {
+        "seed": 15,
+        "n_replans": 10,
+        "wall_s": 1.27,
+        "mean_ms": 97.8,
+        "hit_type": "active"
+      },
+      {
+        "seed": 16,
+        "n_replans": 11,
+        "wall_s": 1.34,
+        "mean_ms": 94.5,
+        "hit_type": "active"
+      },
+      {
+        "seed": 17,
+        "n_replans": 11,
+        "wall_s": 1.28,
+        "mean_ms": 89.4,
+        "hit_type": "active"
+      },
+      {
+        "seed": 18,
+        "n_replans": 10,
+        "wall_s": 1.29,
+        "mean_ms": 100.2,
+        "hit_type": "active"
+      },
+      {
+        "seed": 19,
+        "n_replans": 10,
+        "wall_s": 1.28,
+        "mean_ms": 98.0,
+        "hit_type": "active"
+      },
+      {
+        "seed": 20,
+        "n_replans": 0,
+        "wall_s": 0.16,
+        "mean_ms": null,
+        "hit_type": "no_result"
+      },
+      {
+        "seed": 21,
+        "n_replans": 0,
+        "wall_s": 0.16,
+        "mean_ms": null,
+        "hit_type": "no_result"
+      },
+      {
+        "seed": 22,
+        "n_replans": 11,
+        "wall_s": 1.34,
+        "mean_ms": 93.3,
+        "hit_type": "active"
+      },
+      {
+        "seed": 23,
+        "n_replans": 10,
+        "wall_s": 1.31,
+        "mean_ms": 101.3,
+        "hit_type": "active"
+      },
+      {
+        "seed": 24,
+        "n_replans": 10,
+        "wall_s": 1.27,
+        "mean_ms": 98.4,
+        "hit_type": "miss"
+      },
+      {
+        "seed": 25,
+        "n_replans": 11,
+        "wall_s": 1.34,
+        "mean_ms": 94.0,
+        "hit_type": "miss"
+      },
+      {
+        "seed": 26,
+        "n_replans": 10,
+        "wall_s": 1.32,
+        "mean_ms": 101.5,
+        "hit_type": "active"
+      },
+      {
+        "seed": 27,
+        "n_replans": 11,
+        "wall_s": 1.33,
+        "mean_ms": 93.7,
+        "hit_type": "active"
+      },
+      {
+        "seed": 28,
+        "n_replans": 11,
+        "wall_s": 1.31,
+        "mean_ms": 91.5,
+        "hit_type": "active"
+      },
+      {
+        "seed": 29,
+        "n_replans": 11,
+        "wall_s": 1.34,
+        "mean_ms": 94.3,
+        "hit_type": "active"
+      },
+      {
+        "seed": 30,
+        "n_replans": 10,
+        "wall_s": 1.27,
+        "mean_ms": 98.0,
+        "hit_type": "active"
+      }
+    ]
+  },
+  "async": {
+    "episodes": 10,
+    "async_mode": true,
+    "n_replans": 94,
+    "n_first_plan": 10,
+    "all": {
+      "n": 94,
+      "mean_ms": 7.9,
+      "median_ms": 6.0,
+      "p95_ms": 11,
+      "max_ms": 75,
+      "min_ms": 4
+    },
+    "first_plan": {
+      "n": 10,
+      "mean_ms": 8.6,
+      "median_ms": 8.0,
+      "p95_ms": 10,
+      "max_ms": 10,
+      "min_ms": 8
+    },
+    "steady_state": {
+      "n": 84,
+      "mean_ms": 7.9,
+      "median_ms": 5.0,
+      "p95_ms": 11,
+      "max_ms": 75,
+      "min_ms": 4
+    },
+    "by_iters": {
+      "0": {
+        "n": 90,
+        "mean_ms": 5.8,
+        "median_ms": 6.0,
+        "p95_ms": 8,
+        "max_ms": 11,
+        "min_ms": 4
+      },
+      "5": {
+        "n": 4,
+        "mean_ms": 56.5,
+        "median_ms": 52.0,
+        "p95_ms": 75,
+        "max_ms": 75,
+        "min_ms": 47
+      }
+    },
+    "per_episode": [
+      {
+        "seed": 1,
+        "n_replans": 7,
+        "wall_s": 1.27,
+        "mean_ms": 16.0,
+        "hit_type": "miss"
+      },
+      {
+        "seed": 2,
+        "n_replans": 10,
+        "wall_s": 1.22,
+        "mean_ms": 5.2,
+        "hit_type": "miss"
+      },
+      {
+        "seed": 3,
+        "n_replans": 9,
+        "wall_s": 1.29,
+        "mean_ms": 11.3,
+        "hit_type": "miss"
+      },
+      {
+        "seed": 4,
+        "n_replans": 9,
+        "wall_s": 1.24,
+        "mean_ms": 6.3,
+        "hit_type": "miss"
+      },
+      {
+        "seed": 5,
+        "n_replans": 12,
+        "wall_s": 1.24,
+        "mean_ms": 6.1,
+        "hit_type": "miss"
+      },
+      {
+        "seed": 6,
+        "n_replans": 7,
+        "wall_s": 1.24,
+        "mean_ms": 12.3,
+        "hit_type": "miss"
+      },
+      {
+        "seed": 7,
+        "n_replans": 11,
+        "wall_s": 1.25,
+        "mean_ms": 5.9,
+        "hit_type": "miss"
+      },
+      {
+        "seed": 8,
+        "n_replans": 12,
+        "wall_s": 1.25,
+        "mean_ms": 5.3,
+        "hit_type": "miss"
+      },
+      {
+        "seed": 9,
+        "n_replans": 7,
+        "wall_s": 1.25,
+        "mean_ms": 11.9,
+        "hit_type": "miss"
+      },
+      {
+        "seed": 10,
+        "n_replans": 10,
+        "wall_s": 1.23,
+        "mean_ms": 5.3,
+        "hit_type": "miss"
+      }
+    ]
+  }
+}

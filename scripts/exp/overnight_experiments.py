@@ -24,7 +24,12 @@ V11 时代旧实验(exp1-12)不重跑: 研发迭代记录, 论文不引用其数
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
 from typing import Any
+
+# 独立运行（打印矩阵清单）时保证可 import scripts.*
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from scripts.exp.batch_runner import ExperimentSpec
 
@@ -74,18 +79,26 @@ def _noise_grid() -> list[dict[str, Any]]:
     return grid
 
 
-def _perturb_grid() -> list[dict[str, Any]]:
-    """exp17b: 时间×空间扰动二维网格 × ablation。
+def _perturb_grid(speed: int = 9,
+                  modes: tuple[str, ...] = ("full", "none")) -> list[dict[str, Any]]:
+    """exp17b/17e/17f: 时间×空间扰动二维网格 × 消融档。
 
     --random-perturb + sign=random: 幅度 uniform[0,max]、符号随机,
     RNG 由 seed+99999 播种（可复现）。max=0 的轴不加扰动参数。
+
+    Args:
+        speed: 球速（m/s）；exp17e 复证用 7。
+        modes: 消融档（默认 full/none；exp17f 机制归因用 tube_only/softmin_only）。
+
+    Returns:
+        参数字典列表。
     """
     grid: list[dict[str, Any]] = []
     for t_max_ms in [0, 10, 25, 50, 100]:
         for s_max_m in [0.0, 0.05, 0.1, 0.2]:
-            for ablation in ["full", "none"]:
+            for ablation in modes:
                 base: dict[str, Any] = {
-                    "--serve-box": None, "--ball-speed": 9,
+                    "--serve-box": None, "--ball-speed": speed,
                     "--ablation": ablation, "--no-plot": None,
                 }
                 if t_max_ms > 0 or s_max_m > 0:
@@ -194,6 +207,33 @@ EXPERIMENTS: dict[str, ExperimentSpec] = {
         script=V12,
         report_ref="新实验: V12 版观测频率退化（旧 exp9 为 V11, 且当时含 stale cost bug）",
         grid=_obsfreq_grid(),
+    ),
+    "exp17d_mechanism": ExperimentSpec(
+        name="exp17d_mechanism",
+        script=V12,
+        report_ref="四档消融补齐: tube_only/softmin_only × 3 球速 × 100 seeds; "
+                   "full/none 复用 exp17b 基线格, 合并供 fig6 机制归因",
+        grid=[
+            {**base, "--seed": seed}
+            for speed in [7, 9, 12]
+            for mode in ["tube_only", "softmin_only"]
+            for base in [{"--serve-box": None, "--ball-speed": speed,
+                          "--ablation": mode, "--no-plot": None}]
+            for seed in range(1, SEEDS_P2 + 1)
+        ],
+    ),
+    "exp17e_perturb7": ExperimentSpec(
+        name="exp17e_perturb7",
+        script=V12,
+        report_ref="exp17b 扰动网格 @ 7 m/s 复证（鲁棒性结论的球速泛化）",
+        grid=_perturb_grid(speed=7),
+    ),
+    "exp17f_mechanism_perturb": ExperimentSpec(
+        name="exp17f_mechanism_perturb",
+        script=V12,
+        report_ref="机制归因补测: tube_only/softmin_only × 扰动网格 @9 m/s; "
+                   "标称四档（exp17d）显示 softmin 主导, 需在扰动下分离走廊贡献",
+        grid=_perturb_grid(speed=9, modes=("tube_only", "softmin_only")),
     ),
 }
 

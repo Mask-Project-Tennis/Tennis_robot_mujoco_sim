@@ -1,0 +1,10 @@
+
+========================================
+  网球不在工作空间内，机械臂不击打！
+========================================
+
+2026-09-10 17:50:32,352 [INFO] __main__: [ablation] mode=full
+2026-09-10 17:50:32,358 [INFO] __main__: serve-box auto params: horizon=120, iter=10, first_plan_iters=30, total_horizon=250, replan_interval=20, near_plan_iters=5
+2026-09-10 17:50:32,378 [INFO] __main__: 关节限位: 仿真默认(default.yaml), TCP=1.8 m/s, terminal_exempt=20
+2026-09-10 17:50:32,379 [INFO] __main__: 球拍初始位置: [-0.24136342  0.63027058  1.45576659]
+2026-09-10 17:50:32,379 [DEBUG] src.tennis.ball: serve_box bounce (attempt=5): p0_z=1.30, vz0=-2.6, spd=9.0, t1=0.309, t2=0.598, z_err=0.10
