@@ -298,26 +298,28 @@ mujoco_sim/
 - **终端代价**: 惩罚末端执行器偏离期望击打点（位置 + 速度 + 法向量）
 - **运行代价**: 惩罚过大的控制力矩 + 关节加速度 + 控制变化率
 - **正则化**: Levenberg-Marquardt 风格（mu_min=1e-6, mu_max=1e10, delta_0=1.6）
-- 终端代价形式：
+- 终端代价形式（`src/ilqt/cost_terms.py::TerminalHit`，实测对齐）：
   ```
-  l_terminal(x) = ||p_ee(x) - p_hit||^2_Q_p + ||v_ee(x) - v_hit||^2_Q_v + (1 - n_racket·n_des) * Q_n
+  l_terminal(x) = ½||p_ee(x) - p_hit||²_Q_p + ½||v_ee(x) - v_hit||²_Q_v + ½·Q_n·||n_racket - n_des||²
   ```
-  其中 p_ee 为末端位置，p_hit 为击打点位置，v_ee 为末端速度，v_hit 为期望击打速度
+  其中 p_ee 为末端位置，p_hit 为击打点位置，v_ee 为末端速度，v_hit 为期望击打速度，
+  n_racket/n_des 为拍面实际/期望法向量（Q_n=0 时禁用，normal_weight=5e5）
 
 ### Tube-based Robust Hitting
-- 不确定性管道：σ(t) = σ₀ + σᵥ·t + σₐ·t²
 - 候选击球窗口：以 best_k 为中心，window_half_ms 为半宽（默认 50ms）
-- 空间走廊式代价（不绑定时间-空间对应）：
-  1. 垂直偏离代价（hinge loss）：球拍超出走廊半径即惩罚
-  2. 速度方向代价（球拍沿球轨迹线方向运动）
-  3. 法向量代价（拍面朝向来球方向）
-- Softmin 终端聚合：多个候选终端代价加权，β 控制锐度
-- 不确定性管道：σ(t) = σ₀ + σᵥ·t + σₐ·t²
+- 空间走廊式代价（不绑定时间-空间对应，v8 轻量版）：
+  仅保留**垂直偏离的 hinge loss**：`½·s_k·Q_p_tube·max(0, ‖P_⊥(p_ee - p_ball,k)‖ - r_racket)²`
+  （`src/ilqt/tube_cost.py::_compute_tube_cost_at_k`）；走廊半宽 = 拍半径 0.12m，
+  走廊内零代价（甜区物理松弛），沿球轨迹线方向的超前/滞后不惩罚
+- Softmin 终端聚合：窗口内多候选终端代价取 softmin（β=5.0，`TubeConfig.softmin_beta`），
+  候选代价含位置/速度/法向三项；速度方向与法向对齐**由终端承担，不在走廊项内**
+- ⚠️ 历史文档曾描述"不确定性管道 σ(t)=σ₀+σᵥt+σₐt²"与"走廊三项代价"，
+  **当前代码均未实现**，写作与文档引用时不要使用（详见 paper/discussion/2026-09-11 §9）
 
 ### 多层安全滤波
 - **X 平面墙预判**：臂不越过身体中线（X≥-0.1），越界 PD 推回
 - **关节约束**：位置/速度/加速度/力矩四重限制
-- **TCP 速度硬限制**：max_tcp_speed = 1.8 m/s（仿真默认，default.yaml）。TCP 1.0 m/s 仅真机部署（`--limits-config`）；exp16 验证 TCP 1.0 导致安全滤波锁死加速 → 命中率 30%（vs 1.8 = 78%）+ 关节速度 3.94× 超限（重力坠落）
+- **TCP 速度硬限制**：max_tcp_speed = 1.8 m/s（仿真默认，default.yaml）。TCP 1.0 m/s 仅真机部署（`--limits-config`）；exp16 重跑（200 seeds）验证 TCP 1.0 使命中率降至 36.4%（vs 1.8 = 85.4%），挥拍速度被压到 0.87 m/s（详见 `docs/experiments/reports/2026-09-10_exp16_v12_limits_rerun.md`）
 - **逐步安全滤波**：β = [0.8, 0.6, 0.4, 0.2, 0.0]，找到最大可行控制
 - **终段豁免**：击球前 terminal_exempt_steps 步跳过速度检查（默认 20 步）
 - **紧急制动**：所有 β 均失败时施加阻尼力矩 u = -20·qdot（力矩模式）；保持当前角度（位置模式）
@@ -492,7 +494,7 @@ mujoco_sim/
 
 | 脚本 | 用途 | 关键特性 |
 |------|------|---------|
-| `scripts/rm65_mpc_v12.py` | ★ 最新版本（V12） | EpisodeRunner 管线架构 + MPCController 策略化 + 可组合组件，命中率 85.7% |
+| `scripts/rm65_mpc_v12.py` | ★ 最新版本（V12） | EpisodeRunner 管线架构 + MPCController 策略化 + 可组合组件；7 m/s 命中率 85.4%、9 m/s 95.9%（200 seeds，exp13/15 重跑） |
 | `scripts/rm65_mpc_v11.py` | V11 薄壳（29 行） | 委托到 V12 main()，行为一致 |
 | `scripts/rm65_mpc_ilqr_5_5.py` | Tube/iLQR 基线 | 工具脚本依赖基类 |
 | `scripts/sim/rm65_mpc_ilqt.py` | 简化 MPC+iLQR | 无 Tube，基础两阶段 iLQR |

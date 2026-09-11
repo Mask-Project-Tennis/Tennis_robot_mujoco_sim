@@ -1,22 +1,25 @@
 # Skill: 论文撰写（paper_writing）
 
 ## 目的
-指导 Agent 撰写 IEEE RAL 格式的学术论文，先中文后翻译英文。
+指导 Agent 撰写 ICRA 会议格式的学术论文，先中文后翻译英文。
 调用时机：实验数据就绪后，开始组织论文内容时。
 
-## 目标期刊/会议
-**IEEE Robotics and Automation Letters (RAL)** + IEEE ICRA/IROS 会议 presentation
-- 格式：IEEE 双栏，8 页正文 + 参考文献
+## 目标会议
+**ICRA 2027（Seoul）**，截止 2026-09-15 11:59 PST（Paperplaza）；RAL 作为扩展版后备去向
+- 格式：IEEE 双栏会议版，**6 页正文 + 参考文献，最多 +2 页（付费）**
 - 语言：英文（先中文草稿，后翻译）
-- 模板：IEEEtran.cls
+- 模板：IEEEtran.cls（`conference` 选项，main.tex 已就位）
+- 排期与依赖：见 `paper/planning/schedule.md`；论文配置：`paper/planning/00-paper-config.md`（须经用户确认）
 
 ## 论文目录结构
 
 ```
-paper/
-├── main.tex                    # 主文件
-├── references.bib              # 参考文献
-├── figures/                    # 图片（由 figure_generation skill 生成）
+paper/                         # 独立 git 仓库（主仓 .gitignore 已排除）
+├── main.tex                   # 主文件（ICRA conference 版）
+├── references.bib             # 占位；定稿时按实际引用从 Zotero/arXiv 导出生成
+├── build.sh                   # 构建脚本（latexmk；full 模式自动装缺包）
+├── .latexmkrc                 # latexmk 配置（pdflatex+bibtex，输出 build/）
+├── figures/                   # 图片（由 figure_generation skill 生成）
 │   ├── fig1_system_overview.pdf
 │   ├── fig2_algorithm_flowchart.pdf
 │   ├── fig3_tube_corridor.pdf
@@ -24,8 +27,9 @@ paper/
 │   ├── fig5_hit_rate_vs_speed.pdf
 │   ├── fig6_tube_robustness.pdf
 │   ├── fig7_realtime_performance.pdf
-│   └── fig8_tube_diagnostic.pdf
-├── sections/                   # 各节内容
+│   ├── fig8_tube_diagnostic.pdf
+│   └── table_data/            # LaTeX 表格数据
+├── sections/                  # 英文各节（成稿）
 │   ├── abstract.tex
 │   ├── introduction.tex
 │   ├── related_work.tex
@@ -34,16 +38,17 @@ paper/
 │   ├── experiments.tex
 │   ├── results.tex
 │   └── conclusion.tex
-├── sections_zh/                # 中文草稿
-│   ├── abstract.md
-│   ├── introduction.md
-│   ├── related_work.md
-│   ├── problem_formulation.md
-│   ├── method.md
-│   ├── experiments.md
-│   ├── results.md
-│   └── conclusion.md
-└── notes.md                    # 写作笔记
+├── sections_zh/               # 中文草稿（唯一事实源，markdown + LaTeX 公式）
+│   └── （与 sections/ 同名 .md）
+├── planning/                  # 学术流水线中间产物
+│   ├── 00-paper-config.md     #   论文配置记录（academic-paper Phase 0）
+│   ├── schedule.md            #   冲刺排期
+│   ├── 02-outline-evidence.md #   大纲 + 证据映射（Phase 2）
+│   └── 03-argument-blueprint.md # 论证蓝图（Phase 3）
+├── discussion/                # 讨论与决策记录
+├── reviews/                   # 模拟评审 / revision roadmap（round-N 子目录）
+├── notes/                     # 文献调研笔记（43 篇 + 综述 + raw/），已对齐 Zotero 合集 AAYPCPGP
+└── build/                     # 构建产物（gitignore）
 ```
 
 ## LaTeX 工程模板
@@ -51,19 +56,20 @@ paper/
 ### main.tex
 
 ```latex
-\documentclass[letterpaper, 10pt, journal]{IEEEtran}
+\documentclass[letterpaper, 10pt, conference]{IEEEtran}
+\IEEEoverridecommandlockouts
 
-\usepackage{times}
+\usepackage{cite}
 \usepackage{amsmath, amssymb, amsfonts}
 \usepackage{algorithmic}
 \usepackage{algorithm}
 \usepackage{graphicx}
 \usepackage{textcomp}
 \usepackage{bm}
-\usepackage{subcaption}
 \usepackage{booktabs}
 \usepackage{multirow}
-\usepackage{hyperref}
+\usepackage[caption=false,font=footnotesize]{subfig}
+\usepackage[hidelinks]{hyperref}
 \usepackage[capitalize]{cleveref}
 
 \title{Tube-Based Robust MPC with iLQR for Dynamic\\Tennis Hitting with a Robotic Arm}
@@ -92,15 +98,29 @@ Email: author@example.com}
 \end{document}
 ```
 
+### 构建命令
+
+```bash
+./build.sh        # latexmk 增量构建 → build/main.pdf
+./build.sh full   # 缺宏包时自动 tlmgr install（TUNA 镜像）再构建
+./build.sh clean  # 清理辅助文件
+```
+
+TeX Live 2026 用户态安装于 `~/.local/texlive/2026`（PATH 已写入 `~/.zshrc`）。
+
 ## 核心贡献点
 
 基于代码实际能力，论文的核心贡献为：
 
 ### 贡献 1：Tube-based Spatial Corridor for Robust Hitting
 - 空间走廊式 Tube 代价，不绑定"第 k 步必须到 p_ball(k)"的时间-空间对应
-- 三项代价：垂直偏离（hinge loss）+ 速度方向对齐 + 法向量对齐
-- 不确定性管道：σ(t) = σ₀ + σᵥ·t + σₐ·t²
-- 候选击球窗口：以 best_k 为中心，高斯衰减权重
+- v8 实现**仅铰链位置项**：`½·s_k·Q_p_tube·max(0, ‖P_⊥(p_ee−p_ball,k)‖ − r_racket)²`
+  （`src/ilqt/tube_cost.py::_compute_tube_cost_at_k`）；半宽 = 拍半径 r_racket = 0.12 m，
+  走廊内零代价、沿球轨迹线方向的超前/滞后不惩罚
+- 时间窗 softmin 终端（β=5.0，±50ms 候选窗）：候选代价含位置/速度/法向三项，
+  速度方向与法向对齐**由终端承担，不在走廊项内**
+- ⚠️ "不确定性管道 σ(t) = σ₀ + σᵥ·t + σₐ·t²" **当前代码未实现**（2026-09-11 核对源码），
+  禁止写入论文；写作红线清单见 `paper/discussion/2026-09-11_*` §9
 
 **中文草稿要点**：
 > 传统的 tube MPC 方法通常要求系统在特定时刻到达特定状态，形成时间-空间的一一对应。
@@ -123,23 +143,33 @@ Email: author@example.com}
 ### 贡献 3：Real-Time MPC with Asynchronous Replanning
 - 异步重规划：后台线程求解 iLQR，主线程继续执行 buffer
 - Buffer 机制：replan_interval 步的控制缓存
-- 分阶段迭代策略：首次规划 30 次迭代，稳态 far 阶段 10 次，near 阶段 20 次
+- 分阶段迭代策略（`MPCConfig`: first_plan_iters=30, near_plan_iters=5, max_iter_per_plan=10,
+  far_threshold=50）：首次规划 30 次迭代，far 阶段（k_hit>50）**仅 JT 控制、零 iLQR 迭代**，
+  near 阶段 5 次迭代 + hard_constraints
 - 近距 buffer 扩展：k_hit ≤ 30 时 buffer 翻倍，减少重规划频率
 
 **中文草稿要点**：
-> 通过异步重规划架构，系统在不中断执行的情况下持续优化轨迹。
-> 稳态重规划耗时 50-80ms，远低于 100-200ms 的预算，
-> 确保了 200Hz 控制频率下的实时可行性。
+> 实测（exp18，空闲机器）：同步稳态重规划（far 0 迭代 / near 5 迭代）中位 4ms、
+> p95 33ms、上限 41ms，装入 150ms 重规划预算余量充足；首次规划（30 迭代）约 920ms
+> 发生于启动阶段，需提前量或离线预热。异步模式求解耗时同量级，但主循环停顿
+> 由 1.0% 的步超周期（max 41.9ms）降为 0%（max 2.23ms）。
 
 ### 贡献 4：Experimental Validation on RM-65B Constraints
-- 算法能力：12 m/s 球速下 95% 命中率（速度豁免）
-- 真实约束：RM-65B 关节限速下 9 m/s 球速下 100% 命中率
-- TCP 限制：1.8 m/s TCP 限速下 7 m/s 球速下 100% 命中率
-- Tube 鲁棒性：±50ms 时间扰动下命中率从 50% 提升到 85%
+> **数字基准（2026-09-11 重跑，旧数字一律作废）**：见 `docs/experiments/reports/2026-09-1*_exp1*.md`
+> 与 `paper/planning/02-outline-evidence.md`；确认后的贡献措辞见 `paper/planning/00-paper-config.md` §2
+
+- 球速能力（exp15，200 seeds）：7/8/9/12/15 m/s → 85.4/94.9/95.9/85.7/60.5%（峰值 8-9 m/s）
+- 真机限位（exp16，200 seeds）：TCP 1.0 vs 1.8 m/s → 36.4% vs 85.4%（v_racket 0.87 vs 1.48）
+- 鲁棒性（exp17b/17e）：9 m/s 下空间 0.2m −19.5pp、时间 100ms −4.2pp；full vs none 基线 +16.3pp
+- 机制消融（exp17d/17f/G）：四档 full/tube_only/softmin_only/none；softmin 主导标称，走廊贡献见 exp17g
 
 ---
 
 ## 各节撰写指引
+
+> **页数预算说明**：下列各节页数按 8 页版标注；ICRA 6+2 版按 **×0.75 缩放**
+> （Intro 0.9 / Related 0.5 / Problem 0.6 / Method 1.7 / Exp 1.1 / Results 0.9 / Concl 0.3），
+> 大纲阶段（`planning/02-outline-evidence.md`）再按实际内容精调。
 
 ### I. Abstract（中文草稿）
 
@@ -159,10 +189,10 @@ MPC+iLQR+Tube的鲁棒网球击打框架，用于 RM-65B 六自由度机械臂�
 核心创新是空间走廊式 Tube 代价函数，不绑定时间-空间对应，
 允许球拍在候选时间窗口内灵活击球。配合多层安全滤波器和异步重规划架构，
 系统在真实机械臂约束下实现了 200Hz 控制频率的实时控制。
-在 MuJoCo 仿真中，系统在 RM-65B 关节约束下对 9 m/s 球速
-达到 100% 命中率，在 TCP 速度限制 1.8 m/s 下对 7 m/s 球速
-达到 100% 命中率。Tube 机制将 ±50ms 时间扰动下的命中率
-从 50% 提升到 85%。
+在 MuJoCo 仿真中（200 seeds 重跑），系统在 9 m/s 球速下达到 95.9% 命中率，
+在真机 TCP 限位 1.0 m/s 下为 36.4%（仿真默认 1.8 m/s 为 85.4%）；
+鲁棒性网格显示空间 0.2 m 扰动损失 19.5pp、时间 100 ms 扰动仅损失 4.2pp，
+两种机制相对点目标 iLQR 基线提升 6.6-7.1pp。
 ```
 
 ### II. Introduction（1.2 页）
@@ -267,28 +297,24 @@ k_k = -Q_uu^{-1} Q_u
 #### V-B. Tube-based Spatial Corridor Cost（0.7 页）
 
 **内容要点**：
-- 不确定性管道构建：σ(t) = σ₀ + σᵥ·t + σₐ·t²
-- 候选击球窗口搜索：以 best_k 为中心，窗口半宽 window_half_ms
+- 候选击球窗口搜索：以 best_k 为中心，窗口半宽 window_half_ms（默认 50ms）
 - 球轨迹线方向：d_ball = normalize(Σ w_i · v_ball_i)
 - 垂直投影矩阵：P_perp = I - d_ball · d_ball^T
-- 三项代价公式：
-  1. 垂直偏离代价：hinge loss on ‖P_perp · (p_ee - p_ref)‖
-  2. 速度方向代价：‖P_perp · v_ee‖²
-  3. 法向量代价：1 - n_racket · n_des
+- **v8 走廊代价（唯一运行项）**：垂直偏离的 hinge loss，走廊半宽 = 拍半径 r_racket
+- 速度方向对齐、法向对齐**移入终端 softmin 候选代价**（见 `sections_zh/method.md` 式 4）
 
-**关键公式**：
+**关键公式**（对齐 `src/ilqt/tube_cost.py::_compute_tube_cost_at_k`）：
 ```
-l_tube(x, k) = 0.5 · w_k · [
-    Q_p · max(0, ‖P_perp · Δp‖ - r_racket - σ_max)²
-    + Q_v · ‖P_perp · v_ee‖²
-    + Q_n · (1 - n_racket · n_des)
-]
+l_corr(x_k) = 0.5 · s_k · Q_p_tube · [max(0, ‖P_perp · (p_ee,k - p_ball,k)‖ - r_racket)]²
+             r_racket = 0.12 m（拍半径, 固定）
 ```
+> ⚠️ 旧版曾含 `Q_v · ‖P_perp·v_ee‖²` 与 `Q_n·(1-n·n_des)` 两项及 `σ_max` 项，
+> 当前 v8 实现已移除（速度/法向由终端 softmin 承担；σ(t) 管道未实现）
 
 **与传统 tube MPC 的关键区别**：
 - 传统：在时间 k 必须到达状态 x_ref(k) 的 tube 内
 - 本文：在候选窗口 [k_min, k_max] 内任意时刻，只要在空间走廊内
-- 优势：容忍 ±50ms 时间误差，提升鲁棒性
+- 优势：容忍时间预测误差（实测 9 m/s 下 ±100ms 扰动仅损失 4.2pp，exp17b）
 
 #### V-C. MPC Framework with Replanning（0.5 页）
 
@@ -311,28 +337,33 @@ l_tube(x, k) = 0.5 · w_k · [
 **内容**：
 
 #### VI-A. Setup（0.3 页）
-- 机器人：RM-65B（6-DOF，关节力矩 ±60/30/10 Nm）
+- 机器人：RM-65B 双臂（12 DOF；右臂 6 DOF 驱动 + 左臂保持零位）
 - 仿真：MuJoCo，dt=5ms，200Hz
 - 球拍：半径 120mm，连杆垂直法兰
 - 球：从 8m 外发球区随机位置飞来
 
-#### VI-B. Experiment 1: Algorithm Capability（0.3 页）
-- 速度豁免模式，球速 9-30 m/s
-- 结果引用 Fig.5(a) 蓝色曲线
+#### VI-B. E1: 球速能力与真机限位（exp15 + exp16，0.4 页）
+- 球速 7-15 m/s × 200 seeds；真机 TCP 1.0 vs 仿真 1.8 m/s × 200 seeds
+- 结果引用 Fig.5（命中率-球速双线）
 
-#### VI-C. Experiment 2: Real Robot Constraints（0.3 页）
-- 严格关节约束（qdot ≤ 1.0×）
-- 球速 7-12 m/s
-- 结果引用 Fig.5(a) 天蓝色曲线
+#### VI-C. E2: 四档机制消融（exp17d + exp17a/17b 基线格，0.3 页）
+- full / tube_only / softmin_only / none × 7/9/12 m/s
+- 结果引用 Fig.6(a) 柱状 + Table II
 
-#### VI-D. Experiment 3: TCP Speed Limitation（0.2 页）
-- TCP 1.8 m/s + 关节约束
-- 结果引用 Fig.5(a) 琥珀色曲线
+#### VI-D. E3: 鲁棒曲面 $(\tau,\rho)$（exp17b/17e/17f/17g，0.3 页）
+- 时间 [0,10,25,50,100]ms × 空间 [0,0.05,0.1,0.2]m × 四档；@9 主网格 + @7 复证
+- s=0.2 角点高 seeds（3000/格）做走廊独立贡献显著性
+- 结果引用 Fig.6(b) 曲面/热图（核心图）
 
-#### VI-E. Experiment 4: Tube Robustness（0.3 页）
-- 时间扰动 ±100ms，空间偏移 ±100mm
-- Tube on vs off 对比
-- 结果引用 Fig.6
+#### VI-E. E4: 感知退化（exp17a + exp17c，0.2 页）
+- 噪声 σp × KF × ablation × 球速；观测频率 200→10 Hz
+- 结果引用 Fig.8 + Table III
+
+#### VI-F. E5: 实时预算（exp18，0.2 页）
+- 30 sync + 10 async episodes：三段式求解耗时 + 主循环停顿对比
+- 结果引用 Fig.7
+
+> 图资产来源：`experiment_data/exp18_fig_assets/`（4 类轨迹 NPZ + timing.json）
 
 ### VII. Results and Discussion（1.2 页）
 
@@ -387,7 +418,7 @@ l_tube(x, k) = 0.5 · w_k · [
 ### 步骤 4：整合到 LaTeX
 - 将翻译后的内容填入 `paper/sections/*.tex`
 - 插入图表的 `\includegraphics` 和 `\input{table}`
-- 编译检查：`pdflatex main.tex && bibtex main && pdflatex main.tex && pdflatex main.tex`
+- 编译检查：`cd paper && ./build.sh`
 
 ---
 
@@ -420,9 +451,13 @@ l_tube(x, k) = 0.5 · w_k · [
 
 ---
 
-## 参考文献列表
+## 参考文献策略
 
-### 必引文献
+**`paper/notes/` 的文献笔记是中间手稿，不假定全部引用。** 定稿阶段才生成正式 `references.bib`：
+按正文实际 `\cite` 的条目，从 Zotero 合集「网球机器人」（Key: `AAYPCPGP`，已与 notes/ 全部对齐并去重）
+导出 BibTeX，arXiv 条目可用 arxiv MCP `export_citations` 导出权威元数据。禁止手写编造条目。
+
+### 必引文献（指示性，最终以 Zotero 导出为准）
 
 ```bibtex
 @article{todorov2005,
@@ -454,15 +489,15 @@ l_tube(x, k) = 0.5 · w_k · [
 ```
 
 ### 文献搜索建议
-- Google Scholar 搜索：`iLQR robotic hitting`、`tube MPC robot manipulation`、`table tennis robot trajectory optimization`
-- IEEE Xplore 搜索：`robust MPC manipulator dynamic task`、`safety filter robot arm constraint`
+- Zotero 合集 `AAYPCPGP` 与 `paper/notes/`（43 篇结构化笔记，头部带 DOI/arXiv ID）
+- 笔记的综合分析：`paper/notes/线约束iLQR方案-文献对比分析.md`（核心对比对象与 Devil's Advocate）
 - 检查已有文档 `docs/rm65_tennis_report.md` 中的引用列表
 
 ---
 
 ## 写作注意事项
 
-### IEEE RAL 审稿偏好
+### ICRA 审稿偏好（单盲，6+2 页）
 1. **方法创新性**：明确说明与传统方法的区别（特别是 tube 的空间走廊设计）
 2. **实验充分性**：多组对比实验 + 消融 + 统计显著性
 3. **可复现性**：参数完整公开，代码开源
