@@ -126,6 +126,7 @@ class TestGrids:
             "exp17a_noise": (1 * 2 * 1 + 4 * 2 * 2) * 3 * 100,
             "exp17b_perturb": 5 * 4 * 2 * 100,
             "exp17c_obsfreq": (5 * 2 * 1 + 5 * 2 * 2) * 100,
+            "exp17h_extreme": 2 * 4 * 1500 + 4 * 3000,  # Block A + Block B
         }
         for name, n in expected.items():
             assert len(EXPERIMENTS[name].grid) == n, \

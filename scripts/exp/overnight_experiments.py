@@ -281,6 +281,19 @@ EXPERIMENTS: dict[str, ExperimentSpec] = {
             + _perturb_cells(9, [(50, 0.2)], MODES_MECHANISM, 1500)
         ),
     ),
+    "exp17h_extreme": ExperimentSpec(
+        name="exp17h_extreme",
+        script=V12,
+        report_ref="极端条件补强（设计见 paper/planning/03-exp17h-extreme-conditions-design.md）: "
+                   "Block A 9 m/s s∈{0.3,0.4} × 4 档 × 1500（走廊增益是否随扰动幅度单调）"
+                   "+ Block B 12 m/s t=0/s=0.2 × 4 档 × 3000（紧时间余量下走廊是否放大）"
+                   "= 24000 runs",
+        grid=(
+            _perturb_cells(9, [(0, 0.3)], MODES_MECHANISM, 1500)
+            + _perturb_cells(9, [(0, 0.4)], MODES_MECHANISM, 1500)
+            + _perturb_cells(12, [(0, 0.2)], MODES_MECHANISM, 3000)
+        ),
+    ),
 }
 
 
