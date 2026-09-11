@@ -57,6 +57,53 @@ logging.getLogger("src.ilqt.robot_limits").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 
+class _StepTimer:
+    """每步主循环计时钩子（post_exec_hooks 间隔 = 主循环周期）。
+
+    用于同步 vs 异步重规划的主循环停顿对比：同步 ``SyncReplanMode.submit``
+    内联求解会阻塞 step()，对应步的钩子间隔显著拉长；异步 submit 仅入队，
+    间隔保持平稳。间隔本身（而非求解耗时）才是控制循环是否被卡住的指标。
+    """
+
+    def __init__(self) -> None:
+        """初始化计时器。"""
+        self._last: float | None = None
+        self.deltas_ms: list[float] = []
+
+    def hook(self, ctx: object) -> None:
+        """记录与上次调用的间隔（ms）。
+
+        Args:
+            ctx: StepContext（未使用，保持 hook 签名一致）。
+        """
+        now = time.perf_counter()
+        if self._last is not None:
+            self.deltas_ms.append((now - self._last) * 1000.0)
+        self._last = now
+
+    def summary(self, period_ms: float) -> str:
+        """生成可分派解析的单行摘要。
+
+        Args:
+            period_ms: 控制周期（ms），用于统计超周期步数。
+
+        Returns:
+            形如 ``__STEP_TIMING__: n=.. p50=.. ... n_over_period=..`` 的字符串。
+        """
+        if not self.deltas_ms:
+            return "__STEP_TIMING__: n=0"
+        ordered = sorted(self.deltas_ms)
+
+        def _pct(q: float) -> float:
+            return ordered[min(len(ordered) - 1, int(q * len(ordered)))]
+
+        over = sum(1 for v in ordered if v > period_ms)
+        return (f"__STEP_TIMING__: n={len(ordered)} p50={_pct(0.50):.2f} "
+                f"p95={_pct(0.95):.2f} p99={_pct(0.99):.2f} "
+                f"max={ordered[-1]:.2f} n_over_period={over} "
+                f"period_ms={period_ms:.2f}")
+
+
 # ==============================================================================
 # 可视化（从 V11 复用）
 # ==============================================================================
@@ -166,6 +213,8 @@ def main() -> None:
     parser.add_argument("--log-level", default="INFO",
                         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
                         help="日志级别（默认 INFO; 计时分析需 DEBUG 以输出稳态 REPLAN）")
+    parser.add_argument("--dump-step-timing", action="store_true",
+                        help="输出每步主循环耗时摘要（__STEP_TIMING__, 同步/异步停顿对比用）")
     args = parser.parse_args()
     logging.getLogger().setLevel(getattr(logging, args.log_level))
 
@@ -674,12 +723,18 @@ def main() -> None:
             },
         )
 
+    step_timer = None
+    hooks = [recorder.make_hook()] if recorder else []
+    if args.dump_step_timing:
+        step_timer = _StepTimer()
+        hooks.append(step_timer.hook)
+
     runner = EpisodeRunner(
         mpc=mpc,
         perception=perception,
         safety=safety,
         executor=sim_component,
-        post_exec_hooks=[recorder.make_hook()] if recorder else [],
+        post_exec_hooks=hooks,
     )
 
     # ==========================================================================
@@ -692,6 +747,8 @@ def main() -> None:
     t_total_start = time.perf_counter()
     _metrics = runner.run(max_steps=total_steps)
     t_mpc_end = time.perf_counter()
+    if step_timer is not None:
+        print(step_timer.summary(period_ms=dt * 1000.0))
 
     # ==========================================================================
     # 14. 击打后继续仿真（V11 2225-2243，PD 保持 20 步）

@@ -42,6 +42,7 @@ docs/experiments/
 | exp17c | V12 观测频率退化 | — | [2026-09-10](reports/2026-09-10_exp17c_obs_freq_degradation.md) | ✅ |
 | exp17d | 四档机制消融（标称） | — | [2026-09-11](reports/2026-09-11_exp17d_mechanism_ablation.md) | ✅ |
 | exp17e | 扰动网格 @7 m/s 复证 | — | [2026-09-11](reports/2026-09-11_exp17e_perturb7.md) | ✅ |
+| exp17f | 扰动网格机制归因 | — | [2026-09-11](reports/2026-09-11_exp17f_mechanism_perturb.md) | ✅ |
 | exp18 | 图资产（计时 + NPZ） | — | [2026-09-11](reports/2026-09-11_exp18_fig_assets.md) | ✅ |
 
 ## 文档类型说明

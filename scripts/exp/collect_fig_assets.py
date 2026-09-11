@@ -54,6 +54,7 @@ ASYNC_RE = re.compile(
     r"ASYNC_PLAN done: step=(\d+) k_hit=(-?\d+) iters=(\d+) "
     r"horizon=(\d+) t=(\d+)ms")
 RESULT_RE = re.compile(r"__RESULT__: (.+)")
+STEP_RE = re.compile(r"__STEP_TIMING__: (.+)")
 RUN_TIMEOUT_S = 180
 
 BASE_9MS: dict[str, Any] = {"--serve-box": None, "--ball-speed": 9, "--no-plot": None}
@@ -170,11 +171,13 @@ def collect_series(episodes: int, async_mode: bool, tag: str) -> dict[str, Any]:
     Returns:
         timing.json 中的一条序列记录。
     """
-    params: dict[str, Any] = {**BASE_9MS, "--log-level": "DEBUG"}
+    params: dict[str, Any] = {**BASE_9MS, "--log-level": "DEBUG",
+                             "--dump-step-timing": None}
     if async_mode:
         params["--async-replan"] = None
     pattern = ASYNC_RE if async_mode else SYNC_RE
     records: list[dict[str, int]] = []
+    stall_rows: list[dict[str, float]] = []
     per_episode: list[dict[str, Any]] = []
     for seed in range(1, episodes + 1):
         text, fields, wall = run_episode({**params, "--seed": seed})
@@ -182,6 +185,11 @@ def collect_series(episodes: int, async_mode: bool, tag: str) -> dict[str, Any]:
                          (int(g[0]), int(g[1]), int(g[2]), int(g[3]), int(g[4]))))
                 for g in pattern.findall(text)]
         records.extend(hits)
+        m_step = STEP_RE.search(text)
+        if m_step:
+            kv = dict(re.findall(r"(\S+)=(\S+)", m_step.group(1)))
+            stall_rows.append({k: float(v) for k, v in kv.items()
+                               if k != "n"} | {"n": float(kv.get("n", 0))})
         per_episode.append({
             "seed": seed, "n_replans": len(hits), "wall_s": round(wall, 2),
             "mean_ms": (round(statistics.fmean([h["t_ms"] for h in hits]), 1)
@@ -197,6 +205,23 @@ def collect_series(episodes: int, async_mode: bool, tag: str) -> dict[str, Any]:
     for rec in records:
         by_iters.setdefault(str(rec["iters"]), []).append(rec["t_ms"])
     n_first = sum(1 for r in records if r["step"] == 0)
+    # 主循环停顿（每步墙钟）：同步 replan 阻塞步会拉长间隔, 异步保持平稳
+    total_steps = int(sum(r["n"] for r in stall_rows))
+    total_over = int(sum(r.get("n_over_period", 0) for r in stall_rows))
+    stall: dict[str, Any] = {}
+    if stall_rows:
+        stall = {
+            "episodes": len(stall_rows),
+            "total_steps": total_steps,
+            "total_over_period": total_over,
+            "over_ratio": round(total_over / total_steps, 5) if total_steps else 0,
+            "p50_ms_mean": round(statistics.fmean(
+                [r["p50"] for r in stall_rows]), 2),
+            "p95_ms_mean": round(statistics.fmean(
+                [r["p95"] for r in stall_rows]), 2),
+            "p99_ms_max": max(r["p99"] for r in stall_rows),
+            "max_ms_max": max(r["max"] for r in stall_rows),
+        }
     return {
         "episodes": episodes,
         "async_mode": async_mode,
@@ -207,6 +232,7 @@ def collect_series(episodes: int, async_mode: bool, tag: str) -> dict[str, Any]:
         "steady_state": _stats([r["t_ms"] for r in records if r["step"] > 0]),
         "by_iters": {k: _stats(v) for k, v in sorted(
             by_iters.items(), key=lambda kv: int(kv[0]))},
+        "stall": stall,
         "per_episode": per_episode,
     }
 
@@ -271,6 +297,8 @@ def main() -> int:
     parser.add_argument("--scan-cap", type=int, default=40,
                         help="NPZ 扫描每目标最大 seed 数（默认 40）")
     parser.add_argument("--seed-start", type=int, default=1)
+    parser.add_argument("--skip-npz", action="store_true",
+                        help="跳过 NPZ 扫描（只重跑计时/停顿序列时用）")
     args = parser.parse_args()
 
     libdir = _ensure_mujoco_libpath()
@@ -283,17 +311,22 @@ def main() -> int:
     sync = collect_series(args.timing_episodes, False, "sync")
     logger.info("sync: %s", {k: v for k, v in sync.items()
                              if k in ("n_replans", "all", "first_plan",
-                                      "steady_state", "by_iters")})
+                                      "steady_state", "by_iters", "stall")})
     async_series: dict[str, Any] = {}
     if args.async_episodes > 0:
         async_series = collect_series(args.async_episodes, True, "async")
         logger.info("async: %s", {k: v for k, v in async_series.items()
                                   if k in ("n_replans", "all", "first_plan",
-                                           "steady_state", "by_iters")})
+                                           "steady_state", "by_iters",
+                                           "stall")})
     timing = {"generated": time.strftime("%Y-%m-%d %H:%M:%S"),
               "config": BASE_9MS, "sync": sync, "async": async_series}
     (OUT_DIR / "timing.json").write_text(
         json.dumps(timing, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    if args.skip_npz:
+        logger.info("--skip-npz: 跳过 NPZ 扫描")
+        return 0
 
     logger.info("==== Part 2 NPZ 扫描: 4 类目标, cap=%d ====", args.scan_cap)
     manifest = scan_npz(args.scan_cap, args.seed_start)
