@@ -16,11 +16,21 @@ from src.real.trajectory_types import ReplayTrajectory, StepState
 
 
 class MockEnv:
-    """模拟 RobotEnv Protocol，返回固定 arm_state 和 ee_pos。"""
+    """模拟 RobotEnv Protocol，返回固定 arm_state 和 ee_pos。
+
+    actuator_mode = 1（位置）：本文件测试的均为位置模式语义（u_cmd 即目标角，
+    记录进 q_desired）。力矩模式行为由 test_v12_dump_trajectory.py 的
+    metadata/is_position_mode=False 用例覆盖。
+    """
 
     def __init__(self, arm_state: np.ndarray, ee_pos: np.ndarray) -> None:
         self._arm_state = np.asarray(arm_state, dtype=float)
         self._ee_pos = np.asarray(ee_pos, dtype=float)
+
+    @property
+    def actuator_mode(self) -> int:
+        """执行器模式（1=位置），供 TrajectoryRecorder 推断控制模式。"""
+        return 1
 
     def get_arm_state(self) -> np.ndarray:
         """返回右臂状态 (12,)。"""
@@ -463,9 +473,10 @@ class TestTrajectoryRecorderLoadOldPickle:
 
         traj = TrajectoryRecorder.load(path)
 
-        # q_desired = U_history
-        expected_q_desired = np.array(U_history)
-        np.testing.assert_allclose(traj.q_desired, expected_q_desired)
+        # U_history = 控制指令 → u；旧格式控制模式不明，q_desired 保守记空
+        expected_u = np.array(U_history)
+        np.testing.assert_allclose(traj.u, expected_u)
+        assert traj.q_desired.shape == (0, 6)
 
         # q_actual = X_history[1:][:, :6]（跳过初始状态）
         expected_q_actual = np.array([x[:6] for x in X_history[1:]])
@@ -562,8 +573,9 @@ class TestTrajectoryRecorderLoadOldPickle:
         with caplog.at_level(logging.WARNING):
             traj = TrajectoryRecorder.load(path)
 
-        # 截断至 min(5, 2) = 2
-        assert traj.q_desired.shape == (2, 6)
+        # 截断至 min(5, 2) = 2（控制指令进 u，q_desired 保守记空）
+        assert traj.u.shape == (2, 6)
+        assert traj.q_desired.shape == (0, 6)
         assert traj.q_actual.shape == (2, 6)
         assert traj.timestamps.shape == (2,)
         assert traj.tcp_pos.shape == (2, 3)

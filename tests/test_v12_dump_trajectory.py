@@ -102,14 +102,14 @@ class TestTrajectoryRecorderHookIntegration:
         recorder.save(path, hit_step=3)
         traj = TrajectoryRecorder.load(path)
 
-        assert traj.q_desired.shape == (5, 6)
+        assert traj.q_desired.shape == (0, 6)  # 力矩模式：无位置指令
         assert traj.q_actual.shape == (5, 6)
+        assert traj.u.shape == (5, 6)
         # 时间戳应为 step_count * dt = 0, 0.005, 0.01, 0.015, 0.02
         np.testing.assert_allclose(traj.timestamps, np.arange(5) * 0.005)
-        # q_desired[0] = u_cmd at step 0 = 0.1
-        np.testing.assert_allclose(traj.q_desired[0], np.full(6, 0.1))
-        # q_desired[4] = u_cmd at step 4 = 0.5
-        np.testing.assert_allclose(traj.q_desired[4], np.full(6, 0.5))
+        # 力矩模式：u_cmd（力矩）写入 u，不得冒充 q_desired
+        np.testing.assert_allclose(traj.u[0], np.full(6, 0.1))
+        np.testing.assert_allclose(traj.u[4], np.full(6, 0.5))
         # init_q 保留
         np.testing.assert_allclose(traj.init_q, init_q)
         np.testing.assert_allclose(traj.init_q_left, init_q_left)
@@ -119,6 +119,27 @@ class TestTrajectoryRecorderHookIntegration:
         assert traj.metadata["ball_speed"] == 7.0
         assert traj.metadata["is_position_mode"] is False
         assert traj.metadata["p0"] == [2.0, 0.0, 1.5]
+
+    def test_hook_position_mode_records_q_desired(self, tmp_path):
+        """位置模式：u_cmd 即弧度目标角，q_desired 与 u 同步记录。"""
+        env = MockEnv(arm_state=np.zeros(12), ee_pos=np.zeros(3))
+        recorder = TrajectoryRecorder(
+            env, np.zeros(6), np.zeros(6), 0.005, is_position_mode=True,
+        )
+        hook = recorder.make_hook()
+        for step_count in range(3):
+            hook(StepContext(
+                step_count=step_count,
+                arm_state=np.zeros(12),
+                ball_pos=None,
+                u_cmd=np.full(6, 0.1 * (step_count + 1)),
+            ))
+        traj = recorder.to_trajectory()
+        assert traj.q_desired.shape == (3, 6)
+        np.testing.assert_allclose(traj.q_desired[0], np.full(6, 0.1))
+        np.testing.assert_allclose(traj.q_desired[2], np.full(6, 0.3))
+        np.testing.assert_allclose(traj.u[1], np.full(6, 0.2))
+        assert traj.metadata["is_position_mode"] is True
 
     def test_hook_ball_pos_none_records_zeros(self, tmp_path):
         """hook 收到 ball_pos=None 时记录零向量（空挥场景）。"""
@@ -161,6 +182,7 @@ class TestPostHitRecording:
             init_q_left=init_q_left,
             dt=dt,
             metadata={"ball_speed": 7.0},
+            is_position_mode=True,
         )
 
         # 模拟 runner 阶段（hook 记录 total_horizon + follow_through_steps 步）
@@ -220,7 +242,8 @@ class TestPostHitRecording:
             arm_state=np.zeros(12),
             ee_pos=np.array([0.3, 0.0, 0.2]),
         )
-        recorder = TrajectoryRecorder(env, np.zeros(6), np.zeros(6), 0.005)
+        recorder = TrajectoryRecorder(env, np.zeros(6), np.zeros(6), 0.005,
+                                      is_position_mode=True)
 
         for i in range(10):
             recorder.record(
@@ -352,9 +375,10 @@ class TestOldPickleCompatibility:
 
         traj = TrajectoryRecorder.load(path)
 
-        # q_desired = U_history
-        expected_q_desired = np.array(U_history)
-        np.testing.assert_allclose(traj.q_desired, expected_q_desired)
+        # U_history = 控制指令 → u；旧格式模式不明，q_desired 保守记空
+        expected_u = np.array(U_history)
+        np.testing.assert_allclose(traj.u, expected_u)
+        assert traj.q_desired.shape == (0, 6)
 
         # q_actual = X_history[1:][:, :6]（跳过初始状态）
         expected_q_actual = np.array([x[:6] for x in X_history[1:]])
@@ -409,7 +433,8 @@ class TestOldPickleCompatibility:
     def test_new_npz_load_does_not_fallback_to_pickle(self, tmp_path):
         """新 npz 格式文件能被 load() 正确识别（不误触发 pickle 回退）。"""
         env = MockEnv(np.zeros(12), np.zeros(3))
-        recorder = TrajectoryRecorder(env, np.zeros(6), np.zeros(6), 0.005)
+        recorder = TrajectoryRecorder(env, np.zeros(6), np.zeros(6), 0.005,
+                                      is_position_mode=True)
         recorder.record(
             q_desired=np.full(6, 0.5),
             q_actual=np.full(6, 0.3),

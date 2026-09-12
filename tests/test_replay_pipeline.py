@@ -322,6 +322,32 @@ def _save_trajectory_without_q_actual(tmp_path: Path, n_steps: int = 5) -> Path:
     return path
 
 
+def _save_trajectory_without_q_desired(tmp_path: Path, n_steps: int = 5) -> Path:
+    """保存 q_desired 为空的位置模式轨迹，用于 empty_q_desired 测试。
+
+    模拟力矩模式经 recorder 写出的文件：控制量在 u，q_desired 为空 (0, 6)。
+    """
+    import json
+
+    q = np.tile(INIT_Q, (n_steps, 1))
+    path = tmp_path / "no_q_desired.npz"
+    np.savez(
+        path,
+        q_desired=np.zeros((0, 6)),  # 空 q_desired（力矩模式：无位置指令）
+        u=q.copy(),                  # 控制量在 u
+        q_actual=q.copy(),
+        timestamps=np.arange(n_steps) * DT,
+        tcp_pos=np.zeros((n_steps, 3)),
+        ball_pos=np.zeros((n_steps, 3)),
+        init_q=INIT_Q.copy(),
+        init_q_left=INIT_Q_LEFT.copy(),
+        dt=DT,
+        hit_step=-1,
+        metadata=json.dumps({"is_position_mode": True}),
+    )
+    return path
+
+
 class TestRunReplayRemainingStatuses:
     """I2 回归测试：补全 ReplayResult 8 status 的剩余 4 个未测路径。
 
@@ -368,6 +394,43 @@ class TestRunReplayRemainingStatuses:
         assert result.steps == 0
         assert not result.success
         assert "q_actual" in result.reason
+
+    def test_empty_q_desired_without_use_actual(self, tmp_path: Path) -> None:
+        """q_desired 为空（力矩模式无位置指令）且未 --use-actual → 拒绝。
+
+        回归保护：力矩模式记录的 q_desired 槽为空（控制量在 u），
+        不得把空数组当作位置指令下发。
+        """
+        traj_path = _save_trajectory_without_q_desired(tmp_path)
+
+        cfg = ReplayConfig(
+            trajectory_path=traj_path,
+            speed=1.0,
+            use_actual=False,
+            mock=True,
+        )
+        result = run_replay(cfg)
+
+        assert result.status == "empty_q_desired"
+        assert result.steps == 0
+        assert not result.success
+        assert "--use-actual" in result.reason
+
+    def test_empty_q_desired_with_use_actual_passes_gate(
+        self, tmp_path: Path
+    ) -> None:
+        """q_desired 为空但 --use-actual 用 q_actual 重演 → 不被该检查拦截。"""
+        traj_path = _save_trajectory_without_q_desired(tmp_path)
+
+        cfg = ReplayConfig(
+            trajectory_path=traj_path,
+            speed=1.0,
+            use_actual=True,
+            mock=True,
+        )
+        result = run_replay(cfg)
+
+        assert result.status != "empty_q_desired"
 
     def test_connect_failed_returns_status(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

@@ -185,15 +185,20 @@ class TestFileSource:
         assert points2[0][0][0] != 999.0
         np.testing.assert_allclose(points2[0][0], np.zeros(6))
 
-    def test_load_old_pickle_format(self, tmp_path):
-        """加载旧 pickle 格式 → 迭代产出正确的 q_desired 序列。"""
+    def test_old_pickle_without_position_commands_rejected(self, tmp_path):
+        """旧 pickle 无法确认位置模式（q_desired 记空）→ FileSource 拒绝并报错。"""
         path = tmp_path / "old.pkl"
-        u_history = _save_old_pickle(path, n_steps=5)
-        source = FileSource(path)
+        _save_old_pickle(path, n_steps=5)
+        with pytest.raises(ValueError, match="无位置指令"):
+            FileSource(path)
+
+    def test_old_pickle_use_actual_source(self, tmp_path):
+        """旧 pickle 用 use_actual=True 走 q_actual 仍可重演。"""
+        path = tmp_path / "old.pkl"
+        _save_old_pickle(path, n_steps=5)
+        source = FileSource(path, use_actual=True)
         points = list(source)
         assert len(points) == 5
-        for i, (q, t) in enumerate(points):
-            np.testing.assert_allclose(q, u_history[i])
 
     def test_accepts_string_path(self, tmp_path):
         """FileSource 接受字符串路径（不仅限 Path）。"""

@@ -171,10 +171,13 @@ def fig3(npz_path: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz") -> None
 
 def fig4(npz_a: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz",
          npz_b: Path = DATA / "exp18_fig_assets/raw/b_hit_space_perturb.npz") -> None:
-    """Fig.4: (a) 关节角（期望 vs 实际）(b) TCP 速度 + 1.8 m/s 限位线。
+    """Fig.4: (a) 关节角轨迹 (b) TCP 速度 + 1.8 m/s 限位线。
 
-    注：NPZ 未记录力矩（collect_fig_assets 只存 q/tcp/ball），
-    按叙事改用 TCP 速度——安全限位叙事比力矩更贴合论文主线。
+    注 1：NPZ 未记录力矩（collect_fig_assets 只存 q/tcp/ball），按叙事改用
+    TCP 速度——安全限位叙事比力矩更贴合论文主线。
+    注 2：exp18 资产为**力矩模式**记录，其 q_desired 槽实为力矩（已由
+    TrajectoryRecorder 修复：力矩模式 q_desired 记空、控制量进 u），
+    因此本图只画 q_actual，不画「期望」曲线。
     """
     da, db = np.load(npz_a), np.load(npz_b)
     t_a = da["timestamps"] * 1000  # ms
@@ -186,20 +189,17 @@ def fig4(npz_a: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz",
 
     fig, axes = plt.subplots(2, 1, figsize=(7.16, 4.2), sharex=True,
                              gridspec_kw={"height_ratios": [1.2, 1]})
-    # (a) 关节角（注意单位：NPZ 中 q_actual 为弧度、q_desired 为度——
-    #     TrajectoryRecorder 混用单位，此处分别归一化到「度」后绘制）
+    # (a) 关节角（q_actual，弧度→度；力矩模式无位置指令故不画期望曲线）
     ax = axes[0]
     for j in range(6):
-        ax.plot(t_a, da["q_actual"][:, j] * 180 / np.pi, color=colors[j], lw=0.9,
+        ax.plot(t_a, da["q_actual"][:, j] * 180 / np.pi, color=colors[j], lw=1.0,
                 label=joint_names[j])
-        ax.plot(t_a, da["q_desired"][:, j], color=colors[j],
-                lw=0.4, ls="--", alpha=0.5)
     ax.axvline(hit_a, color="k", ls=":", lw=0.8)
     ax.text(hit_a + 5, ax.get_ylim()[1] * 0.9, "hit", fontsize=7)
     ax.set_ylabel("Joint angle (deg)")
     ax.legend(ncol=6, loc="upper center", bbox_to_anchor=(0.5, 1.28), fontsize=6,
               columnspacing=0.8)
-    ax.set_title("(a) Joint trajectories (solid: actual, dashed: desired)", fontsize=9)
+    ax.set_title("(a) Joint trajectories (executed)", fontsize=9)
     style_ax(ax)
     # (b) TCP 速度（两 run 对比 + 限位线）
     ax = axes[1]
@@ -260,8 +260,8 @@ def fig5() -> None:
 
     ax = axes[1]
     x = np.arange(2)
-    bars = ax.bar(x, lim_rates, yerr=lim_errs, capsize=3, width=0.5,
-                  color=[C["full"], C["none"]], alpha=0.85)
+    ax.bar(x, lim_rates, yerr=lim_errs, capsize=3, width=0.5,
+           color=[C["full"], C["none"]], alpha=0.85)
     ax.set_xticks(x, ["TCP 1.8", "TCP 1.0"])
     ax.set_ylabel("Hit rate (%)")
     ax.set_ylim(0, 105)

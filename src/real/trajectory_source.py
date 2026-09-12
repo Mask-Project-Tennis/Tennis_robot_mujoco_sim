@@ -59,6 +59,12 @@ class FileSource:
                 )
             self._q_desired = np.asarray(traj.q_actual, dtype=float)
         else:
+            if len(traj.q_desired) == 0:
+                raise ValueError(
+                    f"轨迹无位置指令（q_desired 为空：力矩模式记录，控制量在 u）。"
+                    f"真机重演需位置模式轨迹，或改用 use_actual=True 重演 q_actual。"
+                    f"文件: {path}"
+                )
             self._q_desired = np.asarray(traj.q_desired, dtype=float)
         self._timestamps = np.asarray(traj.timestamps, dtype=float)
 

@@ -59,6 +59,7 @@ class TrajectoryRecorder:
         init_q_left: np.ndarray,
         dt: float,
         metadata: dict | None = None,
+        is_position_mode: bool | None = None,
     ) -> None:
         """初始化记录器。
 
@@ -69,14 +70,19 @@ class TrajectoryRecorder:
             init_q_left: 左臂初始关节角度 (6,) 弧度。
             dt: 仿真步长（秒）。
             metadata: 额外元信息字典。
+            is_position_mode: 控制模式。None 时按 env.actuator_mode 推断
+                （1=位置）；无法推断时保守取 False（力矩）——未知模式下不把
+                控制量当作位置指令记录，避免 q_desired/u 语义混淆。
         """
         self._env = env
         self._init_q = np.asarray(init_q, dtype=float).copy()
         self._init_q_left = np.asarray(init_q_left, dtype=float).copy()
         self._dt = float(dt)
         self._metadata: dict = dict(metadata) if metadata else {}
+        self._is_position_mode = self._resolve_mode(is_position_mode)
 
         self._q_desired_list: list[np.ndarray] = []
+        self._u_list: list[np.ndarray] = []
         self._q_actual_list: list[np.ndarray] = []
         self._timestamp_list: list[float] = []
         self._tcp_pos_list: list[np.ndarray] = []
@@ -84,24 +90,55 @@ class TrajectoryRecorder:
 
         self._t0: float = time.perf_counter()
 
+    def _resolve_mode(self, explicit: bool | None) -> bool:
+        """确定控制模式：显式参数 → env.actuator_mode → metadata → 保守 False。
+
+        Args:
+            explicit: 构造时显式传入的模式（None=自动推断）。
+
+        Returns:
+            True=位置模式，False=力矩模式。
+        """
+        if explicit is not None:
+            return bool(explicit)
+        actuator_mode = getattr(self._env, "actuator_mode", None)
+        if actuator_mode is not None:
+            return int(actuator_mode) == 1
+        if "is_position_mode" in self._metadata:
+            return bool(self._metadata["is_position_mode"])
+        logger.warning(
+            "无法推断控制模式（env 无 actuator_mode），保守按力矩模式记录："
+            "q_desired 记为空，控制量写入 u"
+        )
+        return False
+
     def record(
         self,
-        q_desired: np.ndarray,
+        q_desired: np.ndarray | None,
         q_actual: np.ndarray,
         timestamp: float,
         tcp_pos: np.ndarray,
         ball_pos: np.ndarray | None = None,
+        u: np.ndarray | None = None,
     ) -> None:
         """记录一步数据。在 post_exec_hook 或重演循环中调用。
 
         Args:
-            q_desired: 目标关节角度 (6,)。
+            q_desired: 目标关节角度 (6,)。力矩模式传 None（无位置指令）。
             q_actual: 实际关节角度 (6,)。
             timestamp: 时间戳（秒）。
             tcp_pos: 末端位置 (3,)。
             ball_pos: 球位置 (3,)，None 时记录为零向量。
+            u: 安全滤波后的控制指令 (6,)（力矩模式=力矩；位置模式可省略）。
         """
-        self._q_desired_list.append(np.asarray(q_desired, dtype=float).copy())
+        if q_desired is None:
+            self._q_desired_list.append(np.zeros(6))
+        else:
+            self._q_desired_list.append(np.asarray(q_desired, dtype=float).copy())
+        if u is None:
+            self._u_list.append(np.zeros(6))
+        else:
+            self._u_list.append(np.asarray(u, dtype=float).copy())
         self._q_actual_list.append(np.asarray(q_actual, dtype=float).copy())
         self._timestamp_list.append(float(timestamp))
         self._tcp_pos_list.append(np.asarray(tcp_pos, dtype=float).copy())
@@ -120,11 +157,18 @@ class TrajectoryRecorder:
             包含所有已记录数据的 ReplayTrajectory。
         """
         n = len(self._q_desired_list)
-        q_desired = np.stack(self._q_desired_list) if n > 0 else np.zeros((0, 6))
         q_actual = np.stack(self._q_actual_list) if n > 0 else np.zeros((0, 6))
+        u = np.stack(self._u_list) if n > 0 else np.zeros((0, 6))
         timestamps = np.array(self._timestamp_list, dtype=float) if n > 0 else np.zeros(0)
         tcp_pos = np.stack(self._tcp_pos_list) if n > 0 else np.zeros((0, 3))
         ball_pos = np.stack(self._ball_pos_list) if n > 0 else np.zeros((0, 3))
+        # q_desired 仅在位置模式下有意义：力矩模式的 u_cmd 是力矩，不得冒充位置指令
+        if self._is_position_mode:
+            q_desired = np.stack(self._q_desired_list) if n > 0 else np.zeros((0, 6))
+        else:
+            q_desired = np.zeros((0, 6))
+        metadata = dict(self._metadata)
+        metadata["is_position_mode"] = self._is_position_mode
         return ReplayTrajectory(
             q_desired=q_desired,
             q_actual=q_actual,
@@ -135,19 +179,21 @@ class TrajectoryRecorder:
             init_q_left=self._init_q_left.copy(),
             dt=self._dt,
             hit_step=hit_step,
-            metadata=dict(self._metadata),
+            metadata=metadata,
+            u=u,
         )
 
     def make_hook(self) -> Callable[["StepContext"], None]:
         """生成 post_exec_hook 函数，注入 EpisodeRunner（仿真侧用）。
 
         hook 内部逻辑:
-            1. 读 ctx.u_cmd（安全滤波后的 q_desired）
-            2. 读 env.get_arm_state()[:6]（执行后的 q_actual）
-            3. 读 env.get_ee_pos()（TCP 位置）
-            4. 读 ctx.ball_pos（球位置，可能为 None）
-            5. 时间戳优先用仿真时间 step_count * dt，无 step_count 时回退墙钟
-            6. 调用 self.record(...)
+            1. 读 ctx.u_cmd（安全滤波后的控制指令；位置模式=弧度目标角，力矩模式=力矩）
+            2. 位置模式: q_desired = u_cmd；力矩模式: q_desired 不记录（None）
+            3. 读 env.get_arm_state()[:6]（执行后的 q_actual）
+            4. 读 env.get_ee_pos()（TCP 位置）
+            5. 读 ctx.ball_pos（球位置，可能为 None）
+            6. 时间戳优先用仿真时间 step_count * dt，无 step_count 时回退墙钟
+            7. 调用 self.record(...)
 
         Returns:
             post_exec_hook 回调函数。
@@ -155,7 +201,9 @@ class TrajectoryRecorder:
 
         def hook(ctx: "StepContext") -> None:
             """post_exec_hook: 记录当前步轨迹数据。"""
-            q_desired = ctx.u_cmd if ctx.u_cmd is not None else np.zeros(6)
+            u_cmd = ctx.u_cmd if ctx.u_cmd is not None else np.zeros(6)
+            # 位置模式下 u_cmd 即弧度目标角；力矩模式下它是力矩，不得写入 q_desired
+            q_desired = u_cmd if self._is_position_mode else None
             arm_state = self._env.get_arm_state()
             q_actual = arm_state[:6]
             tcp_pos = self._env.get_ee_pos()
@@ -167,7 +215,7 @@ class TrajectoryRecorder:
                 timestamp = ctx.step_count * self._dt
             else:
                 timestamp = time.perf_counter() - self._t0
-            self.record(q_desired, q_actual, timestamp, tcp_pos, ball_pos)
+            self.record(q_desired, q_actual, timestamp, tcp_pos, ball_pos, u=u_cmd)
 
         return hook
 
@@ -188,6 +236,7 @@ class TrajectoryRecorder:
         np.savez(
             path,
             q_desired=traj.q_desired,
+            u=traj.u if traj.u is not None else np.zeros((0, 6)),
             q_actual=traj.q_actual,
             timestamps=traj.timestamps,
             tcp_pos=traj.tcp_pos,
@@ -198,7 +247,7 @@ class TrajectoryRecorder:
             hit_step=traj.hit_step,
             metadata=metadata_json,
         )
-        logger.debug(f"轨迹已保存至 {path}（{len(traj.q_desired)} 步）")
+        logger.debug(f"轨迹已保存至 {path}（{len(traj.q_actual)} 步）")
 
     @staticmethod
     def load(path: Path) -> ReplayTrajectory:
@@ -267,6 +316,8 @@ class TrajectoryRecorder:
         """
         metadata_str = str(data["metadata"].item())
         metadata: dict = json.loads(metadata_str) if metadata_str else {}
+        # u 为新字段：旧 npz 无此项时置 None（向后兼容）
+        u = np.asarray(data["u"], dtype=float) if "u" in data.files else None
         return ReplayTrajectory(
             q_desired=np.asarray(data["q_desired"], dtype=float),
             q_actual=np.asarray(data["q_actual"], dtype=float),
@@ -278,6 +329,7 @@ class TrajectoryRecorder:
             dt=float(data["dt"]),
             hit_step=int(data["hit_step"]),
             metadata=metadata,
+            u=u,
         )
 
     @staticmethod
@@ -307,6 +359,9 @@ class TrajectoryRecorder:
         dt = 0.005
         timestamps = np.arange(n, dtype=float) * dt
         tcp_pos = np.zeros((n, 3))
+        # U_history 是控制指令（力矩模式下为力矩）：写入 u，q_desired 记为空
+        u = q_desired.copy()
+        q_desired = np.zeros((0, 6))
 
         ball_pos_history = old.get("ball_pos_history")
         if ball_pos_history is not None and len(ball_pos_history) > 0:
@@ -314,15 +369,15 @@ class TrajectoryRecorder:
         else:
             ball_pos = np.zeros((n, 3))
 
-        # 长度一致性校验：q_desired 长度 = len(U_history)，
+        # 长度一致性校验：控制指令长度 = len(U_history)，
         # q_actual 长度 = len(X_history) - 1。若不一致则截断到较短长度。
         if len(q_actual) != n:
             min_len = min(len(q_actual), n)
             logger.warning(
                 f"旧 pickle X_history/U_history 长度不匹配: "
-                f"q_desired={n}, q_actual={len(q_actual)}，截断至 {min_len}"
+                f"u={n}, q_actual={len(q_actual)}，截断至 {min_len}"
             )
-            q_desired = q_desired[:min_len]
+            u = u[:min_len]
             q_actual = q_actual[:min_len]
             timestamps = timestamps[:min_len]
             tcp_pos = tcp_pos[:min_len]
@@ -354,4 +409,5 @@ class TrajectoryRecorder:
             dt=dt,
             hit_step=int(old.get("hit_step", -1)),
             metadata=metadata,
+            u=u,
         )

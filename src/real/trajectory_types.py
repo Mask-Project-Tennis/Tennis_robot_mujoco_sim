@@ -16,7 +16,11 @@ class ReplayTrajectory:
     """重演轨迹数据结构（仿真侧记录 + 真机侧消费）。
 
     Attributes:
-        q_desired: (N, 6) 规划输出的目标关节角度（弧度）。
+        q_desired: (N, 6) **位置模式**下的目标关节角度（弧度）。力矩模式轨迹无位置
+            指令，此字段为空 (0, 6)——控制指令见 u。真机重演只接受 q_desired 非空
+            的位置模式轨迹。
+        u: (N, 6) 安全滤波后的控制指令：位置模式 = 弧度目标角（与 q_desired 相同）；
+            力矩模式 = 力矩（Nm，受 acturator ctrlrange 约束）。旧格式文件为 None。
         q_actual: (N, 6) 实际执行的关节角度（弧度）。
         timestamps: (N,) 每步时间戳（秒，相对 episode 起点）。
         tcp_pos: (N, 3) 末端执行器位置。
@@ -25,7 +29,7 @@ class ReplayTrajectory:
         init_q_left: (6,) 左臂初始关节角度。
         dt: 仿真步长（秒）。
         hit_step: 击球步索引（-1=未击中）。
-        metadata: 其他元信息（hit_type/pos_error/ball_speed 等）。
+        metadata: 其他元信息（hit_type/pos_error/ball_speed/is_position_mode 等）。
     """
 
     q_desired: np.ndarray
@@ -38,6 +42,7 @@ class ReplayTrajectory:
     dt: float
     hit_step: int
     metadata: dict = field(default_factory=dict)
+    u: np.ndarray | None = None
 
 
 @dataclass

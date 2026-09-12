@@ -721,6 +721,7 @@ def main() -> None:
                 "ball_speed": args.ball_speed,
                 "is_position_mode": is_position_mode,
             },
+            is_position_mode=is_position_mode,
         )
 
     step_timer = None
@@ -771,14 +772,16 @@ def main() -> None:
         sim_component.ball_pos_history.append(ball_pos_post.copy())
 
         # 记录 post-hit 步到 TrajectoryRecorder（hook 不覆盖此段）
+        # 位置模式: u_hold 即目标角，写入 q_desired；力矩模式: q_desired 传 None
         if recorder is not None:
             step_idx = total_horizon + follow_through_steps + i
             recorder.record(
-                q_desired=q_hold.copy(),
+                q_desired=q_hold.copy() if is_position_mode else None,
                 q_actual=x_current[:env.NQ].copy(),
                 timestamp=step_idx * dt,
                 tcp_pos=env.get_ee_pos().copy(),
                 ball_pos=ball_pos_post.copy(),
+                u=u_hold.copy(),
             )
 
     # ==========================================================================

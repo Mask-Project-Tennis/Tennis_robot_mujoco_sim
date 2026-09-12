@@ -276,6 +276,13 @@ def main() -> None:
 
     # 加载轨迹
     traj: ReplayTrajectory = TrajectoryRecorder.load(Path(args.trajectory))
+    if not args.use_actual and len(traj.q_desired) == 0:
+        # 力矩模式轨迹无位置指令（控制量在 u）：默认改查 q_actual
+        print(
+            "\n[提示] 该轨迹无位置指令（q_desired 为空：力矩模式记录，控制量见 u），"
+            "已自动改用 q_actual 检查。真机重演需位置模式轨迹。"
+        )
+        args.use_actual = True
     q_check = traj.q_actual if args.use_actual else traj.q_desired
     q_label = "q_actual" if args.use_actual else "q_desired"
     print(f"\n{'='*60}")

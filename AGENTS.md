@@ -53,8 +53,8 @@ RM-65B 12 自由度（双臂各 6），关节分配如下：
 | 11 | l_joint6 | qpos[11] |
 
 ### 球自由关节
-- qpos[12:19] (7维 quaternion + xyz)
-- qvel[12:18] (6维)
+- qpos[12:19]（7 维：位置 xyz 在前 [12:15]，四元数 wxyz 在后 [15:19] —— MuJoCo free joint 布局）
+- qvel[12:18]（6 维：线速度 [12:15] + 角速度 [15:18]）
 
 - MuJoCo 模型为 `src/robot/rm65_model.xml`，是 DOF 数和关节顺序的唯一事实来源
 - 球拍: 连杆沿法兰局部方向延伸，球拍面在连杆末端（racket_center site）
@@ -604,7 +604,10 @@ configs/
 - `safety_adapter.py` — `SafetyAdapter`：SafetyMonitor → SafetyComponent（安全检查）
 
 #### 轨迹重演模块（仿真→真机桥接）
-- `trajectory_types.py`：`ReplayTrajectory` 数据结构（q/v/u 完整轨迹，保存/加载/回放）
+- `trajectory_types.py`：`ReplayTrajectory` 数据结构（保存/加载/回放）。
+  **字段语义（2026-09-12 修正）**：`q_desired` 仅**位置模式**有值（弧度目标角）；
+  `u` 为安全滤波后的控制指令（位置模式=目标角，力矩模式=力矩 Nm）；
+  力矩模式轨迹 `q_desired` 为空 (0,6)，真机重演需位置模式轨迹或 `--use-actual`
 - `trajectory_source.py`：`TrajectorySource` Protocol（装饰器链产出 q_desired 序列）
 - `trajectory_sink.py`：命令消费 Sink 链（Composite + 责任链模式，下发/记录/过滤）
 - `trajectory_recorder.py`：`TrajectoryRecorder`（仿真侧记录规划/执行轨迹，真机侧可重演）

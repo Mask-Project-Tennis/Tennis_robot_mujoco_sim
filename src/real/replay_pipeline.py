@@ -287,7 +287,7 @@ def run_replay(cfg: ReplayConfig) -> ReplayResult:
     traj = TrajectoryRecorder.load(cfg.trajectory_path)
     logger.info(
         "轨迹已加载: %d 步, dt=%.4f, init_q=%s",
-        len(traj.q_desired), traj.dt, traj.init_q,
+        len(traj.q_actual), traj.dt, traj.init_q,
     )
 
     # 安全校验：只支持位置模式轨迹（真机仅支持角度控制）
@@ -303,29 +303,44 @@ def run_replay(cfg: ReplayConfig) -> ReplayResult:
                 reason="轨迹非位置模式，加 --force-mode 跳过",
             )
 
-    # --use-actual: 使用 q_actual 重演
+    # --use-actual 前置校验：q_actual 必须非空（先于通用空轨迹检查，报错更具体）
+    if cfg.use_actual and len(traj.q_actual) == 0:
+        logger.error(
+            "--use-actual 但轨迹 q_actual 为空（旧格式或未记录），拒绝重演。"
+            "去掉 --use-actual 用 q_desired，或重新生成轨迹。"
+        )
+        return ReplayResult(
+            steps=0,
+            status="empty_q_actual",
+            reason="--use-actual 但 q_actual 为空",
+        )
+
+    # 空轨迹提前返回（非失败，但无内容可重演）
+    if len(traj.q_actual) == 0:
+        logger.warning("轨迹为空（0 步），无内容可重演")
+        return ReplayResult(steps=0, status="empty", reason="轨迹 0 步")
+
+    # 位置指令非空校验：力矩模式轨迹的 q_desired 为空（控制量在 u），
+    # 真机只能重演位置指令——除非显式 --use-actual 用 q_actual 重演
+    if not cfg.use_actual and len(traj.q_desired) == 0:
+        logger.error(
+            "轨迹无位置指令（q_desired 为空：力矩模式记录，控制量见 u）。"
+            "真机重演需位置模式轨迹；或加 --use-actual 用 q_actual 重演。"
+        )
+        return ReplayResult(
+            steps=0,
+            status="empty_q_desired",
+            reason="力矩模式轨迹无位置指令，加 --use-actual 用 q_actual 重演",
+        )
+
+    # --use-actual: init_q 覆盖为 q_actual[0]（此时 q_actual 已确认非空）
     if cfg.use_actual:
-        if len(traj.q_actual) == 0:
-            logger.error(
-                "--use-actual 但轨迹 q_actual 为空（旧格式或未记录），拒绝重演。"
-                "去掉 --use-actual 用 q_desired，或重新生成轨迹。"
-            )
-            return ReplayResult(
-                steps=0,
-                status="empty_q_actual",
-                reason="--use-actual 但 q_actual 为空",
-            )
         old_init = np.degrees(traj.init_q).round(1)
         traj.init_q = traj.q_actual[0].copy()
         logger.info(
             "--use-actual: init_q 覆盖为 q_actual[0] (%s → %s)",
             old_init.tolist(), np.degrees(traj.init_q).round(1).tolist(),
         )
-
-    # 空轨迹提前返回（非失败，但无内容可重演）
-    if len(traj.q_desired) == 0:
-        logger.warning("轨迹为空（0 步），无内容可重演")
-        return ReplayResult(steps=0, status="empty", reason="轨迹 0 步")
 
     # I3: 关节限位预检（仅看硬超限；裕度告警留给 inspect_trajectory 工具）
     # 必须在 robot.connect / pre_motion 之前完成，避免对拒绝的轨迹做任何硬件动作
