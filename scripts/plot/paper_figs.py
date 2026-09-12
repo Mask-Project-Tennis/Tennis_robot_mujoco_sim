@@ -244,19 +244,20 @@ def fig3_alt_2d(npz_path: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz") 
               b[-1, 0] - off[0], b[0, 0] - off[0]]
     poly_y = [b[0, 1] + off[1], b[-1, 1] + off[1],
               b[-1, 1] - off[1], b[0, 1] - off[1]]
-    ax.fill(poly_x, poly_y, color=C["corridor"], alpha=0.2, lw=0,
+    # 绘制顺序 Ball→Corridor→Racket 与 (a) 一致；走廊填充压底不遮球线
+    ax.plot(b[:, 0], b[:, 1], color=C["ball"], lw=1.6, zorder=3,
+            label="Ball trajectory")
+    ax.fill(poly_x, poly_y, color=C["corridor"], alpha=0.2, lw=0, zorder=1,
             label="Corridor ($\\pm0.12$ m)")
     for sgn in (+1, -1):
         ax.plot([b[0, 0] + sgn * off[0], b[-1, 0] + sgn * off[0]],
                 [b[0, 1] + sgn * off[1], b[-1, 1] + sgn * off[1]],
-                color=C["corridor"], lw=0.9, ls="--")
-    ax.plot(b[:, 0], b[:, 1], color=C["ball"], lw=1.6, label="Ball trajectory")
-    ax.plot(r[:, 0], r[:, 1], color=C["racket"], lw=1.4, label="Racket center")
-    for sgn in (+1, -1):
-        ax.plot([b[0, 0] + sgn * off[0], b[-1, 0] + sgn * off[0]],
-                [b[0, 1] + sgn * off[1], b[-1, 1] + sgn * off[1]],
-                color=C["corridor"], lw=0.9, ls="--")
+                color=C["corridor"], lw=0.9, ls="--", zorder=2)
+    ax.plot(r[:, 0], r[:, 1], color=C["racket"], lw=1.4, zorder=2,
+            label="Racket center")
     ax.scatter(b[-1, 0], b[-1, 1], color="k", marker="*", s=40, zorder=5)
+    ax.annotate("hit", (b[-1, 0], b[-1, 1]), textcoords="offset points",
+                xytext=(6, 6), fontsize=8)
     ax.set_xlabel("X (m)")
     ax.set_ylabel("Y (m)")
     ax.set_title("(b) Top view: lateral corridor width", fontsize=8)
@@ -285,16 +286,16 @@ def fig4(npz_a: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz",
     names = ["J0", "J1", "J2", "J3", "J4", "J5"]
     colors = ["#0072B2", "#D55E00", "#009E73", "#56B4E9", "#E69F00", "#CC79A7"]
 
-    # 版式：(a) 通栏（6 条关节曲线需要宽度）；(b)(c) 并排 —— (c) 是命中邻域放大。
-    # 放大图早期版本是 (b) 的内嵌 inset，但 (b) 里没有足够大的空白矩形：
-    # 任意能放下的位置都会压住 1.8 m/s 限速线，且 inset 的刻度标签会落到主曲线上，
-    # 所以把它提升为独立面板，标签恢复满字号。
-    fig = plt.figure(figsize=(7.16, 2.90))
+    # 版式：(a)(b) 上下同宽共享时间轴（同列，竖直对照成立），(c) 占右列两行。
+    # 旧版 (a) 通栏而 (b) 只有 55% 宽：上下同宽的时间轴被拉成不同比例，
+    # 竖直对照失效；放大图早期是 (b) 的内嵌 inset，但 (b) 里没有足够大的
+    # 空白矩形（任意位置都会压住 1.8 m/s 限速线），故升为右列独立面板。
+    fig = plt.figure(figsize=(7.16, 2.72))
     # 显式给四周留白（不用 tight_layout）：默认 subplot 参数会让坐标轴只占 125%-90% 宽
     gs = fig.add_gridspec(2, 2, height_ratios=[1.15, 1], width_ratios=[1.55, 1],
                           left=0.055, right=0.995, top=0.88, bottom=0.155,
                           hspace=0.62, wspace=0.30)
-    ax = fig.add_subplot(gs[0, :])
+    ax = fig.add_subplot(gs[0, 0])
     # (a) 相对初始位形的关节偏差：曲线彼此分离，能读出各关节的挥拍行程
     q0 = da["q_actual"][0]
     for j in range(6):
@@ -329,7 +330,7 @@ def fig4(npz_a: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz",
     style_ax(ax)
 
     # (c) 命中邻域放大：两条曲线在此分离（整段画在一起时完全重合、读不出差异）
-    axi = fig.add_subplot(gs[1, 1])
+    axi = fig.add_subplot(gs[0:2, 1])
     m_a = (t_a > hit_a - 120) & (t_a < hit_a + 120)
     m_b = (t_b > hit_b - 120) & (t_b < hit_b + 120)
     axi.plot(t_a[m_a] - hit_a, v_a[m_a], color=C["full"], lw=1.0)
@@ -357,7 +358,7 @@ def fig5(stats: dict) -> None:
     rates = [e1[str(s)]["rate"] for s in speeds]
     errs = [ci_half(e1[str(s)]) for s in speeds]
 
-    fig, axes = plt.subplots(1, 2, figsize=(7.16, 1.95),
+    fig, axes = plt.subplots(1, 2, figsize=(7.16, 1.85),
                             gridspec_kw={"width_ratios": [1.7, 1]})
     ax = axes[0]
     ax.errorbar(speeds, rates, yerr=errs, color=C["full"], marker="o", capsize=2.5,
@@ -375,14 +376,15 @@ def fig5(stats: dict) -> None:
     vals = [e2[k]["rate"] for k in keys]
     errs = [ci_half(e2[k]) for k in keys]
     ns = [e2[k]["n_valid"] for k in keys]
+    # 中性灰阶：限速档不是方法档，不复用四档配色语义
     ax.bar(np.arange(2), vals, yerr=errs, capsize=3, width=0.5,
-           color=[C["full"], C["none"]], alpha=0.9)
+           color=["#6B6B6B", "#BFBFBF"], alpha=0.95)
     ax.set_xticks(np.arange(2), ["TCP 1.8", "TCP 1.0"])
     ax.set_ylabel("Active-hit rate (%)")
     ax.set_ylim(0, 105)
     for i in range(2):
         ax.text(i, vals[i] + errs[i] + 3, f"$n$={ns[i]}", ha="center", fontsize=7.5)
-    ax.set_title("(b) Real-robot TCP limit (7 m/s)", fontsize=9)
+    ax.set_title("(b) Robot-derived TCP constraint set (7 m/s)", fontsize=9)
     style_ax(ax)
 
     fig.tight_layout(pad=0.3)
@@ -393,106 +395,113 @@ def fig5(stats: dict) -> None:
 # fig6 机制归因（四面板，统计量全部读 JSON）
 # =============================================================================
 
-def fig6(stats: dict) -> None:
-    """Fig.6: (a) 标称四档 (b) 网格增益热图（对称 ±16 + 显著标记）
-    (c) 走廊增益 vs 球速 (d) 走廊增益 vs 扰动幅度。"""
-    e3, e4, e7 = stats["E3_nominal"], stats["E4_grid"], stats["E7_corners"]
-    fig, axes = plt.subplots(2, 2, figsize=(7.16, 3.05))
+def _holm_sig(pvals: dict[str, float]) -> dict[str, bool]:
+    """Holm 逐步法多重校正（α=0.05）：p 升序，阈值 α/(m-i)，首个不显著即停。"""
+    m = len(pvals)
+    sig: dict[str, bool] = {k: False for k in pvals}
+    for i, (k, p) in enumerate(sorted(pvals.items(), key=lambda kv: kv[1])):
+        if p <= 0.05 / (m - i):
+            sig[k] = True
+        else:
+            break
+    return sig
 
-    # (a) 标称四档（含 Wilson CI）
+
+def fig6(stats: dict) -> None:
+    """Fig.6: (a) 标称增益两系列 (b) 时间效应热图 softmin−pt (c) 走廊增量热图
+    full−softmin (d) 走廊独立价值 vs 扰动幅度（E7 高功效角点）。
+
+    chat2 第二轮改版：(b) 原为 full−pt（混合两机制），拆成两张热图后
+    (c) 全格 ≈0 = 「走廊被时间窗覆盖」的视觉证明；(b)(c) 共享 ±16 pp 色阶。
+    星号全部 Holm-adjusted（m=20）：raw p<0.05 有 11 格，Holm 后仅 2 格。
+    """
+    e3, e4, e7 = stats["E3_nominal"], stats["E4_grid"], stats["E7_corners"]
+    fig, axes = plt.subplots(2, 2, figsize=(7.16, 2.88))
+
+    def asym_err(v: dict) -> tuple[float, float]:
+        """配对 bootstrap CI 的上下误差条（以 diff_pp 为基准）。"""
+        lo, hi = v["ci95"]
+        return v["diff_pp"] - lo, hi - v["diff_pp"]
+
+    # (a) 标称增益两系列：不再画四档率柱（与 Table I 重复），改画对点目标的增益
     ax = axes[0][0]
     speeds = [7, 9, 12]
-    width = 0.19
-    for mi, mode in enumerate(MODE_ORDER):
-        vals, errs = [], []
+    width = 0.32
+    for mi, (key, lab, col) in enumerate([
+            ("softmin_only_vs_none", "softmin-only", C["softmin_only"]),
+            ("tube_only_vs_none", "corridor-only", C["tube_only"])]):
+        vals, errs = [], [[], []]
         for sp in speeds:
-            st = e3["cells"].get(f"{sp}|{mode}", {})
-            vals.append(st.get("rate", np.nan))
-            errs.append(ci_half(st) if st else 0.0)
-        ax.bar(np.arange(3) + (mi - 1.5) * width, vals, width, yerr=errs,
-               capsize=1.6, color=C[mode], label=MODE_LABELS[mode], alpha=0.9)
+            p = e3["paired"].get(f"{sp}|{key}", {})
+            vals.append(p.get("diff_pp", np.nan))
+            lo, hi = asym_err(p) if p else (np.nan, np.nan)
+            errs[0].append(lo)
+            errs[1].append(hi)
+        ax.bar(np.arange(3) + (mi - 0.5) * width, vals, width, yerr=errs,
+               capsize=1.6, color=col, label=lab, alpha=0.9)
+    ax.axhline(0, color="gray", lw=0.7, ls="--")
     ax.set_xticks(np.arange(3), [f"{s}" for s in speeds])
     ax.set_xlabel("Ball speed (m/s)")
-    ax.set_ylabel("Active-hit rate (%)")
-    ax.set_ylim(0, 128)
-    ax.set_title("(a) Nominal four-tier ablation", fontsize=9)
-    ax.legend(ncol=2, loc="upper left", framealpha=0.9, fontsize=7,
+    ax.set_ylabel("Gain vs. point target (pp)")
+    ax.set_title("(a) Nominal gains vs. point target", fontsize=9)
+    ax.legend(ncol=1, loc="upper left", framealpha=0.9, fontsize=7,
               borderpad=0.3, labelspacing=0.3, handlelength=1.2)
     style_ax(ax)
 
-    # (b) 扰动网格 full − point-target 增益热图
-    ax = axes[0][1]
+    # (b)(c) 拆分热图：共享 ±16 pp 色阶（(c) 全格 ≈0 即视觉证明）
     ts = [0, 10, 25, 50, 100]
     ss = [0.0, 0.05, 0.1, 0.2]
-    gain = np.full((len(ts), len(ss)), np.nan)
-    sig = np.zeros_like(gain, dtype=bool)
-    for i, t in enumerate(ts):
-        for j, s in enumerate(ss):
-            key = f"t{t}|s{s}"
-            f_rate = e4["per_cell"][f"{key}|full"]["rate"]
-            n_rate = e4["per_cell"][f"{key}|none"]["rate"]
-            gain[i, j] = f_rate - n_rate
-            sig[i, j] = e4["per_cell_paired"][f"{key}|full_vs_none"]["p_mcnemar"] < 0.05
-    vmax = float(np.nanmax(np.abs(gain)))
-    vmax = 16.0  # 对称上限：数据 ±16pp 以内，避免色阶被极值拉满
-    im = ax.imshow(gain, aspect="auto", cmap="RdBu_r", vmin=-vmax, vmax=vmax)
-    ax.set_xticks(range(len(ss)), [f"{s:.2f}" for s in ss])
-    ax.set_yticks(range(len(ts)), [f"{t}" for t in ts])
-    ax.set_xlabel("Space perturb. max (m)")
-    ax.set_ylabel("Time perturb. max (ms)")
-    for i in range(len(ts)):
-        for j in range(len(ss)):
-            ax.text(j, i, f"{gain[i, j]:+.0f}" + ("*" if sig[i, j] else ""),
-                    ha="center", va="center", fontsize=7.5, color="k")
-    ax.set_title("(b) full $-$ point-target gain (pp), 9 m/s", fontsize=9)
-    fig.colorbar(im, ax=ax, shrink=0.85, label="pp", pad=0.02)
+    heat_specs = [
+        (axes[0][1], "softmin_only_vs_none",
+         "(b) Temporal effect (pp), 9 m/s"),
+        (axes[1][0], "full_vs_softmin_only",
+         "(c) Incremental corridor effect (pp), 9 m/s"),
+    ]
+    for ax, cmp, title in heat_specs:
+        keys = [f"t{t}|s{s}" for t in ts for s in ss]
+        pvals = {k: e4["per_cell_paired"][f"{k}|{cmp}"]["p_mcnemar"] for k in keys}
+        sig = _holm_sig(pvals)
+        gain = np.full((len(ts), len(ss)), np.nan)
+        for i, t in enumerate(ts):
+            for j, s in enumerate(ss):
+                k = f"t{t}|s{s}"
+                gain[i, j] = e4["per_cell_paired"][f"{k}|{cmp}"]["diff_pp"]
+        im = ax.imshow(gain, aspect="auto", cmap="RdBu_r", vmin=-16, vmax=16)
+        ax.set_xticks(range(len(ss)), [f"{s:.2f}" for s in ss])
+        ax.set_yticks(range(len(ts)), [f"{t}" for t in ts])
+        ax.set_xlabel("Space perturb. max (m)")
+        ax.set_ylabel("Time perturb. max (ms)")
+        for i in range(len(ts)):
+            for j in range(len(ss)):
+                k = f"t{ts[i]}|s{ss[j]}"
+                ax.text(j, i, f"{gain[i, j]:+.0f}{'*' if sig[k] else ''}",
+                        ha="center", va="center", fontsize=7.5, color="k")
+        ax.set_title(title, fontsize=9)
+        fig.colorbar(im, ax=ax, shrink=0.85, label="pp", pad=0.02)
 
-    # (c) 走廊增益 vs 球速（nominal 三点 + 空间角点两点，误差条为配对 bootstrap CI）
-    ax = axes[1][0]
-    nom_g, nom_e = [], []
-    for sp in speeds:
-        p = e3["paired"].get(f"{sp}|tube_only_vs_none", {})
-        nom_g.append(p.get("diff_pp", np.nan))
-        nom_e.append(ci_half(p) if p.get("n_paired") else 0.0)
-    ax.errorbar(speeds, nom_g, yerr=nom_e, marker="o", capsize=2.5, lw=1.0,
-                color=C["tube_only"], label="nominal ($t{=}0$, $s{=}0$)")
-    c_sp, c_g, c_e = [], [], []
-    for sp in (9, 12):
-        p = e7["paired"].get(f"{sp}|s0.2|t0|tube_only_vs_none", {})
-        c_sp.append(sp)
-        c_g.append(p.get("diff_pp", np.nan))
-        c_e.append(ci_half(p) if p.get("n_paired") else 0.0)
-    ax.errorbar(c_sp, c_g, yerr=c_e, marker="s", capsize=2.5, lw=0, ls="none",
-                color=C["corridor"], label="spatial corner ($t{=}0$, $s{=}0.2$ m)")
-    ax.axhline(0, color="gray", lw=0.7, ls="--")
-    ax.set_xlabel("Ball speed (m/s)")
-    ax.set_ylabel("Corridor gain vs point target (pp)")
-    ax.set_xticks(speeds)
-    ax.set_title("(c) Corridor value vs. ball speed", fontsize=9)
-    ax.legend(loc="upper left", framealpha=0.9, fontsize=7)
-    style_ax(ax)
-
-    # (d) 走廊增益 vs 扰动幅度（9 m/s, t=0）
+    # (d) 走廊独立价值 vs 扰动幅度（E7 高功效角点，9 m/s, t=0；不连线避免趋势暗示）
     ax = axes[1][1]
-    s_list, g_list, e_list, p_list = [], [], [], []
+    s_list, g_list, e_list, p_list, n_list = [], [], [], [], []
     for s in (0.2, 0.3, 0.4):
         p = e7["paired"].get(f"9|s{s}|t0|tube_only_vs_none", {})
         if p.get("n_paired"):
             s_list.append(s)
             g_list.append(p["diff_pp"])
-            e_list.append(ci_half(p))
+            e_list.append(asym_err(p))
             p_list.append(p["p_mcnemar"])
-    ax.errorbar(s_list, g_list, yerr=e_list, marker="o", capsize=2.5, lw=1.0,
-                color=C["tube_only"])
+            n_list.append(p["n_paired"])
+    for s, g, (lo, hi), pv in zip(s_list, g_list, e_list, p_list):
+        ax.errorbar([s], [g], yerr=[[lo], [hi]], marker="o", capsize=2.5,
+                    lw=0, color=C["tube_only"])
+        ax.text(s, g + hi + 0.5, f"$p$${fmt_p(pv)}$", fontsize=7, ha="center")
     ax.axhline(0, color="gray", lw=0.7, ls="--")
-    for s, g, e, p in zip(s_list, g_list, e_list, p_list):
-        ax.text(s, g + e + 0.55, f"$p$${fmt_p(p)}$", fontsize=7,
-                ha="right" if s == max(s_list) else ("left" if s == min(s_list) else "center"))
-    ax.set_ylim(-1.5, 8.0)
+    ax.set_ylim(-2.0, 9.0)
     ax.set_xlim(0.17, 0.44)
     ax.set_xlabel("Space perturb. max $s$ (m)")
-    ax.set_ylabel("Corridor gain vs point target (pp)")
-    ax.set_title("(d) Corridor value vs. perturbation size", fontsize=9)
+    ax.set_ylabel("Corridor gain vs. point target (pp)")
+    ax.set_title("(d) Corridor-only value, 9 m/s (E7)", fontsize=9)
+    ax.text(0.98, 0.04, "high-power corners,\n$n$=1481--2970", fontsize=6.5,
+            transform=ax.transAxes, ha="right", va="bottom", color="dimgray")
     style_ax(ax)
 
     fig.tight_layout(pad=0.3)
@@ -508,52 +517,58 @@ def fig7(stats: dict, timing_path: Path = DATA / "exp18_fig_assets/timing.json")
     t = json.loads(Path(timing_path).read_text(encoding="utf-8"))
     sync, async_ = t["sync"], t["async"]
 
-    fig, axes = plt.subplots(1, 3, figsize=(7.16, 2.05),
-                            gridspec_kw={"width_ratios": [1.45, 1, 1]})
+    fig, axes = plt.subplots(1, 2, figsize=(7.16, 1.90),
+                            gridspec_kw={"width_ratios": [1.3, 1.7]})
 
     # (a) 数值表：只有 3 个点，表格比 log 坐标轴更紧凑也不误导
     ax = axes[0]
     ax.axis("off")
-    rows = [("First plan (30 it.)", sync["by_iters"]["30"]["mean_ms"]),
-            ("Steady far (0 it.)", sync["by_iters"]["0"]["mean_ms"]),
-            ("Steady near (5 it.)", sync["by_iters"]["5"]["mean_ms"]),
-            ("Steady-state, all", 4.0),          # median
-            ("Steady-state p95", 33.0),
-            ("Steady-state max", 41.0)]
+    # 统计量显式标注（chat2 意见：919.8 与 4.0 分别来自 mean/median，须写清）。
+    # 表值固定为受控空闲机实测的审计值（与正文一致）；(b) 面板 deciles 取自
+    # 重录版 timing.json（分布形状对机器负载稳健，绝对值会随负载漂移）。
+    rows = [("First plan (30 it.), mean", 919.8),
+            ("Steady far (0 it.), mean", 3.4),
+            ("Steady near (5 it.), mean", 24.8),
+            ("Steady-state, median", 4.0),
+            ("Steady-state, p95", 33.0),
+            ("Steady-state, max", 41.0)]
     # 标题已含 (a) 与单位，不再另起一行 "Replanning time (ms)"（与标题重复）
     ax.text(0.07, 1.06, "(a) Replanning time (ms)", fontsize=9, va="top",
             transform=ax.transAxes)
     ax.plot([0.07, 0.95], [0.96, 0.96], transform=ax.transAxes, lw=0.7, color="k")
     for i, (name, val) in enumerate(rows):
-        y = 0.85 - i * 0.148
+        y = 0.88 - i * 0.135
         ax.text(0.07, y, name, fontsize=7.5, va="center", transform=ax.transAxes)
         ax.text(0.93, y, f"{val:.1f}", fontsize=7.5, va="center", ha="right",
                 transform=ax.transAxes, color=C["none"] if val > 100 else "k")
-    ax.text(0.07, -0.02, "budget: 150 ms/replan", fontsize=7, va="top",
+    ax.text(0.07, 0.07, "synchronous mode, 30 episodes", fontsize=6.8, va="center",
+            transform=ax.transAxes, color="dimgray")
+    ax.text(0.07, -0.05, "budget: 150 ms/replan", fontsize=7, va="top",
             transform=ax.transAxes, color="dimgray")
 
-    # (b) 超周期步占比
+    # (b) 逐步主循环延迟 ECDF（sync vs async）：一张图替代旧 (b)(c) 两根柱
+    # 数据 = timing.json stall.deciles_pooled（各 episode 十分位点池化）
     ax = axes[1]
-    over = [sync["stall"]["over_ratio"] * 100, async_["stall"]["over_ratio"] * 100]
-    ax.bar(["Sync", "Async"], over, color=[C["none"], C["tube_only"]], alpha=0.9,
-           width=0.55)
-    for i, v in enumerate(over):
-        ax.text(i, v + 0.03, f"{v:.2f}%", ha="center", fontsize=7.5)
-    ax.set_ylabel("Steps beyond 5 ms (%)")
-    ax.set_ylim(0, 1.25)
-    ax.set_title("(b) Stall frequency", fontsize=9)
-    style_ax(ax)
-
-    # (c) 最大单步延迟
-    ax = axes[2]
-    pmax = [sync["stall"]["max_ms_max"], async_["stall"]["max_ms_max"]]
-    ax.bar(["Sync", "Async"], pmax, color=[C["none"], C["tube_only"]], alpha=0.9,
-           width=0.55)
-    for i, v in enumerate(pmax):
-        ax.text(i, v + 1.0, f"{v:.1f} ms", ha="center", fontsize=7.5)
-    ax.set_ylabel("Max per-step latency (ms)")
-    ax.set_ylim(0, 52)
-    ax.set_title("(c) Worst-case delay", fontsize=9)
+    for tag, col, ls in (("sync", "#4D4D4D", "-"), ("async", "#9E9E9E", "--")):
+        pool = t[tag]["stall"].get("deciles_pooled", [])
+        if not pool:
+            continue
+        n = len(pool)
+        ax.step(pool, np.arange(1, n + 1) / n, where="post", color=col, ls=ls,
+                lw=1.1, label=f"{tag} (n={n})")
+    ax.axvline(5.0, color="k", ls=":", lw=0.9)
+    ax.text(5.0, 0.97, "control period\n5 ms", fontsize=6.8, ha="left",
+            va="top", transform=ax.get_xaxis_transform(), color="dimgray")
+    ax.axvline(150.0, color="k", ls=":", lw=0.9)
+    ax.text(150.0, 0.97, "replan budget\n150 ms", fontsize=6.8, ha="left",
+            va="top", transform=ax.get_xaxis_transform(), color="dimgray")
+    ax.set_xscale("log")
+    ax.set_xlim(0.05, 400)
+    ax.set_ylim(0, 1.02)
+    ax.set_xlabel("Per-step main-loop latency (ms)")
+    ax.set_ylabel("Cumulative fraction")
+    ax.set_title("(b) Latency distribution", fontsize=9)
+    ax.legend(loc="upper left", framealpha=0.9, fontsize=7)
     style_ax(ax)
 
     fig.tight_layout(pad=0.3)
@@ -582,7 +597,7 @@ def fig8() -> None:
         ("c_miss_combined_perturb", "Miss", C["none"]),
         ("d_hit_noise_kf", "Noise+filter hit", C["softmin_only"]),
     ]
-    fig, axes = plt.subplots(1, 3, figsize=(7.16, 1.95))
+    fig, axes = plt.subplots(1, 3, figsize=(7.16, 1.85))
     series: list[tuple[np.ndarray, np.ndarray]] = []
     for i, (name, label, col) in enumerate(specs):
         d = np.load(DATA / "exp18_fig_assets/raw" / f"{name}.npz", allow_pickle=True)

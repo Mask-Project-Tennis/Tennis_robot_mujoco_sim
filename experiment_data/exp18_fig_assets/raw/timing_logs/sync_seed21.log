@@ -3,8 +3,8 @@
   网球不在工作空间内，机械臂不击打！
 ========================================
 
-2026-09-11 14:19:07,681 [INFO] __main__: [ablation] mode=full
-2026-09-11 14:19:07,687 [INFO] __main__: serve-box auto params: horizon=120, iter=10, first_plan_iters=30, total_horizon=250, replan_interval=20, near_plan_iters=5
-2026-09-11 14:19:07,712 [INFO] __main__: 关节限位: 仿真默认(default.yaml), TCP=1.8 m/s, terminal_exempt=20
-2026-09-11 14:19:07,712 [INFO] __main__: 球拍初始位置: [-0.24136342  0.63027058  1.45576659]
-2026-09-11 14:19:07,713 [DEBUG] src.tennis.ball: serve_box bounce (attempt=0): p0_z=1.24, vz0=-2.7, spd=9.0, t1=0.289, t2=0.596, z_err=0.04
+2026-09-13 00:12:01,524 [INFO] __main__: [ablation] mode=full
+2026-09-13 00:12:01,530 [INFO] __main__: serve-box auto params: horizon=120, iter=10, first_plan_iters=30, total_horizon=250, replan_interval=20, near_plan_iters=5
+2026-09-13 00:12:01,554 [INFO] __main__: 关节限位: 仿真默认(default.yaml), TCP=1.8 m/s, terminal_exempt=20
+2026-09-13 00:12:01,555 [INFO] __main__: 球拍初始位置: [-0.24136342  0.63027058  1.45576659]
+2026-09-13 00:12:01,556 [DEBUG] src.tennis.ball: serve_box bounce (attempt=0): p0_z=1.24, vz0=-2.7, spd=9.0, t1=0.289, t2=0.596, z_err=0.04

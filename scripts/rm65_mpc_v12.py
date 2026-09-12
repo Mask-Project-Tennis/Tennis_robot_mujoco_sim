@@ -98,10 +98,12 @@ class _StepTimer:
             return ordered[min(len(ordered) - 1, int(q * len(ordered)))]
 
         over = sum(1 for v in ordered if v > period_ms)
+        # deciles 向量：供实时图 ECDF（各 episode 的每步主循环耗时分位点池化）
+        deciles = ",".join(f"{_pct(q):.2f}" for q in np.linspace(0.1, 1.0, 10))
         return (f"__STEP_TIMING__: n={len(ordered)} p50={_pct(0.50):.2f} "
                 f"p95={_pct(0.95):.2f} p99={_pct(0.99):.2f} "
                 f"max={ordered[-1]:.2f} n_over_period={over} "
-                f"period_ms={period_ms:.2f}")
+                f"period_ms={period_ms:.2f} deciles={deciles}")
 
 
 # ==============================================================================
@@ -154,6 +156,8 @@ def main() -> None:
     parser.add_argument("--near-iters", type=int, default=None, help="near阶段 iLQR 迭代次数")
     parser.add_argument("--window-ms", type=float, default=50.0, help="Tube 候选窗口半宽 (ms)")
     parser.add_argument("--softmin-beta", type=float, default=5.0, help="终端 softmin 锐度 β")
+    parser.add_argument("--corridor-radius", type=float, default=0.12,
+                        help="走廊半宽 (m)；标称 = 拍半径 0.12 m，敏感性实验可改")
     parser.add_argument("--ablation", choices=["full", "tube_only", "softmin_only", "none"],
                         default=None, help="消融模式")
     parser.add_argument("--no-softmin", action="store_true", help="[已废弃] 禁用 softmin")
@@ -353,6 +357,7 @@ def main() -> None:
         Q_n_tube=0.0,
         tube_cost_ratio=1.0,
         softmin_beta=args.softmin_beta,
+        corridor_radius=args.corridor_radius,
         use_softmin_terminal=ablation_mode in ("full", "softmin_only"),
     )
 

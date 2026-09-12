@@ -1,0 +1,5 @@
+# 由 batch_runner 自动生成
+# experiment: exp18_sensitivity
+# grid_size: 2600
+# report_ref: chat2 第二轮审稿补跑: β/窗口/半径单因素敏感性（标称 β5/w50/r0.12 已由 E3 覆盖，不复跑）。9 m/s × 200 seeds，配对基准 none 跑一次：full×6 + softmin_only×{β1,β10,w25,w75} + tube_only×{r0.08,r0.16} + none×1 = 13 组合 × 200 = 2600 runs
+# config_ids: ['ablationfull__ballspeed9__corridorradius0.08__noplot__servebox', 'ablationfull__ballspeed9__corridorradius0.16__noplot__servebox', 'ablationfull__ballspeed9__noplot__servebox__softminbeta1.0', 'ablationfull__ballspeed9__noplot__servebox__softminbeta10.0', 'ablationfull__ballspeed9__noplot__servebox__windowms25.0', 'ablationfull__ballspeed9__noplot__servebox__windowms75.0', 'ablationnone__ballspeed9__noplot__servebox', 'ablationsoftmin_only__ballspeed9__noplot__servebox__softminbeta1.0', 'ablationsoftmin_only__ballspeed9__noplot__servebox__softminbeta10.0', 'ablationsoftmin_only__ballspeed9__noplot__servebox__windowms25.0', 'ablationsoftmin_only__ballspeed9__noplot__servebox__windowms75.0', 'ablationtube_only__ballspeed9__corridorradius0.08__noplot__servebox', 'ablationtube_only__ballspeed9__corridorradius0.16__noplot__servebox']

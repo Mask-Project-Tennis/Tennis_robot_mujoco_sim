@@ -174,6 +174,36 @@ def _perturb_cells(speed: int, cells: list[tuple[int, float]],
     return grid
 
 
+def _sensitivity_grid() -> list[dict[str, Any]]:
+    """exp18_sensitivity: β/窗口/半径单因素敏感性（chat2 审稿补跑）。
+
+    参数只在起作用的档位上扫（paired 对照 none 只跑一次，seed 对齐可配对）：
+    - softmin 参数（β、窗口）→ softmin_only
+    - 走廊半径 → tube_only
+    - full × 全部 6 个非标称组合（全系统对参数选择的鲁棒性）
+    """
+    combos: list[tuple[dict[str, Any], tuple[str, ...]]] = [
+        ({"--softmin-beta": 1.0}, ("full", "softmin_only")),
+        ({"--softmin-beta": 10.0}, ("full", "softmin_only")),
+        ({"--window-ms": 25.0}, ("full", "softmin_only")),
+        ({"--window-ms": 75.0}, ("full", "softmin_only")),
+        ({"--corridor-radius": 0.08}, ("full", "tube_only")),
+        ({"--corridor-radius": 0.16}, ("full", "tube_only")),
+    ]
+    grid: list[dict[str, Any]] = []
+    for combo, tiers in combos:
+        for tier in tiers:
+            base = {"--serve-box": None, "--ball-speed": 9, "--no-plot": None,
+                    "--ablation": tier, **combo}
+            grid.extend({**base, "--seed": s}
+                        for s in range(1, SEEDS_P1 + 1))
+    # 配对基准：none 档跑一次（标称参数，seed 与上方对齐）
+    base_none = {"--serve-box": None, "--ball-speed": 9, "--no-plot": None,
+                 "--ablation": "none"}
+    grid.extend({**base_none, "--seed": s} for s in range(1, SEEDS_P1 + 1))
+    return grid
+
+
 EXPERIMENTS: dict[str, ExperimentSpec] = {
     "exp13_arch": ExperimentSpec(
         name="exp13_arch",
@@ -312,6 +342,17 @@ EXPERIMENTS: dict[str, ExperimentSpec] = {
             for mode in MODES_MECHANISM
             for s in range(1, 401)
         ],
+    ),
+    "exp18_sensitivity": ExperimentSpec(
+        name="exp18_sensitivity",
+        script=V12,
+        report_ref="chat2 第二轮审稿补跑: β/窗口/半径单因素敏感性（标称 β5/w50/r0.12 "
+                   "已由 E3 覆盖，不复跑）。9 m/s × 200 seeds，配对基准 none 跑一次："
+                   "full×6 + softmin_only×{β1,β10,w25,w75} + tube_only×{r0.08,r0.16} "
+                   "+ none×1 = 13 组合 × 200 = 2600 runs",
+        grid=(
+            _sensitivity_grid()
+        ),
     ),
 }
 

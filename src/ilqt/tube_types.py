@@ -45,6 +45,10 @@ class TubeConfig:
     True: 终端代价在多个候选位置上 softmin，容忍时间不确定性。
     False: 仅在 best_k 单点终端代价（原始行为）。"""
 
+    corridor_radius: float = 0.12
+    """走廊半宽（米）。标称值 = 拍半径 0.12 m；仅敏感性实验改动，
+    改动后走廊不再对应物理拍半径，仅作为代价参数含义成立。"""
+
 
 @dataclass
 class BallTrajectoryTube:

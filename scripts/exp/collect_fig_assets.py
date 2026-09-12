@@ -188,8 +188,15 @@ def collect_series(episodes: int, async_mode: bool, tag: str) -> dict[str, Any]:
         m_step = STEP_RE.search(text)
         if m_step:
             kv = dict(re.findall(r"(\S+)=(\S+)", m_step.group(1)))
-            stall_rows.append({k: float(v) for k, v in kv.items()
-                               if k != "n"} | {"n": float(kv.get("n", 0))})
+            row: dict[str, Any] = {}
+            for k, v in kv.items():
+                if k == "n":
+                    row[k] = float(v)
+                elif k == "deciles":
+                    row["deciles"] = [float(x) for x in v.split(",")]
+                else:
+                    row[k] = float(v)
+            stall_rows.append(row)
         per_episode.append({
             "seed": seed, "n_replans": len(hits), "wall_s": round(wall, 2),
             "mean_ms": (round(statistics.fmean([h["t_ms"] for h in hits]), 1)
@@ -210,6 +217,10 @@ def collect_series(episodes: int, async_mode: bool, tag: str) -> dict[str, Any]:
     total_over = int(sum(r.get("n_over_period", 0) for r in stall_rows))
     stall: dict[str, Any] = {}
     if stall_rows:
+        # 各 episode 的逐步耗时分位点池化 → 近似全样本 ECDF（实时图 (b) 面板数据源）
+        pooled: list[float] = []
+        for r in stall_rows:
+            pooled.extend(r.get("deciles", []))
         stall = {
             "episodes": len(stall_rows),
             "total_steps": total_steps,
@@ -221,6 +232,7 @@ def collect_series(episodes: int, async_mode: bool, tag: str) -> dict[str, Any]:
                 [r["p95"] for r in stall_rows]), 2),
             "p99_ms_max": max(r["p99"] for r in stall_rows),
             "max_ms_max": max(r["max"] for r in stall_rows),
+            "deciles_pooled": sorted(pooled),
         }
     return {
         "episodes": episodes,

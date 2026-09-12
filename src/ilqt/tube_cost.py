@@ -83,6 +83,8 @@ class TubeHittingCostWrapper:
         self._Q_p_tube = config.Q_p_tube
         self._Q_v_tube = config.Q_v_tube
         self._Q_n_tube = config.Q_n_tube
+        # 走廊半宽：标称 = 拍半径 RACKET_RADIUS，敏感性实验可经 TubeConfig 覆盖
+        self._r_racket: float = config.corridor_radius
 
         # P0-2: softmin 参数
         self._use_softmin = config.use_softmin_terminal
@@ -402,7 +404,8 @@ class TubeHittingCostWrapper:
 
         v8 重新设计：轻量级走廊引导，仅保留 hinge loss 位置偏离代价。
         不再惩罚速度/法向量（这些由终端代价处理）。
-        走廊半宽 = RACKET_RADIUS，走廊内零代价，走廊外温和二次惩罚。
+        走廊半宽 = 拍半径 0.12 m（标称，可经 config.corridor_radius 覆盖），
+        走廊内零代价，走廊外温和二次惩罚。
         """
         self.env.set_arm_state(x)
         p_ee = self.env.get_ee_pos()
@@ -410,7 +413,7 @@ class TubeHittingCostWrapper:
         dp = p_ee - self._p_ball_ref
         dp_perp = self._P_perp @ dp
         perp_dist = float(np.linalg.norm(dp_perp))
-        margin = perp_dist - self.RACKET_RADIUS
+        margin = perp_dist - self._r_racket
         pos_err = max(0.0, margin)
         pos_cost = self._Q_p_tube * pos_err**2
 
@@ -440,7 +443,7 @@ class TubeHittingCostWrapper:
         dp = p_ee - self._p_ball_ref
         dp_perp = self._P_perp @ dp
         perp_dist = float(np.linalg.norm(dp_perp))
-        margin = perp_dist - self.RACKET_RADIUS
+        margin = perp_dist - self._r_racket
 
         if margin > 0.0 and perp_dist > 1e-8:
             dp_perp_hat = dp_perp / perp_dist
