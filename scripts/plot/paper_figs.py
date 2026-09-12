@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import argparse
 import json
-from collections import defaultdict
 from pathlib import Path
 
 import matplotlib
@@ -140,17 +139,20 @@ def _corridor_band(ball: np.ndarray, hit: int, r_half: float = 0.12):
 def fig3_3d(npz_path: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz") -> None:
     """Fig.3（正文版）: 3D 球轨迹 + 球拍轨迹 + 连续走廊带 + 击球点。
 
-    修正旧版问题：(1) 不再被 tight bbox 裁小后放大 3 倍；
-    (2) 走廊画成沿轨迹的连续半透明带（半宽 = 拍半径），而非孤立圆环；
-    (3) 只画击球前的进场段，避免弹跳段抢占视觉。
+    画布按**单栏**尺寸出图（3.40 in 宽，对应 \\columnwidth 3.5 in）：
+    Axes3D 的投影盒受图高限制，若按 7.16 in 通栏铺开，墨迹只占画布 38%，
+    两侧留出约 4.4 in 空白 —— 这正是旧版「页面正中一小块、大量浪费」的根因。
     """
     d = np.load(npz_path)
     ball, tcp = d["ball_pos"], d["tcp_pos"]
     hit = int(d["hit_step"])
     dt = float(d["dt"])
 
-    fig = plt.figure(figsize=(7.16, 2.55))
-    ax = fig.add_axes([0.02, 0.02, 0.82, 0.92], projection="3d")
+    # 画布 3.40x3.15 in：上方 2.66 in 给 3D 投影盒（盒宽高比 4:3，铺满画布宽度），
+    # 下方 0.49 in 留给两栏图例，避免图例压住轨迹
+    fig = plt.figure(figsize=(3.40, 3.15))
+    # 投影盒留出四周余量：Axes3D 的 z 轴标签会伸出盒外，若铺满画布会被切到
+    ax = fig.add_axes([0.055, 0.18, 0.87, 0.795], projection="3d")
     k0 = max(0, hit - 60)
     ax.plot(ball[k0:hit + 3, 0], ball[k0:hit + 3, 1], ball[k0:hit + 3, 2],
             color=C["ball"], lw=1.6, label="Ball trajectory")
@@ -177,27 +179,34 @@ def fig3_3d(npz_path: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz") -> N
     ax.scatter(*ball[hit], color="k", s=32, marker="*", zorder=5,
                label=f"Hit ($t={hit * dt:.1f}$ s)")
 
-    ax.set_xlabel("X (m)", labelpad=-2)
-    ax.set_ylabel("Y (m)", labelpad=-2)
-    ax.set_zlabel("Z (m)", labelpad=-2)
+    ax.set_xlabel("X (m)", labelpad=-1)
+    ax.set_ylabel("Y (m)", labelpad=-1)
+    ax.set_zlabel("Z (m)", labelpad=-1)
     ax.view_init(elev=22, azim=-58)
-    ax.tick_params(labelsize=7.5, pad=0.5)
-    ax.legend(loc="upper left", bbox_to_anchor=(0.0, 1.0), fontsize=7,
-              framealpha=0.9, borderpad=0.3, labelspacing=0.3)
+    ax.tick_params(labelsize=6.5, pad=0.3)
+    # 图例移到画布底部两栏：单栏宽度下若放在盒内会压住球轨迹
+    handles, labels = ax.get_legend_handles_labels()
+    fig.legend(handles, labels, loc="lower center", bbox_to_anchor=(0.5, 0.0),
+               ncol=2, fontsize=6.2, frameon=False, columnspacing=0.9,
+               handlelength=1.5, handletextpad=0.4, labelspacing=0.25)
     fig.savefig(OUT / "fig3_tube_corridor.pdf", dpi=300)
     plt.close(fig)
     print("已保存 paper/figures/fig3_tube_corridor.pdf （3D 正文版）")
 
 
 def fig3_alt_2d(npz_path: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz") -> None:
-    """Fig.3（备选版）: 2D 双面板 —— (a) 侧视 (b) 俯视，走廊画成半透明带。"""
+    """Fig.3（备选版）: 2D 双面板 —— (a) 侧视 (b) 俯视，走廊画成半透明带。
+
+    与技术选型无关，只与版式有关：画布宽度与 3D 正文版一致（3.40 in = 单栏），
+    面板改为上下堆叠，这样两版可直接互换、对比时只差「呈现方式」这一个变量。
+    """
     d = np.load(npz_path)
     ball, tcp = d["ball_pos"], d["tcp_pos"]
     hit = int(d["hit_step"])
     k0 = max(0, hit - 60)
     b, r = ball[k0:hit + 3], tcp[k0:hit + 8]
 
-    fig, axes = plt.subplots(1, 2, figsize=(7.16, 2.15))
+    fig, axes = plt.subplots(2, 1, figsize=(3.40, 3.50))
     r_half = 0.12
 
     # (a) 侧视：Y–Z 平面（球的前进方向 vs 高度）
@@ -215,8 +224,10 @@ def fig3_alt_2d(npz_path: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz") 
                 xytext=(6, 6), fontsize=8)
     ax.set_xlabel("Y (m)")
     ax.set_ylabel("Z (m)")
-    ax.set_title("(a) Side view: corridor along the ball line", fontsize=9)
-    ax.legend(loc="upper left", framealpha=0.9)
+    ax.set_title("(a) Side view: corridor along the ball line", fontsize=8)
+    # 图例放左下：侧视图的走廊带占据上半部，左上角会压住球轨迹
+    ax.legend(loc="lower left", framealpha=0.9, fontsize=6.2,
+              handlelength=1.5, borderpad=0.3, labelspacing=0.25)
     style_ax(ax)
 
     # (b) 俯视：X–Y 平面（横向走廊宽度）
@@ -245,8 +256,9 @@ def fig3_alt_2d(npz_path: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz") 
     ax.scatter(b[-1, 0], b[-1, 1], color="k", marker="*", s=40, zorder=5)
     ax.set_xlabel("X (m)")
     ax.set_ylabel("Y (m)")
-    ax.set_title("(b) Top view: lateral corridor width", fontsize=9)
-    ax.legend(loc="lower right", framealpha=0.9)
+    ax.set_title("(b) Top view: lateral corridor width", fontsize=8)
+    ax.legend(loc="lower right", framealpha=0.9, fontsize=6.2,
+              handlelength=1.5, borderpad=0.3, labelspacing=0.25)
     style_ax(ax)
 
     fig.tight_layout(pad=0.3)
@@ -270,10 +282,17 @@ def fig4(npz_a: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz",
     names = ["J0", "J1", "J2", "J3", "J4", "J5"]
     colors = ["#0072B2", "#D55E00", "#009E73", "#56B4E9", "#E69F00", "#CC79A7"]
 
-    fig, axes = plt.subplots(2, 1, figsize=(7.16, 2.5), sharex=True,
-                            gridspec_kw={"height_ratios": [1.15, 1]})
+    # 版式：(a) 通栏（6 条关节曲线需要宽度）；(b)(c) 并排 —— (c) 是命中邻域放大。
+    # 放大图早期版本是 (b) 的内嵌 inset，但 (b) 里没有足够大的空白矩形：
+    # 任意能放下的位置都会压住 1.8 m/s 限速线，且 inset 的刻度标签会落到主曲线上，
+    # 所以把它提升为独立面板，标签恢复满字号。
+    fig = plt.figure(figsize=(7.16, 2.90))
+    # 显式给四周留白（不用 tight_layout）：默认 subplot 参数会让坐标轴只占 125%-90% 宽
+    gs = fig.add_gridspec(2, 2, height_ratios=[1.15, 1], width_ratios=[1.55, 1],
+                          left=0.055, right=0.995, top=0.88, bottom=0.155,
+                          hspace=0.62, wspace=0.30)
+    ax = fig.add_subplot(gs[0, :])
     # (a) 相对初始位形的关节偏差：曲线彼此分离，能读出各关节的挥拍行程
-    ax = axes[0]
     q0 = da["q_actual"][0]
     for j in range(6):
         ax.plot(t_a, (da["q_actual"][:, j] - q0[j]) * 180 / np.pi,
@@ -285,38 +304,42 @@ def fig4(npz_a: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz",
     ax.legend(ncol=6, loc="upper left", fontsize=7, columnspacing=0.7,
               handlelength=1.1, labelspacing=0.2, borderpad=0.25, framealpha=0.85)
     ax.set_title("(a) Joint excursions relative to the initial pose", fontsize=9)
+    ax.tick_params(labelbottom=False)
     style_ax(ax)
 
-    # (b) TCP 速度：两条曲线 + 限速带 + 命中区放大
-    ax = axes[1]
+    # (b) TCP 速度：两条曲线 + 限速带 + 命中时刻竖线
+    ax = fig.add_subplot(gs[1, 0], sharex=ax)
     v_a = np.linalg.norm(np.gradient(da["tcp_pos"], axis=0), axis=1) / float(da["dt"])
     v_b = np.linalg.norm(np.gradient(db["tcp_pos"], axis=0), axis=1) / float(db["dt"])
     ax.plot(t_a, v_a, color=C["full"], lw=1.0, label="baseline")
     ax.plot(t_b, v_b, color=C["none"], lw=1.0, label="space-perturbed ($s=0.1$ m)")
     ax.axhspan(1.8, 1.98, color="gray", alpha=0.25, lw=0)
     ax.axhline(1.8, color="gray", ls="--", lw=0.8)
-    ax.annotate("TCP limit 1.8 m/s", xy=(0.02, 0.93), xycoords="axes fraction",
-                fontsize=7.5, color="dimgray")
+    ax.annotate("TCP limit 1.8 m/s", xy=(0.02, 0.818), xycoords="axes fraction",
+                va="center", fontsize=7.5, color="dimgray")
     ax.axvline(hit_a, color=C["full"], ls=":", lw=0.8)
     ax.axvline(hit_b, color=C["none"], ls=":", lw=0.8)
     ax.set_xlabel("Time (ms)")
     ax.set_ylabel("TCP speed (m/s)")
-    ax.set_title("(b) TCP speed profiles (inset: hit neighbourhood)", fontsize=9)
-    ax.legend(loc="upper right", framealpha=0.9)
+    ax.set_title("(b) TCP speed profiles", fontsize=9)
+    ax.legend(loc="upper right", framealpha=0.9, fontsize=7)
     style_ax(ax)
-    # 命中附近放大：两条曲线在此分离（旧版整段重合不可读）
-    axi = ax.inset_axes([0.63, 0.46, 0.24, 0.46])
+
+    # (c) 命中邻域放大：两条曲线在此分离（整段画在一起时完全重合、读不出差异）
+    axi = fig.add_subplot(gs[1, 1])
     m_a = (t_a > hit_a - 120) & (t_a < hit_a + 120)
     m_b = (t_b > hit_b - 120) & (t_b < hit_b + 120)
     axi.plot(t_a[m_a] - hit_a, v_a[m_a], color=C["full"], lw=1.0)
     axi.plot(t_b[m_b] - hit_b, v_b[m_b], color=C["none"], lw=1.0)
-    axi.axhline(1.8, color="gray", ls="--", lw=0.7)
-    axi.set_xlabel("$t-t_{hit}$ (ms)", fontsize=7, labelpad=0.5)
-    axi.tick_params(labelsize=6.5, pad=0.5)
+    axi.axhline(1.8, color="gray", ls="--", lw=0.8)
+    axi.set_xlabel("$t-t_{hit}$ (ms)")
+    axi.set_ylabel("TCP speed (m/s)")
     axi.set_ylim(0, max(v_a[m_a].max(), v_b[m_b].max()) * 1.15)
-    axi.grid(True, alpha=0.25, linewidth=0.3)
+    axi.set_title("(c) Zoom: hit neighbourhood", fontsize=9)
+    style_ax(axi)
 
-    fig.tight_layout(pad=0.3)
+    # 不用 tight_layout：它会把上面 add_gridspec 设的 hspace/wspace 覆盖掉，
+    # 导致 (a) 的标题与 (b)(c) 的标题挤在一起
     save(fig, "fig4_joint_trajectory.pdf")
 
 
@@ -460,7 +483,7 @@ def fig6(stats: dict) -> None:
                 color=C["tube_only"])
     ax.axhline(0, color="gray", lw=0.7, ls="--")
     for s, g, e, p in zip(s_list, g_list, e_list, p_list):
-        ax.text(s, g + e + 0.55, f"$p$={p:.3f}", fontsize=7,
+        ax.text(s, g + e + 0.55, f"$p$${fmt_p(p)}$", fontsize=7,
                 ha="right" if s == max(s_list) else ("left" if s == min(s_list) else "center"))
     ax.set_ylim(-1.5, 8.0)
     ax.set_xlim(0.17, 0.44)
@@ -494,11 +517,12 @@ def fig7(stats: dict, timing_path: Path = DATA / "exp18_fig_assets/timing.json")
             ("Steady-state, all", 4.0),          # median
             ("Steady-state p95", 33.0),
             ("Steady-state max", 41.0)]
-    ax.text(0.07, 1.0, "Replanning time (ms)", fontsize=9, va="top",
+    # 标题已含 (a) 与单位，不再另起一行 "Replanning time (ms)"（与标题重复）
+    ax.text(0.07, 1.06, "(a) Replanning time (ms)", fontsize=9, va="top",
             transform=ax.transAxes)
-    ax.plot([0.07, 0.95], [0.93, 0.93], transform=ax.transAxes, lw=0.7, color="k")
+    ax.plot([0.07, 0.95], [0.96, 0.96], transform=ax.transAxes, lw=0.7, color="k")
     for i, (name, val) in enumerate(rows):
-        y = 0.82 - i * 0.145
+        y = 0.85 - i * 0.148
         ax.text(0.07, y, name, fontsize=7.5, va="center", transform=ax.transAxes)
         ax.text(0.93, y, f"{val:.1f}", fontsize=7.5, va="center", ha="right",
                 transform=ax.transAxes, color=C["none"] if val > 100 else "k")
