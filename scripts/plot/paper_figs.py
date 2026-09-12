@@ -25,6 +25,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 import json
 from pathlib import Path
 
@@ -34,6 +35,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 PROJECT = Path(__file__).resolve().parent.parent.parent
+# 允许 fig8 在函数内导入 src（与 rm65_mpc_v12.py 的 sys.path 处理一致）
+sys.path.insert(0, str(PROJECT))
 DATA = PROJECT / "experiment_data"
 OUT = PROJECT / "paper" / "figures"
 STATS_JSON = PROJECT / "paper" / "planning" / "06-stats-active.json"
@@ -562,19 +565,38 @@ def fig7(stats: dict, timing_path: Path = DATA / "exp18_fig_assets/timing.json")
 # =============================================================================
 
 def fig8() -> None:
-    """Fig.8: 三场景球心-拍心距离曲线（事件对齐 t−t_hit），标注最小距离与拍半径。"""
+    """Fig.8: 三场景球心-拍心距离曲线（对齐 nominal predicted hit time）。
+
+    对齐基准 = 规划器在 episode 起始时刻预测的击球步：find_hitting_point_physics
+    （MuJoCo 前向仿真，含地面反弹，与 do_replan 同一函数）。三个面板统一 x/y
+    范围：miss 面板的 t=0 即预测击球时刻（旧版 hit_step=-1 使 t=0 落在 episode
+    末步，而 caption 却写 "aligned at contact"，两者都不成立）。
+    """
+    from src.robot.constants import SHOULDER_POS, WORKSPACE_RADIUS
+    from src.sim.rm65_env import RM65Env
+    from src.tennis.hitting import find_hitting_point_physics
+
+    env = RM65Env(PROJECT / "src" / "robot" / "rm65_model.xml")
     specs = [
         ("b_hit_space_perturb", "Corridor hit", C["full"]),
         ("c_miss_combined_perturb", "Miss", C["none"]),
         ("d_hit_noise_kf", "Noise+filter hit", C["softmin_only"]),
     ]
     fig, axes = plt.subplots(1, 3, figsize=(7.16, 1.95))
+    series: list[tuple[np.ndarray, np.ndarray]] = []
     for i, (name, label, col) in enumerate(specs):
-        d = np.load(DATA / "exp18_fig_assets/raw" / f"{name}.npz")
-        ball, tcp = d["ball_pos"], d["tcp_pos"]
-        hit = int(d["hit_step"])
-        t = (d["timestamps"] - d["timestamps"][hit]) * 1000
-        dist = np.linalg.norm(ball - tcp, axis=1) * 1000  # mm
+        d = np.load(DATA / "exp18_fig_assets/raw" / f"{name}.npz", allow_pickle=True)
+        md = json.loads(d["metadata"].item())
+        p0 = np.array(md["p0"])
+        v0 = np.array(md["v0"])
+        # 重算规划器在 episode 起始时刻的预测击球步（与 replan_core.do_replan 同源）
+        hi = find_hitting_point_physics(
+            env, p0, v0, SHOULDER_POS, WORKSPACE_RADIUS, len(d["timestamps"])
+        )
+        k_nom = hi["k_hit"] if hi is not None else int(d["hit_step"])
+        t = (d["timestamps"] - d["timestamps"][k_nom]) * 1000
+        dist = np.linalg.norm(d["ball_pos"] - d["tcp_pos"], axis=1) * 1000  # mm
+        series.append((t, dist))
         ax = axes[i]
         ax.plot(t, dist, color=col, lw=1.1)
         ax.axhline(120, color="gray", ls="--", lw=0.9)
@@ -584,7 +606,6 @@ def fig8() -> None:
         ax.annotate(f"min {dmin:.0f} mm", (tmin, dmin), textcoords="offset points",
                     xytext=(-58, 8) if i == 2 else (6, 8), fontsize=7.5)
         ax.set_yscale("log")
-        ax.set_xlabel("$t-t_{hit}$ (ms)")
         ax.set_title(f"({chr(97 + i)}) {label}", fontsize=9)
         if i == 0:
             ax.set_ylabel("Ball–racket center dist. (mm)")
@@ -592,8 +613,15 @@ def fig8() -> None:
                         xycoords="axes fraction", fontsize=7, color="dimgray")
         else:
             ax.set_yticklabels([])
-        ax.set_xlim(t.min(), t.max())
         style_ax(ax)
+
+    # 三面板统一 x/y 范围（y 轴为共享 log 轴，隐藏 (b)(c) 刻度标签才成立）
+    x_all = np.concatenate([t for t, _ in series])
+    y_all = np.concatenate([dist for _, dist in series])
+    for ax in axes:
+        ax.set_xlim(x_all.min(), x_all.max())
+        ax.set_ylim(40.0, 1.05 * float(y_all.max()))
+        ax.set_xlabel("$t - t_{hit}^{nom}$ (ms)")
 
     fig.tight_layout(pad=0.3)
     save(fig, "fig8_tube_diagnostic.pdf")
