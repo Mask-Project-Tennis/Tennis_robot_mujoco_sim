@@ -209,7 +209,7 @@ def fig3_alt_2d(npz_path: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz") 
     k0 = max(0, hit - 60)
     b, r = ball[k0:hit + 3], tcp[k0:hit + 8]
 
-    fig, axes = plt.subplots(2, 1, figsize=(3.40, 3.50))
+    fig, axes = plt.subplots(2, 1, figsize=(3.40, 3.30))
     r_half = 0.12
 
     # (a) 侧视：Y–Z 平面（球的前进方向 vs 高度）
@@ -290,7 +290,7 @@ def fig4(npz_a: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz",
     # 旧版 (a) 通栏而 (b) 只有 55% 宽：上下同宽的时间轴被拉成不同比例，
     # 竖直对照失效；放大图早期是 (b) 的内嵌 inset，但 (b) 里没有足够大的
     # 空白矩形（任意位置都会压住 1.8 m/s 限速线），故升为右列独立面板。
-    fig = plt.figure(figsize=(7.16, 2.72))
+    fig = plt.figure(figsize=(7.16, 2.62))
     # 显式给四周留白（不用 tight_layout）：默认 subplot 参数会让坐标轴只占 125%-90% 宽
     gs = fig.add_gridspec(2, 2, height_ratios=[1.15, 1], width_ratios=[1.55, 1],
                           left=0.055, right=0.995, top=0.88, bottom=0.155,
@@ -358,7 +358,7 @@ def fig5(stats: dict) -> None:
     rates = [e1[str(s)]["rate"] for s in speeds]
     errs = [ci_half(e1[str(s)]) for s in speeds]
 
-    fig, axes = plt.subplots(1, 2, figsize=(7.16, 1.85),
+    fig, axes = plt.subplots(1, 2, figsize=(7.16, 1.78),
                             gridspec_kw={"width_ratios": [1.7, 1]})
     ax = axes[0]
     ax.errorbar(speeds, rates, yerr=errs, color=C["full"], marker="o", capsize=2.5,
@@ -416,7 +416,7 @@ def fig6(stats: dict) -> None:
     星号全部 Holm-adjusted（m=20）：raw p<0.05 有 11 格，Holm 后仅 2 格。
     """
     e3, e4, e7 = stats["E3_nominal"], stats["E4_grid"], stats["E7_corners"]
-    fig, axes = plt.subplots(2, 2, figsize=(7.16, 2.88))
+    fig, axes = plt.subplots(2, 2, figsize=(7.16, 2.78))
 
     def asym_err(v: dict) -> tuple[float, float]:
         """配对 bootstrap CI 的上下误差条（以 diff_pp 为基准）。"""
@@ -517,7 +517,7 @@ def fig7(stats: dict, timing_path: Path = DATA / "exp18_fig_assets/timing.json")
     t = json.loads(Path(timing_path).read_text(encoding="utf-8"))
     sync, async_ = t["sync"], t["async"]
 
-    fig, axes = plt.subplots(1, 2, figsize=(7.16, 1.90),
+    fig, axes = plt.subplots(1, 2, figsize=(7.16, 1.82),
                             gridspec_kw={"width_ratios": [1.3, 1.7]})
 
     # (a) 数值表：只有 3 个点，表格比 log 坐标轴更紧凑也不误导
@@ -597,7 +597,7 @@ def fig8() -> None:
         ("c_miss_combined_perturb", "Miss", C["none"]),
         ("d_hit_noise_kf", "Noise+filter hit", C["softmin_only"]),
     ]
-    fig, axes = plt.subplots(1, 3, figsize=(7.16, 1.85))
+    fig, axes = plt.subplots(1, 3, figsize=(7.16, 1.78))
     series: list[tuple[np.ndarray, np.ndarray]] = []
     for i, (name, label, col) in enumerate(specs):
         d = np.load(DATA / "exp18_fig_assets/raw" / f"{name}.npz", allow_pickle=True)
