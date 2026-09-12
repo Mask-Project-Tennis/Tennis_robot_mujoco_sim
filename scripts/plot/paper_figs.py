@@ -139,6 +139,71 @@ def _corridor_band(ball: np.ndarray, hit: int, r_half: float = 0.12):
     return u, seg, v, w
 
 
+def fig1_hero(npz_path: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz") -> None:
+    """Fig.1（hero 概念图）: (a) point-target 单点单时刻 vs (b) 走廊+时间窗松弛。
+
+    chat2 审稿意见：平台截图只说明「用了机器人」，首页应有概念 hero。
+    两面板用同一 episode 的真实数据：(a) 只画命中点星标（单一 time–space 对）；
+    (b) 叠加 ±0.12 m 走廊带与候选窗口内多个候选点（空间带 × 任意候选时刻）。
+    """
+    d = np.load(npz_path)
+    ball, tcp = d["ball_pos"], d["tcp_pos"]
+    hit = int(d["hit_step"])
+    k0 = max(0, hit - 60)
+    b, r = ball[k0:hit + 3], tcp[k0:hit + 8]
+
+    fig, axes = plt.subplots(2, 1, figsize=(3.40, 2.55))
+    r_half = 0.12
+
+    # (a) point-target：单一 time–space 对
+    ax = axes[0]
+    ax.plot(b[:, 0], b[:, 1], color=C["ball"], lw=1.5, zorder=3)
+    ax.plot(r[:, 0], r[:, 1], color=C["racket"], lw=1.3, zorder=2)
+    ax.scatter([b[-1, 0]], [b[-1, 1]], color="k", marker="*", s=50, zorder=5)
+    ax.annotate("single\n$(t, p)$", (b[-1, 0], b[-1, 1]),
+                textcoords="offset points", xytext=(7, 7), fontsize=7.5)
+    ax.set_xlabel("X (m)")
+    ax.set_ylabel("Y (m)")
+    ax.set_title("(a) Point target: one instant, one point", fontsize=8)
+    style_ax(ax)
+
+    # (b) 走廊 + 候选时间窗
+    ax = axes[1]
+    u = b[-1, :2] - b[0, :2]
+    u = u / (np.linalg.norm(u) + 1e-12)
+    nrm = np.array([-u[1], u[0]])
+    off = r_half * nrm
+    poly_x = [b[0, 0] + off[0], b[-1, 0] + off[0],
+              b[-1, 0] - off[0], b[0, 0] - off[0]]
+    poly_y = [b[0, 1] + off[1], b[-1, 1] + off[1],
+              b[-1, 1] - off[1], b[0, 1] - off[1]]
+    ax.plot(b[:, 0], b[:, 1], color=C["ball"], lw=1.5, zorder=3)
+    ax.fill(poly_x, poly_y, color=C["corridor"], alpha=0.20, lw=0, zorder=1)
+    for sgn in (+1, -1):
+        ax.plot([b[0, 0] + sgn * off[0], b[-1, 0] + sgn * off[0]],
+                [b[0, 1] + sgn * off[1], b[-1, 1] + sgn * off[1]],
+                color=C["corridor"], lw=0.9, ls="--", zorder=2)
+    ax.plot(r[:, 0], r[:, 1], color=C["racket"], lw=1.3, zorder=2)
+    # 候选窗口内的候选点（±50 ms = ±10 步，抽 5 个）
+    for kk in (-10, -5, 0, 5, 10):
+        if 0 <= len(b) - 1 + kk < len(b):
+            idx = len(b) - 1 + kk
+            ax.scatter([b[idx, 0]], [b[idx, 1]], color="k", marker="*", s=18,
+                       zorder=5, alpha=0.75 if kk else 1.0)
+    ax.annotate("candidate\ninstants", (b[-1, 0], b[-1, 1] + off[1]),
+                textcoords="offset points", xytext=(-6, 10), fontsize=7.5,
+                ha="right")
+    ax.set_xlabel("X (m)")
+    ax.set_ylabel("Y (m)")
+    ax.set_title("(b) Corridor + time window: a band, any instant", fontsize=8)
+    style_ax(ax)
+
+    fig.tight_layout(pad=0.3)
+    fig.savefig(OUT / "fig1_hero.pdf", dpi=300)
+    plt.close(fig)
+    print("已保存 paper/figures/fig1_hero.pdf （hero 概念图）")
+
+
 def fig3_3d(npz_path: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz") -> None:
     """Fig.3（正文版）: 3D 球轨迹 + 球拍轨迹 + 连续走廊带 + 击球点。
 
@@ -512,8 +577,8 @@ def fig6(stats: dict) -> None:
 # fig7 实时性能（三段耗时改紧凑数值表）
 # =============================================================================
 
-def fig7(stats: dict, timing_path: Path = DATA / "exp18_fig_assets/timing.json") -> None:
-    """Fig.7: (a) 三段耗时数值表 (b) 超周期步占比 (c) 最大单步延迟。"""
+def fig_realtime(stats: dict, timing_path: Path = DATA / "exp18_fig_assets/timing.json") -> None:
+    """打印 Fig.8（实时预算）: (a) 三段耗时数值表 (b) 逐步延迟 ECDF。"""
     t = json.loads(Path(timing_path).read_text(encoding="utf-8"))
     sync, async_ = t["sync"], t["async"]
 
@@ -572,15 +637,15 @@ def fig7(stats: dict, timing_path: Path = DATA / "exp18_fig_assets/timing.json")
     style_ax(ax)
 
     fig.tight_layout(pad=0.3)
-    save(fig, "fig7_realtime_performance.pdf")
+    save(fig, "fig8_realtime_performance.pdf")
 
 
 # =============================================================================
 # fig8 诊断（仅距离曲线，事件对齐）
 # =============================================================================
 
-def fig8() -> None:
-    """Fig.8: 三场景球心-拍心距离曲线（对齐 nominal predicted hit time）。
+def fig_diagnostic() -> None:
+    """打印 Fig.7（诊断距离）: 三场景球心-拍心距离曲线（对齐 nominal predicted hit time）。
 
     对齐基准 = 规划器在 episode 起始时刻预测的击球步：find_hitting_point_physics
     （MuJoCo 前向仿真，含地面反弹，与 do_replan 同一函数）。三个面板统一 x/y
@@ -639,7 +704,7 @@ def fig8() -> None:
         ax.set_xlabel("$t - t_{hit}^{nom}$ (ms)")
 
     fig.tight_layout(pad=0.3)
-    save(fig, "fig8_tube_diagnostic.pdf")
+    save(fig, "fig7_diagnostic.pdf")
 
 
 # =============================================================================
@@ -731,6 +796,8 @@ def main() -> None:
     args = ap.parse_args()
     want = set(args.fig)
     stats = load_stats()
+    if "1hero" in want:
+        fig1_hero()
     if "3" in want:
         fig3_3d()
     if "3alt" in want:
@@ -742,9 +809,9 @@ def main() -> None:
     if "6" in want:
         fig6(stats)
     if "7" in want:
-        fig7(stats)
+        fig_diagnostic()
     if "8" in want:
-        fig8()
+        fig_realtime(stats)
     if "table" in want:
         tables(stats)
 
