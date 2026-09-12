@@ -1,0 +1,5 @@
+# 由 batch_runner 自动生成
+# experiment: exp17i_limits_ablation
+# grid_size: 3200
+# report_ref: 限速×机制消融配对实验（设计见 docs/experiments/design/exp17i_limits_ablation.md）: TCP 1.0(real_robot.yaml) vs 1.8(默认) × 4 档 × 400 seeds @7 m/s = 3200 runs —— 验证「限速越紧, 鲁棒层相对增益越大」（Q5 相对版主张, discussion §8#6）
+# config_ids: ['ablationfull__ballspeed7__limitsconfigconfigs_real_robot.yaml__noplot__servebox', 'ablationfull__ballspeed7__noplot__servebox', 'ablationnone__ballspeed7__limitsconfigconfigs_real_robot.yaml__noplot__servebox', 'ablationnone__ballspeed7__noplot__servebox', 'ablationsoftmin_only__ballspeed7__limitsconfigconfigs_real_robot.yaml__noplot__servebox', 'ablationsoftmin_only__ballspeed7__noplot__servebox', 'ablationtube_only__ballspeed7__limitsconfigconfigs_real_robot.yaml__noplot__servebox', 'ablationtube_only__ballspeed7__noplot__servebox']

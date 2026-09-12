@@ -45,6 +45,7 @@ docs/experiments/
 | exp17f | 扰动网格机制归因 | — | [2026-09-11](reports/2026-09-11_exp17f_mechanism_perturb.md) | ✅ |
 | exp17g | 空间扰动统计功效（s=0.2 角点） | — | [2026-09-11](reports/2026-09-11_exp17g_spatial_power.md) | ✅ |
 | exp17h | 极端条件补强（s 扫描 + 12 m/s 角点） | [design](design/exp17h_extreme.md) | [2026-09-12](reports/2026-09-12_exp17h_extreme.md) | ✅ |
+| exp17i | 限速×机制消融配对（Q5 主张证伪） | [design](design/exp17i_limits_ablation.md) | [2026-09-12](reports/2026-09-12_exp17i_limits_ablation.md) | ✅ |
 | exp18 | 图资产（计时 + NPZ） | — | [2026-09-11](reports/2026-09-11_exp18_fig_assets.md) | ✅ |
 
 ## 文档类型说明
