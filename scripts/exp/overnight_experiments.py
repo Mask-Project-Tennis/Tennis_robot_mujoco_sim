@@ -294,6 +294,25 @@ EXPERIMENTS: dict[str, ExperimentSpec] = {
             + _perturb_cells(12, [(0, 0.2)], MODES_MECHANISM, 3000)
         ),
     ),
+    "exp17i_limits_ablation": ExperimentSpec(
+        name="exp17i_limits_ablation",
+        script=V12,
+        report_ref="限速×机制消融配对实验（设计见 docs/experiments/design/exp17i_limits_ablation.md）: "
+                   "TCP 1.0(real_robot.yaml) vs 1.8(默认) × 4 档 × 400 seeds @7 m/s = 3200 runs "
+                   "—— 验证「限速越紧, 鲁棒层相对增益越大」（Q5 相对版主张, discussion §8#6）",
+        grid=[
+            {**base, "--ablation": mode, "--seed": s}
+            for base in [
+                # TCP 1.0（真机限位）
+                {"--serve-box": None, "--ball-speed": 7, "--no-plot": None,
+                 "--limits-config": "configs/real_robot.yaml"},
+                # TCP 1.8（默认仿真限位）
+                {"--serve-box": None, "--ball-speed": 7, "--no-plot": None},
+            ]
+            for mode in MODES_MECHANISM
+            for s in range(1, 401)
+        ],
+    ),
 }
 
 

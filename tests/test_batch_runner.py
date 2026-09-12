@@ -127,6 +127,7 @@ class TestGrids:
             "exp17b_perturb": 5 * 4 * 2 * 100,
             "exp17c_obsfreq": (5 * 2 * 1 + 5 * 2 * 2) * 100,
             "exp17h_extreme": 2 * 4 * 1500 + 4 * 3000,  # Block A + Block B
+            "exp17i_limits_ablation": 2 * 4 * 400,     # 限速层 × 4 档（配对设计）
         }
         for name, n in expected.items():
             assert len(EXPERIMENTS[name].grid) == n, \
