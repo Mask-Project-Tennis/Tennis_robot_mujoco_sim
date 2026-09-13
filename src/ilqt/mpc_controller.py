@@ -106,6 +106,11 @@ class MPCConfig:
     time_perturb_s: float = 0.0
     space_perturb_m: float = 0.0
     perturb_alpha_min: float = 0.0
+    # 空间扰动注入口径：
+    #   "hitpoint"（默认，历史口径）= 只偏移单点目标 p_hit；
+    #   "ballstate"（chat9 审稿建议）= 偏移喂给规划器的球状态估计，
+    #   使单点目标、候选集合、走廊轴、warm start 同源于一份有偏预测。
+    spatial_perturb_target: str = "hitpoint"
 
     # ── R 退火 ──
     use_r_decay: bool = False

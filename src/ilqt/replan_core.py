@@ -79,7 +79,41 @@ def do_replan(
 
     remaining_horizon = config.total_horizon - step
 
-    # 1. 查找击打点
+    # 衰减式扰动：计算衰减系数（模拟预测精度随观测逐步提高）
+    decay_alpha = 1.0
+    if abs(config.time_perturb_s) > 1e-6 or abs(config.space_perturb_m) > 1e-6:
+        r_interval = config.replan_interval
+        r_total = max(1, request.k_hit_current // r_interval)
+        r_count = max(1, (request.k_hit_current - remaining_horizon) // r_interval + 1)
+        decay_alpha = max(config.perturb_alpha_min, 1.0 - r_count / r_total)
+
+    # 空间扰动注入口径二选一（chat9 审稿：区分「单点目标偏移」与「共享预测输入偏移」）：
+    #   hitpoint（默认，历史口径）：只偏移单点目标 p_hit_new，候选集合与走廊轴
+    #     仍由当前球观测重建 —— 几何参照不带该偏移。
+    #   ballstate：偏置注入到生成「规划目标」的球状态估计上 —— 单点目标、候选
+    #     集合、走廊轴、Jacobian warm start 全部由同一份有偏预测生成，任何代价项
+    #     都拿不到无偏的几何参照；而到达时刻预测与可达性门限仍用当前观测，
+    #     使空间偏置不串入时间通道、也不会让偏置取消挥拍本身。
+    ball_pos_goal = ball_pos
+    spatial_offset = np.zeros(3)
+    if (config.spatial_perturb_target == "ballstate"
+            and abs(config.space_perturb_m) > 1e-6):
+        effective_sp = config.space_perturb_m * decay_alpha
+        if abs(effective_sp) > 1e-6:
+            d_ball = ball_vel / (np.linalg.norm(ball_vel) + 1e-8)
+            lateral = np.cross(d_ball, np.array([0.0, 0.0, 1.0]))
+            lateral_norm = np.linalg.norm(lateral)
+            if lateral_norm > 1e-6:
+                lateral /= lateral_norm
+            else:
+                lateral = np.array([1.0, 0.0, 0.0])
+            spatial_offset = lateral * effective_sp
+            ball_pos_goal = ball_pos + spatial_offset
+            logger.debug(
+                "BALLSTATE 空间扰动 step=%d: 偏移 %.3f m", step, effective_sp,
+            )
+
+    # 1. 查找击打点（时序/可达性始终用当前观测：空间偏置只在目标几何上生效）
     env_plan.set_ball_state(ball_pos, ball_vel)
     hit_info_new = find_hitting_point_physics(
         env_plan, ball_pos, ball_vel, config.shoulder_pos, config.workspace_radius,
@@ -97,14 +131,6 @@ def do_replan(
     if k_hit_candidate < max(10, k_hit_new // 4) and k_hit_new > 30:
         k_hit_candidate = max(1, k_hit_new - config.replan_interval)
 
-    # 衰减式扰动：计算衰减系数（模拟预测精度随观测逐步提高）
-    decay_alpha = 1.0
-    if abs(config.time_perturb_s) > 1e-6 or abs(config.space_perturb_m) > 1e-6:
-        r_interval = config.replan_interval
-        r_total = max(1, request.k_hit_current // r_interval)
-        r_count = max(1, (request.k_hit_current - remaining_horizon) // r_interval + 1)
-        decay_alpha = max(config.perturb_alpha_min, 1.0 - r_count / r_total)
-
     # 时间扰动（衰减式）
     if abs(config.time_perturb_s) > 1e-6:
         effective_perturb = config.time_perturb_s * decay_alpha
@@ -117,6 +143,11 @@ def do_replan(
     v_ball_hit_new = hit_info_new["v_ball_hit"].copy()
     k_hit_new = k_hit_candidate
 
+    # ballstate 口径：击打点由当前观测给出，但目标叠加偏置
+    # （后续 p_follow/warm start/backswing 均基于它 → 四档一致地带偏置）。
+    if np.any(spatial_offset != 0.0):
+        p_hit_new = p_hit_new + spatial_offset
+
     # 2. 击球点可执行性后过滤
     q_hit_feas = env_plan.solve_ik(p_hit_new, q_init=x_current[:env_plan.NQ], max_iter=50, eps=1e-2)
     env_plan.set_arm_state(np.concatenate([q_hit_feas, np.zeros(env_plan.NQ)]))
@@ -126,8 +157,10 @@ def do_replan(
     if ball_spd > max_ee_v * 2.0:
         logger.warning("ASYNC 步 %d: 球速 %.1fm/s 超过限速 %.1fm/s", step, ball_spd, max_ee_v)
 
-    # 3. 空间偏移（衰减式）
-    if abs(config.space_perturb_m) > 1e-6:
+    # 3. 空间偏移（衰减式；仅 hitpoint 口径在此注入，
+    #    ballstate 口径已在击打点搜索之前偏移球状态）
+    if (config.spatial_perturb_target != "ballstate"
+            and abs(config.space_perturb_m) > 1e-6):
         effective_sp = config.space_perturb_m * decay_alpha
         if abs(effective_sp) > 1e-6:
             d_ball_hit = v_ball_hit_new / (np.linalg.norm(v_ball_hit_new) + 1e-8)
@@ -288,8 +321,10 @@ def do_replan(
     if need_candidates_replan and horizon_full > 5:
         tube_cfg_replan = config.tube_cfg
         if tube_cfg_replan is not None:
+            # ballstate 口径：候选窗口同样由有偏球态生成（与击打点同源）；
+            # 有偏搜索失败时退回真值球态，避免走廊/softmin 因偏置被整段关闭。
             hit_window_replan = search_hit_window(
-                env_plan, ball_pos, ball_vel,
+                env_plan, ball_pos_goal, ball_vel,
                 config.shoulder_pos, config.workspace_radius,
                 remaining_horizon, tube_cfg_replan,
                 ball_direction="y",
@@ -297,6 +332,16 @@ def do_replan(
                 robot_limits=robot_limits,
                 init_q=x_current[:env_plan.NQ].copy(),
             )
+            if hit_window_replan is None and ball_pos_goal is not ball_pos:
+                hit_window_replan = search_hit_window(
+                    env_plan, ball_pos, ball_vel,
+                    config.shoulder_pos, config.workspace_radius,
+                    remaining_horizon, tube_cfg_replan,
+                    ball_direction="y",
+                    current_step=0,
+                    robot_limits=robot_limits,
+                    init_q=x_current[:env_plan.NQ].copy(),
+                )
             if hit_window_replan is not None:
                 racket_speed_replan = config.racket_speed
                 hitting_tube_replan = build_hitting_tube(

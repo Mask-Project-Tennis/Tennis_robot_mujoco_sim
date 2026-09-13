@@ -142,7 +142,8 @@ def _obsfreq_grid() -> list[dict[str, Any]]:
 
 def _perturb_cells(speed: int, cells: list[tuple[int, float]],
                    modes: tuple[str, ...], seeds: int,
-                   start: int = 1) -> list[dict[str, Any]]:
+                   start: int = 1,
+                   spatial_target: str = "hitpoint") -> list[dict[str, Any]]:
     """指定 (t_max_ms, s_max_m) 角点的高 seeds 复测网格（exp17g 用）。
 
     Args:
@@ -151,6 +152,7 @@ def _perturb_cells(speed: int, cells: list[tuple[int, float]],
         modes: 消融档。
         seeds: 每格 seed 数。
         start: 起始 seed。
+        spatial_target: 空间扰动注入口径（hitpoint / ballstate）。
 
     Returns:
         参数字典列表。
@@ -169,6 +171,7 @@ def _perturb_cells(speed: int, cells: list[tuple[int, float]],
             if s_max_m > 0:
                 base["--space-perturb-m"] = s_max_m
                 base["--space-perturb-min-m"] = 0.0
+                base["--spatial-perturb-target"] = spatial_target
             grid.extend({**base, "--seed": s}
                         for s in range(start, start + seeds))
     return grid
@@ -370,6 +373,41 @@ EXPERIMENTS: dict[str, ExperimentSpec] = {
             for mode in ("full", "softmin_only")
             for s in range(1, 201)
         ],
+    ),
+    "exp20_shared_pilot": ExperimentSpec(
+        name="exp20_shared_pilot",
+        script=V12,
+        report_ref="chat9 审稿 pilot: ballstate 口径空间扰动（先偏移喂给规划器的球状态估计，"
+                   "再生成击打点/候选集合/走廊轴/warm start —— 各代价项面对同一份有偏预测）。"
+                   "9 m/s × s∈{0.1,0.2,0.3} × 四档 × 100 seeds = 1200 runs；"
+                   "与 exp17b/17f 的 hitpoint 口径同 seed 对照，用于决定是否改用该协议"
+                   "重跑全部空间侧实验（chat9 意见一）。",
+        grid=_perturb_cells(9, [(0, 0.1), (0, 0.2), (0, 0.3)], MODES_MECHANISM,
+                            SEEDS_P2, spatial_target="ballstate"),
+    ),
+    "exp22_shared_spatial": ExperimentSpec(
+        name="exp22_shared_spatial",
+        script=V12,
+        report_ref="chat9 意见一 §A 方案: 把空间侧实验全部改为「共享预测输入」口径 "
+                   "(--spatial-perturb-target ballstate)：候选集合/走廊轴/warm start 与单点目标"
+                   "由同一份有偏球态生成，任何代价项都拿不到无偏几何参照。"
+                   "覆盖 s>0 的全部格子：9 m/s 网格 15 格 × 4 档 × 100 seeds（6000）；"
+                   "7 m/s 复证网格 15 格 × full/none × 100（3000）；"
+                   "高功效角点 exp17g/17h 原地重跑（42000）。合计 51000 runs。"
+                   "s=0 列与标称格不受协议影响，沿用 exp17b/17d/17f。",
+        grid=(
+            _perturb_cells(9, [(t, s) for t in (0, 10, 25, 50, 100)
+                               for s in (0.05, 0.1, 0.2)],
+                           MODES_MECHANISM, SEEDS_P2, spatial_target="ballstate")
+            + _perturb_cells(7, [(t, s) for t in (0, 10, 25, 50, 100)
+                                 for s in (0.05, 0.1, 0.2)],
+                             ("full", "none"), SEEDS_P2, spatial_target="ballstate")
+            + _perturb_cells(9, [(0, 0.2)], MODES_MECHANISM, 3000, spatial_target="ballstate")
+            + _perturb_cells(9, [(50, 0.2)], MODES_MECHANISM, 1500, spatial_target="ballstate")
+            + _perturb_cells(9, [(0, 0.3)], MODES_MECHANISM, 1500, spatial_target="ballstate")
+            + _perturb_cells(9, [(0, 0.4)], MODES_MECHANISM, 1500, spatial_target="ballstate")
+            + _perturb_cells(12, [(0, 0.2)], MODES_MECHANISM, 3000, spatial_target="ballstate")
+        ),
     ),
 }
 

@@ -183,6 +183,10 @@ def main() -> None:
     parser.add_argument("--async-replan", action="store_true", help="启用异步重规划")
     parser.add_argument("--time-perturb-ms", type=float, default=0.0, help="球到达时间预测扰动 (ms)")
     parser.add_argument("--space-perturb-m", type=float, default=0.0, help="击打点空间偏移 (m)")
+    parser.add_argument("--spatial-perturb-target", choices=["hitpoint", "ballstate"],
+                        default="hitpoint",
+                        help="空间扰动注入口径: hitpoint=只偏移单点目标（历史口径）; "
+                             "ballstate=偏移球状态估计（候选集合/走廊轴/初始化同源）")
     parser.add_argument("--perturb-alpha-min", type=float, default=0.0, help="衰减扰动保底值")
     parser.add_argument("--random-perturb", action="store_true", help="随机扰动")
     parser.add_argument("--perturb-sign", choices=["random", "positive", "negative"],
@@ -663,6 +667,7 @@ def main() -> None:
         time_perturb_s=time_perturb_s,
         space_perturb_m=space_perturb_m,
         perturb_alpha_min=perturb_alpha_min,
+        spatial_perturb_target=args.spatial_perturb_target,
         use_r_decay=use_r_decay,
         r_decay_ratio=r_decay_ratio,
         fix_joint5_angle=fix_joint5_angle,
