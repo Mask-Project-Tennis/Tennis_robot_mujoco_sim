@@ -1,0 +1,139 @@
+{
+  "sensitivity": [
+    {
+      "tier": "full",
+      "knob": "beta",
+      "value": 1.0,
+      "rate": 94.9,
+      "n": 197
+    },
+    {
+      "tier": "full",
+      "knob": "beta",
+      "value": 10.0,
+      "rate": 94.4,
+      "n": 197
+    },
+    {
+      "tier": "full",
+      "knob": "window_ms",
+      "value": 25.0,
+      "rate": 94.9,
+      "n": 197
+    },
+    {
+      "tier": "full",
+      "knob": "window_ms",
+      "value": 75.0,
+      "rate": 94.4,
+      "n": 197
+    },
+    {
+      "tier": "full",
+      "knob": "radius",
+      "value": 0.08,
+      "rate": 94.4,
+      "n": 197
+    },
+    {
+      "tier": "full",
+      "knob": "radius",
+      "value": 0.16,
+      "rate": 93.9,
+      "n": 197
+    },
+    {
+      "tier": "none",
+      "knob": "nominal",
+      "value": null,
+      "rate": 79.7,
+      "n": 197
+    },
+    {
+      "tier": "softmin_only",
+      "knob": "beta",
+      "value": 1.0,
+      "rate": 94.4,
+      "n": 197
+    },
+    {
+      "tier": "softmin_only",
+      "knob": "beta",
+      "value": 10.0,
+      "rate": 93.9,
+      "n": 197
+    },
+    {
+      "tier": "softmin_only",
+      "knob": "window_ms",
+      "value": 25.0,
+      "rate": 94.9,
+      "n": 197
+    },
+    {
+      "tier": "softmin_only",
+      "knob": "window_ms",
+      "value": 75.0,
+      "rate": 93.9,
+      "n": 197
+    },
+    {
+      "tier": "tube_only",
+      "knob": "radius",
+      "value": 0.08,
+      "rate": 84.8,
+      "n": 197
+    },
+    {
+      "tier": "tube_only",
+      "knob": "radius",
+      "value": 0.16,
+      "rate": 84.8,
+      "n": 197
+    }
+  ],
+  "tcp_exceed": {
+    "E2": {
+      "n": 198,
+      "exceed_pct": 19.2,
+      "mean": 1.094,
+      "p90": 1.01
+    },
+    "E8": [
+      {
+        "tier": "full",
+        "n": 394,
+        "exceed_pct": 18.8,
+        "mean": 1.102,
+        "p90": 1.01
+      },
+      {
+        "tier": "none",
+        "n": 394,
+        "exceed_pct": 5.8,
+        "mean": 1.096,
+        "p90": 1.0
+      },
+      {
+        "tier": "softmin_only",
+        "n": 394,
+        "exceed_pct": 19.0,
+        "mean": 1.102,
+        "p90": 1.01
+      },
+      {
+        "tier": "tube_only",
+        "n": 394,
+        "exceed_pct": 8.1,
+        "mean": 1.096,
+        "p90": 1.0
+      }
+    ]
+  },
+  "exempt_window": {
+    "n": 188,
+    "n_in_window": 96,
+    "max_in_window": 0.9995,
+    "exceed_all_pct": 0.0
+  }
+}
