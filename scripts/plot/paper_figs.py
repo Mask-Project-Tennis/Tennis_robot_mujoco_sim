@@ -306,14 +306,27 @@ def fig3_alt_2d(npz_path: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz") 
     r_half = 0.12
 
     # (a) 侧视：Y–Z 平面（球的前进方向 vs 高度）
+    # chat7 审稿意见：式(2)(3)/代码的走廊轴是「窗口平均方向 + 固定投影矩阵」的
+    # 直线轴（零代价集合为绕直线的圆柱），旧版沿抛物线画弯曲带、与公式不一致。
+    # 现按公式画为：首尾连线（窗口平均方向的平面投影）± r_half 的直线带；
+    # 橙色曲线保留真实球轨迹，二者在窗口中段几乎相切、如实表达「局部直线近似」。
     ax = axes[0]
     ax.plot(b[:, 1], b[:, 2], color=C["ball"], lw=1.6, label="Ball trajectory")
-    for sign in (+1, -1):
-        ax.plot(b[:, 1] + sign * r_half * 0.0, b[:, 2] + sign * r_half,
-                color=C["corridor"], lw=0.9, ls="--")
-    ax.fill_between(b[:, 1], b[:, 2] - r_half, b[:, 2] + r_half,
-                    color=C["corridor"], alpha=0.18, lw=0,
-                    label="Corridor ($\\pm0.12$ m)")
+    p0_2, p1_2 = b[0, 1:].astype(float), b[-1, 1:].astype(float)
+    u2 = p1_2 - p0_2
+    L2 = float(np.linalg.norm(u2))
+    u2 = u2 / (L2 + 1e-12)
+    n2 = np.array([-u2[1], u2[0]])          # 带内法线（Y–Z 平面内垂直于轴）
+    mid2 = 0.5 * (p0_2 + p1_2)              # 参考点：窗口弦中点（轴上）
+    tau = np.array([-L2 / 2.0, L2 / 2.0])
+    axis = mid2[None, :] + tau[:, None] * u2[None, :]
+    band_up = axis + r_half * n2
+    band_dn = axis - r_half * n2
+    for band in (band_up, band_dn):
+        ax.plot(band[:, 0], band[:, 1], color=C["corridor"], lw=0.9, ls="--")
+    poly = np.vstack([band_up, band_dn[::-1]])
+    ax.fill(poly[:, 0], poly[:, 1], color=C["corridor"], alpha=0.18, lw=0,
+            label="Corridor ($\\pm0.12$ m)")
     ax.plot(r[:, 1], r[:, 2], color=C["racket"], lw=1.4, label="Racket center")
     ax.scatter(b[-1, 1], b[-1, 2], color="k", marker="*", s=40, zorder=5)
     # hit 标注置于命中点左下方（走廊带内空白区）：左上偏移会被球轨迹线穿过词面
@@ -648,7 +661,7 @@ def fig6(stats: dict) -> None:
     ax.set_xlim(0.17, 0.44)
     ax.set_xlabel("Space perturb. max $s$ (m)")
     ax.set_ylabel("Corridor gain vs. point target (pp)")
-    ax.set_title("(d) Corridor-only value, 9 m/s (E7)", fontsize=9)
+    ax.set_title("(d) Corridor-only value, 9 m/s", fontsize=9)
     style_ax(ax)
 
     fig.tight_layout(pad=0.3, w_pad=1.4)
