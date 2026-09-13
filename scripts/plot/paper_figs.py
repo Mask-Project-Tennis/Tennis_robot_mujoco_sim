@@ -163,7 +163,7 @@ def fig1_hero(npz_path: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz") ->
     k0 = max(0, hit - 60)
     b, r = ball[k0:hit + 3], tcp[k0:hit + 8]
 
-    fig, axes = plt.subplots(2, 1, figsize=(3.40, 2.55))
+    fig, axes = plt.subplots(2, 1, figsize=(3.40, 2.20))
     r_half = 0.12
 
     # (a) point-target：单一 time–space 对
@@ -192,33 +192,49 @@ def fig1_hero(npz_path: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz") ->
     style_ax(ax)
 
     # (b) 走廊 + 候选时间窗
+    # chat8 审稿意见：running cost 只在候选窗口（±50 ms）内启用，旧图把走廊带
+    # 画满整段飞行轨迹。现改为：窗口外轨迹浅灰、窗口内橙色；直线带只覆盖窗口段。
     ax = axes[1]
-    u = b[-1, :2] - b[0, :2]
+    i_hit = hit - k0
+    i_w0 = max(0, i_hit - 10)
+    i_w1 = min(len(b) - 1, i_hit + 10)
+    GRAY = "0.65"
+    seg0, seg1 = b[i_w0, :2], b[i_w1, :2]
+    u = seg1 - seg0
     u = u / (np.linalg.norm(u) + 1e-12)
     nrm = np.array([-u[1], u[0]])
     off = r_half * nrm
-    poly_x = [b[0, 0] + off[0], b[-1, 0] + off[0],
-              b[-1, 0] - off[0], b[0, 0] - off[0]]
-    poly_y = [b[0, 1] + off[1], b[-1, 1] + off[1],
-              b[-1, 1] - off[1], b[0, 1] - off[1]]
-    ax.plot(b[:, 0], b[:, 1], color=C["ball"], lw=1.5, zorder=3)
+    poly_x = [seg0[0] + off[0], seg1[0] + off[0],
+              seg1[0] - off[0], seg0[0] - off[0]]
+    poly_y = [seg0[1] + off[1], seg1[1] + off[1],
+              seg1[1] - off[1], seg0[1] - off[1]]
+    ax.plot(b[:i_w0, 0], b[:i_w0, 1], color=GRAY, lw=1.4, zorder=2)
+    ax.plot(b[i_w1:, 0], b[i_w1:, 1], color=GRAY, lw=1.4, zorder=2)
+    ax.plot(b[i_w0:i_w1 + 1, 0], b[i_w0:i_w1 + 1, 1], color=C["ball"], lw=1.5,
+            zorder=3)
     ax.fill(poly_x, poly_y, color=C["corridor"], alpha=0.18, lw=0, zorder=1)
     for sgn in (+1, -1):
-        ax.plot([b[0, 0] + sgn * off[0], b[-1, 0] + sgn * off[0]],
-                [b[0, 1] + sgn * off[1], b[-1, 1] + sgn * off[1]],
+        ax.plot([seg0[0] + sgn * off[0], seg1[0] + sgn * off[0]],
+                [seg0[1] + sgn * off[1], seg1[1] + sgn * off[1]],
                 color=C["corridor"], lw=0.9, ls="--", zorder=2)
     ax.plot(r[:, 0], r[:, 1], color=C["racket"], lw=1.3, zorder=2)
     # 候选窗口内的候选点（±50 ms = ±10 步，抽 5 个）
     for kk in (-10, -5, 0, 5, 10):
-        if 0 <= len(b) - 1 + kk < len(b):
-            idx = len(b) - 1 + kk
+        idx = i_hit + kk
+        if 0 <= idx < len(b):
             ax.scatter([b[idx, 0]], [b[idx, 1]], color="k", marker="*", s=18,
                        zorder=5, alpha=0.75 if kk else 1.0)
     # 引线指向簇内星标；文本块两行从锚点向下延伸，无引线会显得与候选点分离
-    ax.annotate("candidate\nstates", (b[-1, 0], b[-1, 1]),
+    ax.annotate("candidate\nstates", (b[i_hit, 0], b[i_hit, 1]),
                 textcoords="offset points", xytext=(12, -14), fontsize=7.5,
                 va="top", arrowprops=dict(arrowstyle="-", lw=0.6, color="k",
                                           shrinkA=0, shrinkB=2))
+    # 窗口标注置于带下方空白区并引线指向窗口段中点（贴顶会被面板边框截断）
+    ax.annotate("$\\pm 50$ ms window",
+                xy=(0.5 * (seg0[0] + seg1[0]), 0.5 * (seg0[1] + seg1[1])),
+                xytext=(-0.95, -1.55), fontsize=7, color="0.35", ha="left",
+                va="top", arrowprops=dict(arrowstyle="-", lw=0.6, color="0.35",
+                                          shrinkA=2, shrinkB=2))
     # 走廊标注由 caption 承载（单栏图内任意位置都会压虚线/标题，放弃图内文字）
     ax.set_xlabel("X (m)")
     ax.set_ylabel("Y (m)")
@@ -295,43 +311,77 @@ def fig3_alt_2d(npz_path: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz") 
 
     与技术选型无关，只与版式有关：画布宽度与 3D 正文版一致（3.40 in = 单栏），
     面板改为上下堆叠，这样两版可直接互换、对比时只差「呈现方式」这一个变量。
+
+    chat8 审稿意见：running cost 只在候选窗口（±50 ms）内启用，旧图把走廊带
+    画满 hit−60..hit+3 整段轨迹、且无参考点/方向标记，读者无法对照式(2)(3)。
+    现改为：窗口外轨迹浅灰、窗口内橙色；直线带只覆盖窗口段（首尾连线 ± r_half）；
+    标出窗口起止、走廊参考点（best 步球位置）与轴线方向箭头。
     """
     d = np.load(npz_path)
     ball, tcp = d["ball_pos"], d["tcp_pos"]
     hit = int(d["hit_step"])
+    win = 10                                   # ±50 ms = ±10 步候选窗口半宽
     k0 = max(0, hit - 60)
     b, r = ball[k0:hit + 3], tcp[k0:hit + 8]
+    i_hit = hit - k0                        # 命中步在 b 中的下标
+    i_w0 = i_hit - win                      # 窗口首步在 b 中的下标（hit−10）
+    i_w1 = i_hit                            # 窗口末步下标（命中步）
+    GRAY = "0.65"
 
-    fig, axes = plt.subplots(2, 1, figsize=(3.40, 3.45))
+    fig, axes = plt.subplots(2, 1, figsize=(3.40, 2.85))
     r_half = 0.12
 
     # (a) 侧视：Y–Z 平面（球的前进方向 vs 高度）
     # chat7 审稿意见：式(2)(3)/代码的走廊轴是「窗口平均方向 + 固定投影矩阵」的
     # 直线轴（零代价集合为绕直线的圆柱），旧版沿抛物线画弯曲带、与公式不一致。
-    # 现按公式画为：首尾连线（窗口平均方向的平面投影）± r_half 的直线带；
+    # 现按公式画为：窗口首尾连线（窗口平均方向的平面投影）± r_half 的直线带；
     # 橙色曲线保留真实球轨迹，二者在窗口中段几乎相切、如实表达「局部直线近似」。
     ax = axes[0]
-    ax.plot(b[:, 1], b[:, 2], color=C["ball"], lw=1.6, label="Ball trajectory")
-    p0_2, p1_2 = b[0, 1:].astype(float), b[-1, 1:].astype(float)
+    # 窗口外轨迹浅灰、窗口内橙色（区分「空间轴延伸」与「代价启用时间范围」）
+    ax.plot(b[:i_w0, 1], b[:i_w0, 2], color=GRAY, lw=1.4, zorder=2)
+    ax.plot(b[i_w1:, 1], b[i_w1:, 2], color=GRAY, lw=1.4, zorder=2)
+    ax.plot(b[i_w0:i_w1 + 1, 1], b[i_w0:i_w1 + 1, 2], color=C["ball"], lw=1.6,
+            zorder=3, label="Ball trajectory")
+    p0_2, p1_2 = b[i_w0, 1:].astype(float), b[i_w1, 1:].astype(float)
     u2 = p1_2 - p0_2
     L2 = float(np.linalg.norm(u2))
     u2 = u2 / (L2 + 1e-12)
     n2 = np.array([-u2[1], u2[0]])          # 带内法线（Y–Z 平面内垂直于轴）
-    mid2 = 0.5 * (p0_2 + p1_2)              # 参考点：窗口弦中点（轴上）
-    tau = np.array([-L2 / 2.0, L2 / 2.0])
-    axis = mid2[None, :] + tau[:, None] * u2[None, :]
+    tau = np.array([0.0, L2])
+    axis = p0_2[None, :] + tau[:, None] * u2[None, :]
     band_up = axis + r_half * n2
     band_dn = axis - r_half * n2
+    ax.plot(axis[:, 0], axis[:, 1], color=C["corridor"], lw=1.0, alpha=0.9)
     for band in (band_up, band_dn):
         ax.plot(band[:, 0], band[:, 1], color=C["corridor"], lw=0.9, ls="--")
     poly = np.vstack([band_up, band_dn[::-1]])
     ax.fill(poly[:, 0], poly[:, 1], color=C["corridor"], alpha=0.18, lw=0,
             label="Corridor ($\\pm0.12$ m)")
+    # 方向箭头：轴线末端（窗口末）画箭头，表示 d_ball 方向
+    ax.annotate("", xy=axis[-1], xytext=axis[-1] - 0.55 * (L2 + 1e-12) * u2,
+                arrowprops=dict(arrowstyle="->", lw=1.0, color=C["corridor"],
+                                shrinkA=0, shrinkB=0))
+    # 窗口起止标记：窗口两端画短竖线（灰色），标注 "±50 ms window"
+    for ix in (i_w0, i_w1):
+        pz = b[ix]
+        ax.plot([pz[1], pz[1]], [pz[2] - 0.10, pz[2] + 0.10],
+                color=GRAY, lw=1.0, zorder=4)
+    ax.annotate("$\\pm 50$ ms window", (0.5 * (b[i_w0, 1] + b[i_w1, 1]),
+                                        b[i_w0, 2] + r_half + 0.06),
+                ha="center", va="bottom", fontsize=7, color="0.35")
     ax.plot(r[:, 1], r[:, 2], color=C["racket"], lw=1.4, label="Racket center")
-    ax.scatter(b[-1, 1], b[-1, 2], color="k", marker="*", s=40, zorder=5)
+    ax.scatter(b[i_hit, 1], b[i_hit, 2], color="k", marker="*", s=40, zorder=5,
+               label="Reference point")
     # hit 标注置于命中点左下方（走廊带内空白区）：左上偏移会被球轨迹线穿过词面
-    ax.annotate("hit", (b[-1, 1], b[-1, 2]), textcoords="offset points",
+    ax.annotate("hit", (b[i_hit, 1], b[i_hit, 2]), textcoords="offset points",
                 xytext=(-8, -12), fontsize=8, ha="right", va="top")
+    # 窗口段标注：锚定窗口起点，文字放左下空白区（贴带上缘会被边框截断）
+    ax.annotate("$\\pm 50$ ms window", xy=(b[i_w0, 1], b[i_w0, 2]),
+                xycoords="data", xytext=(0.04, 0.18),
+                textcoords="axes fraction", fontsize=6.5, color="0.35",
+                ha="left", va="bottom",
+                arrowprops=dict(arrowstyle="-", lw=0.6, color="0.35",
+                                shrinkA=2, shrinkB=2))
     ax.set_xlabel("Y (m)")
     ax.set_ylabel("Z (m)")
     ax.set_title("(a) Side view: corridor along the ball line", fontsize=8)
@@ -339,41 +389,63 @@ def fig3_alt_2d(npz_path: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz") 
 
     # (b) 俯视：X–Y 平面（横向走廊宽度）
     ax = axes[1]
-    # 横向走廊：以球轨迹线为轴，两侧各 r_half 的平行带（限制在轨迹跨度内）
-    u = b[-1, :2] - b[0, :2]
+    # 横向走廊：以窗口首尾连线为轴，两侧各 r_half 的平行带（只覆盖窗口段）
+    u = b[i_w1, :2] - b[i_w0, :2]
     u = u / (np.linalg.norm(u) + 1e-12)
     nrm = np.array([-u[1], u[0]])
     off = r_half * nrm
-    poly_x = [b[0, 0] + off[0], b[-1, 0] + off[0],
-              b[-1, 0] - off[0], b[0, 0] - off[0]]
-    poly_y = [b[0, 1] + off[1], b[-1, 1] + off[1],
-              b[-1, 1] - off[1], b[0, 1] - off[1]]
+    seg0, seg1 = b[i_w0, :2], b[i_w1, :2]
+    poly_x = [seg0[0] + off[0], seg1[0] + off[0],
+              seg1[0] - off[0], seg0[0] - off[0]]
+    poly_y = [seg0[1] + off[1], seg1[1] + off[1],
+              seg1[1] - off[1], seg0[1] - off[1]]
     # 绘制顺序 Ball→Corridor→Racket 与 (a) 一致；走廊填充压底不遮球线
-    ax.plot(b[:, 0], b[:, 1], color=C["ball"], lw=1.6, zorder=3,
-            label="Ball trajectory")
+    ax.plot(b[:i_w0, 0], b[:i_w0, 1], color=GRAY, lw=1.4, zorder=2)
+    ax.plot(b[i_w1:, 0], b[i_w1:, 1], color=GRAY, lw=1.4, zorder=2)
+    ax.plot(b[i_w0:i_w1 + 1, 0], b[i_w0:i_w1 + 1, 1], color=C["ball"], lw=1.6,
+            zorder=3, label="Ball trajectory")
     ax.fill(poly_x, poly_y, color=C["corridor"], alpha=0.2, lw=0, zorder=1,
             label="Corridor ($\\pm0.12$ m)")
+    ax.plot([seg0[0], seg1[0]], [seg0[1], seg1[1]], color=C["corridor"],
+            lw=1.0, alpha=0.9, zorder=2)
     for sgn in (+1, -1):
-        ax.plot([b[0, 0] + sgn * off[0], b[-1, 0] + sgn * off[0]],
-                [b[0, 1] + sgn * off[1], b[-1, 1] + sgn * off[1]],
+        ax.plot([seg0[0] + sgn * off[0], seg1[0] + sgn * off[0]],
+                [seg0[1] + sgn * off[1], seg1[1] + sgn * off[1]],
                 color=C["corridor"], lw=0.9, ls="--", zorder=2)
+    # 方向箭头（轴线末端）
+    ax.annotate("", xy=seg1, xytext=seg1 - 0.55 * np.linalg.norm(seg1 - seg0) * u,
+                arrowprops=dict(arrowstyle="->", lw=1.0, color=C["corridor"],
+                                shrinkA=0, shrinkB=0))
+    for ix in (i_w0, i_w1):
+        px = b[ix]
+        n_p = np.array([-u[1], u[0]])
+        ax.plot([px[0] - 0.10 * n_p[0], px[0] + 0.10 * n_p[0]],
+                [px[1] - 0.10 * n_p[1], px[1] + 0.10 * n_p[1]],
+                color=GRAY, lw=1.0, zorder=4)
     ax.plot(r[:, 0], r[:, 1], color=C["racket"], lw=1.4, zorder=2,
             label="Racket center")
-    ax.scatter(b[-1, 0], b[-1, 1], color="k", marker="*", s=40, zorder=5)
+    ax.scatter(b[i_hit, 0], b[i_hit, 1], color="k", marker="*", s=40, zorder=5)
     # hit 标注移到锚点下方：俯视图中命中点贴近上边框（judge 意见）
-    ax.annotate("hit", (b[-1, 0], b[-1, 1]), textcoords="offset points",
+    ax.annotate("hit", (b[i_hit, 0], b[i_hit, 1]), textcoords="offset points",
                 xytext=(6, -7), fontsize=8, va="top")
+    ax.annotate("$\\pm 50$ ms window", xy=(b[i_w0, 0], b[i_w0, 1]),
+                xycoords="data", xytext=(0.55, 0.10),
+                textcoords="axes fraction", fontsize=6.5, color="0.35",
+                ha="left", va="bottom",
+                arrowprops=dict(arrowstyle="-", lw=0.6, color="0.35",
+                                shrinkA=2, shrinkB=2))
     ax.set_xlabel("X (m)")
     ax.set_ylabel("Y (m)")
     ax.set_title("(b) Top view: lateral corridor width", fontsize=8)
     style_ax(ax)
 
     # 图例统一移到画布底部：面板内任意角落都会被走廊带/球轨迹遮挡（judge 意见）
-    fig.tight_layout(pad=0.3, rect=(0, 0.09, 1, 1))
+    fig.tight_layout(pad=0.3, rect=(0, 0.13, 1, 1))
     handles, labels = axes[0].get_legend_handles_labels()
-    fig.legend(handles, labels, loc="lower center", ncol=3, fontsize=6.4,
+    # 4 条图例：2 列 2 行（3 列会把第 4 条 "Reference point" 裁出画布右缘）
+    fig.legend(handles, labels, loc="lower center", ncol=2, fontsize=6.4,
                frameon=False, handlelength=1.5, columnspacing=1.6,
-               bbox_to_anchor=(0.5, 0.005))
+               bbox_to_anchor=(0.5, 0.004))
     save(fig, "fig3_alt_2d.pdf")
     plt.close(fig)
     print(f"已保存 {OUT / 'fig3_alt_2d.pdf'} （2D 备选版）")
@@ -402,10 +474,10 @@ def fig4(npz_a: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz",
     # 旧版 (a) 通栏而 (b) 只有 55% 宽：上下同宽的时间轴被拉成不同比例，
     # 竖直对照失效；放大图早期是 (b) 的内嵌 inset，但 (b) 里没有足够大的
     # 空白矩形（任意位置都会压住 1.8 m/s 限速线），故升为右列独立面板。
-    fig = plt.figure(figsize=(7.16, 2.55))
+    fig = plt.figure(figsize=(7.16, 2.20))
     # 显式给四周留白（不用 tight_layout）：默认 subplot 参数会让坐标轴只占 125%-90% 宽
     gs = fig.add_gridspec(2, 2, height_ratios=[1.15, 1], width_ratios=[1.55, 1],
-                          left=0.055, right=0.995, top=0.88, bottom=0.155,
+                          left=0.055, right=0.995, top=0.87, bottom=0.185,
                           hspace=0.62, wspace=0.30)
     ax = fig.add_subplot(gs[0, 0])
     # (a) 关节利用率：|Δq| 占初始位形到最近限位余量的百分比（100% 线 = 关节限位）。
@@ -465,21 +537,35 @@ def fig4(npz_a: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz",
     style_ax(ax)
 
     # (c) 命中邻域放大：两条曲线在此分离（整段画在一起时完全重合、读不出差异）
+    # chat8 审稿意见：caption 给出 −5 ms 接触时间差，但旧版两曲线各自按自己的
+    # 接触时刻对齐（差值被减掉），图中看不到两次接触事件。改为统一参考
+    # t − hit_a，两次接触分别用与曲线同线型的竖线标出。
     axi = fig.add_subplot(gs[0:2, 1])
     m_a = (t_a > hit_a - 120) & (t_a < hit_a + 120)
     m_b = (t_b > hit_b - 120) & (t_b < hit_b + 120)
+    shift_b = hit_b - hit_a
     axi.plot(t_a[m_a] - hit_a, v_a[m_a], color="#4D4D4D", lw=1.1,
              label="nominal")
-    axi.plot(t_b[m_b] - hit_b, v_b[m_b], color="#999999", lw=1.1, ls="--",
+    axi.plot(t_b[m_b] - hit_a, v_b[m_b], color="#999999", lw=1.1, ls="--",
              label="space-perturbed")
     axi.axhline(1.8, color="gray", ls="--", lw=0.8)
-    axi.set_xlabel("$t-t_{hit}$ (ms)")
+    # 两次接触时刻：线型与各自曲线一致（统一参考 t − hit_a）
+    axi.axvline(0, color="#4D4D4D", ls=":", lw=0.9)
+    axi.axvline(shift_b, color="#999999", ls=":", lw=0.9)
+    axi.set_xlabel("$t-t_{hit}^{nom}$ (ms)")
     axi.set_ylabel("TCP speed (m/s)")
     axi.set_ylim(0, max(v_a[m_a].max(), v_b[m_b].max()) * 1.15)
+    # 接触偏移标注：置于第二次接触线上方空白处（曲线峰值在右、左下为图例）
+    axi.annotate(f"contact\noffset {shift_b:+.0f} ms", xy=(shift_b, 0.55),
+                 xytext=(24, 1.02), fontsize=6.5, color="dimgray",
+                 ha="left", va="bottom",
+                 arrowprops=dict(arrowstyle="-", lw=0.6, color="dimgray",
+                                 shrinkA=2, shrinkB=2))
     # 两条曲线的身份用小图例在左下角标出（审稿人意见：原内嵌标签与 Δv 文字
     # 在曲线峰值附近互相压字；左下 [−120,−40] ms 区全空，figure 内其余位置
     # 右下被回收段占据）。Δv_max / hit shift 数值移入 caption，此处 print 供核对。
-    xa, xb = t_a[m_a] - hit_a, t_b[m_b] - hit_b
+    # 统一参考 t − hit_a（与绘图一致）
+    xa, xb = t_a[m_a] - hit_a, t_b[m_b] - hit_a
     common = np.union1d(xa, xb)
     dv = np.abs(np.interp(common, xa, v_a[m_a])
                 - np.interp(common, xb, v_b[m_b])).max()
@@ -506,7 +592,7 @@ def fig5(stats: dict) -> None:
     rates = [e1[str(s)]["rate"] for s in speeds]
     errs = [ci_half(e1[str(s)]) for s in speeds]
 
-    fig, axes = plt.subplots(1, 2, figsize=(7.16, 1.68),
+    fig, axes = plt.subplots(1, 2, figsize=(7.16, 1.42),
                             gridspec_kw={"width_ratios": [1.7, 1]})
     ax = axes[0]
     # 中性深灰：单序列实验条件不占机制配色（绿=full 档，见 figs 6/7）
@@ -568,15 +654,16 @@ def _holm_sig(pvals: dict[str, float]) -> dict[str, bool]:
 
 
 def fig6(stats: dict) -> None:
-    """Fig.6: (a) 标称增益两系列 (b) 时间效应热图 softmin−pt (c) 走廊增量热图
+    """Fig.6: (a) 标称增益两系列 (b) softmin 相对点目标增益热图 (c) 走廊增量热图
     full−softmin (d) 走廊独立价值 vs 扰动幅度（E7 高功效角点）。
 
     chat2 第二轮改版：(b) 原为 full−pt（混合两机制），拆成两张热图后
-    (c) 全格 ≈0 = 「走廊被时间窗覆盖」的视觉证明；(b)(c) 共享 ±16 pp 色阶。
+    (c) 全格 ≈0 = 「走廊被时间窗覆盖」的视觉证明；(b)(c) 共享 ±20 pp 色阶
+    （chat8：±16 容不下 (0,0) 格 +17.3，扩到 ±20；标题去掉机制预判）。
     星号全部 Holm-adjusted（m=20）：raw p<0.05 有 11 格，Holm 后仅 2 格。
     """
     e3, e4, e7 = stats["E3_nominal"], stats["E4_grid"], stats["E7_corners"]
-    fig, axes = plt.subplots(2, 2, figsize=(7.16, 2.55))
+    fig, axes = plt.subplots(2, 2, figsize=(7.16, 2.25))
 
     def asym_err(v: dict) -> tuple[float, float]:
         """配对 bootstrap CI 的上下误差条（以 diff_pp 为基准）。"""
@@ -602,18 +689,18 @@ def fig6(stats: dict) -> None:
     ax.axhline(0, color="gray", lw=0.7, ls="--")
     ax.set_xticks(np.arange(3), [f"{s}" for s in speeds])
     ax.set_xlabel("Ball speed (m/s)")
-    ax.set_ylabel("Gain vs. point target (pp)")
+    ax.set_ylabel("Gain (pp)")
     ax.set_title("(a) Nominal gains vs. point target", fontsize=9)
     ax.legend(ncol=1, loc="upper left", framealpha=0.9, fontsize=7,
               borderpad=0.3, labelspacing=0.3, handlelength=1.2)
     style_ax(ax)
 
-    # (b)(c) 拆分热图：共享 ±16 pp 色阶（(c) 全格 ≈0 即视觉证明）
+    # (b)(c) 拆分热图：共享 ±20 pp 色阶（(c) 全格 ≈0 即视觉证明）
     ts = [0, 10, 25, 50, 100]
     ss = [0.0, 0.05, 0.1, 0.2]
     heat_specs = [
         (axes[0][1], "softmin_only_vs_none",
-         "(b) Temporal effect (pp), 9 m/s"),
+         "(b) Softmin-only gain over point-target (pp), 9 m/s"),
         (axes[1][0], "full_vs_softmin_only",
          "(c) Incremental corridor effect (pp), 9 m/s"),
     ]
@@ -626,11 +713,11 @@ def fig6(stats: dict) -> None:
             for j, s in enumerate(ss):
                 k = f"t{t}|s{s}"
                 gain[i, j] = e4["per_cell_paired"][f"{k}|{cmp}"]["diff_pp"]
-        im = ax.imshow(gain, aspect="auto", cmap="RdBu_r", vmin=-16, vmax=16)
+        im = ax.imshow(gain, aspect="auto", cmap="RdBu_r", vmin=-20, vmax=20)
         ax.set_xticks(range(len(ss)), [f"{s:.2f}" for s in ss])
         ax.set_yticks(range(len(ts)), [f"{t}" for t in ts])
         ax.set_xlabel("Space perturb. max (m)")
-        ax.set_ylabel("Time perturb. max (ms)")
+        ax.set_ylabel("Time max (ms)")
         for i in range(len(ts)):
             for j in range(len(ss)):
                 k = f"t{ts[i]}|s{ss[j]}"
@@ -660,11 +747,11 @@ def fig6(stats: dict) -> None:
     ax.set_ylim(-2.0, 9.0)
     ax.set_xlim(0.17, 0.44)
     ax.set_xlabel("Space perturb. max $s$ (m)")
-    ax.set_ylabel("Corridor gain vs. point target (pp)")
+    ax.set_ylabel("Corridor gain (pp)")
     ax.set_title("(d) Corridor-only value, 9 m/s", fontsize=9)
     style_ax(ax)
 
-    fig.tight_layout(pad=0.3, w_pad=1.4)
+    fig.tight_layout(pad=0.3, w_pad=2.2)
     save(fig, "fig6_tube_robustness.pdf")
 
 
@@ -677,7 +764,7 @@ def fig_realtime(stats: dict, timing_path: Path = DATA / "exp18_fig_assets/timin
     t = json.loads(Path(timing_path).read_text(encoding="utf-8"))
     sync, async_ = t["sync"], t["async"]
 
-    fig, axes = plt.subplots(1, 2, figsize=(7.16, 1.68),
+    fig, axes = plt.subplots(1, 2, figsize=(7.16, 1.42),
                             gridspec_kw={"width_ratios": [1.3, 1.7]})
 
     # (a) 数值表：只有 3 个点，表格比 log 坐标轴更紧凑也不误导
@@ -696,9 +783,9 @@ def fig_realtime(stats: dict, timing_path: Path = DATA / "exp18_fig_assets/timin
     ]
     # 标题已含 (a) 与单位，不再另起一行 "Replanning time (ms)"（与标题重复）；
     # 表头横线下移到标题降部以下（judge 意见：原 0.96 横线穿过标题括号/降部）
-    ax.text(0.07, 1.09, "(a) Replanning time (ms)", fontsize=9, va="top",
+    ax.text(0.07, 1.10, "(a) Replanning time (ms)", fontsize=9, va="top",
             transform=ax.transAxes)
-    ax.plot([0.07, 0.95], [0.925, 0.925], transform=ax.transAxes, lw=0.7,
+    ax.plot([0.07, 0.95], [0.90, 0.90], transform=ax.transAxes, lw=0.7,
             color="k")
     for i, (name, val) in enumerate(rows):
         y = 0.855 - i * 0.132
@@ -724,7 +811,7 @@ def fig_realtime(stats: dict, timing_path: Path = DATA / "exp18_fig_assets/timin
     # （judge/审稿人意见：150 ms 线离右边框太近且信息重复）
     ax.axvline(5.0, color="k", ls=":", lw=0.9)
     # 标签放在阈值线底部左侧空白区（顶部会与 sync 平台/async 曲线相碰）
-    ax.text(4.6, 0.05, "control period\n5 ms", fontsize=6.8, ha="right",
+    ax.text(2.6, 0.02, "control period\n5 ms", fontsize=6.8, ha="right",
             va="bottom", transform=ax.get_xaxis_transform(), color="dimgray")
     ax.set_xscale("log")
     ax.set_xlim(0.05, 400)
@@ -734,6 +821,34 @@ def fig_realtime(stats: dict, timing_path: Path = DATA / "exp18_fig_assets/timin
     ax.set_title("(b) Latency distribution", fontsize=9)
     # 图例移至右下空白区（左上会压住 sync 曲线的上升段与平台）
     ax.legend(loc="lower right", framealpha=0.9, fontsize=7)
+    # chat8 审稿意见：普通 CDF 把最重要的尾部差异压在最上方（0.04% 只有一次
+    # 超时）。加尾部放大 inset（>4.5 ms 区域）并直接标出超时步数/总步数，
+    # 结论限定于本次运行记录。
+    ins = ax.inset_axes([0.26, 0.075, 0.44, 0.36])
+    for tag, col, ls in (("sync", "#4D4D4D", "-"), ("async", "#9E9E9E", "--")):
+        pool = np.sort(np.asarray(t[tag]["stall"].get("raw_pool", []), dtype=float))
+        tail = pool[pool >= 4.5]
+        if tail.size:
+            n = pool.size
+            ins.step(tail, np.arange(n - tail.size + 1, n + 1) / n, where="post",
+                     color=col, ls=ls, lw=1.0)
+    ins.axvline(5.0, color="k", ls=":", lw=0.8)
+    ins.set_xlim(4.5, 55)
+    ins.set_ylim(0.9885, 1.0008)
+    ins.set_xticks([5, 20, 40])
+    ins.tick_params(labelsize=5.8, pad=1.5)
+    # inset 内不放文字（曲线斜穿全幅，任何位置都会压线）；统计文字移主面板左下空白
+    ov_s = t["sync"]["stall"]["total_over_period"]
+    n_s = t["sync"]["stall"]["total_steps"]
+    ov_a = t["async"]["stall"]["total_over_period"]
+    n_a = t["async"]["stall"]["total_steps"]
+    # 统计文字放 inset 右下空白（曲线自左下升到右上，右下三角区无遮挡）
+    ins.text(0.965, 0.30, f"sync {ov_s}/{n_s:,} = {ov_s / n_s * 100:.2f}% $>$5 ms",
+             transform=ins.transAxes, fontsize=5.8, va="top", ha="right",
+             color="dimgray")
+    ins.text(0.965, 0.12, f"async {ov_a}/{n_a:,} = {ov_a / n_a * 100:.2f}% $>$5 ms",
+             transform=ins.transAxes, fontsize=5.8, va="top", ha="right",
+             color="dimgray")
     style_ax(ax)
 
     fig.tight_layout(pad=0.3)
@@ -769,7 +884,7 @@ def fig_diagnostic() -> None:
         ("pt_miss_s20_s77", "Point-target miss", "0.2 m spatial", C["none"]),
         ("co_hit_s20_s77", "Corridor-only hit", "same perturbation", C["tube_only"]),
     ]
-    fig, axes = plt.subplots(1, 4, figsize=(7.16, 1.72))
+    fig, axes = plt.subplots(1, 4, figsize=(7.16, 1.42))
     series: list[tuple[np.ndarray, np.ndarray]] = []
     for i, (name, label, cond, col) in enumerate(specs):
         d = np.load(DATA / "exp18_fig_assets/raw" / f"{name}.npz", allow_pickle=True)
@@ -793,7 +908,20 @@ def fig_diagnostic() -> None:
         # 数值标注靠外侧：miss 面板（i=0,2）标左上、hit 面板（i=1,3）标右上，
         # 避免压住 min 点与 120 mm 参考线
         off = (-52, 9) if i in (0, 2) else (6, 9)
-        ax.annotate(f"min {dmin:.0f} mm", (tmin, dmin), textcoords="offset points",
+        # chat8 审稿意见：命中面板标出真实 narrow-phase 接触时刻（黑色星标），
+        # 与最小距离点（圆点）区分，避免读者按「跨 120 mm 线即命中」理解。
+        # 命中面板中两者几乎重合：合并为一条 "contact: min X mm" 标注防互压。
+        contact_ok = False
+        if i in (1, 3):
+            hs = int(d["hit_step"])
+            if 0 < hs < len(d["timestamps"]):
+                t_c = (d["timestamps"][hs] - d["timestamps"][k_nom]) * 1000
+                ax.plot([t_c], [dist[hs]], marker="*", ms=10, color="k",
+                        zorder=6, mew=0.6)
+                contact_ok = True
+        # 变量名避开面板标题的 label（此前覆盖导致标题被替换成标注文本）
+        ann_label = f"contact: min {dmin:.0f} mm" if contact_ok else f"min {dmin:.0f} mm"
+        ax.annotate(ann_label, (tmin, dmin), textcoords="offset points",
                     xytext=off, fontsize=7.5)
         ax.set_yscale("log")
         ax.set_title(f"({chr(97 + i)}) {label}\n{cond}", fontsize=8.2)

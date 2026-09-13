@@ -354,6 +354,23 @@ EXPERIMENTS: dict[str, ExperimentSpec] = {
             _sensitivity_grid()
         ),
     ),
+    "exp19_hardmin": ExperimentSpec(
+        name="exp19_hardmin",
+        script=V12,
+        report_ref="chat8 审稿补跑: hard-min 终端基线。β=1e6 ≈ 数值 hard-min（softmin "
+                   "对数-和-指数实现数值稳定），区分「多候选目标集合」与「softmin 平滑聚合」"
+                   "两种解释。9 m/s 标称 × full/softmin_only × 200 seeds = 400 runs；"
+                   "β=5 标称与 point-target 基线复用 exp17b/exp17d（同 seeds 1-200）。",
+        grid=[
+            {**base, "--ablation": mode, "--seed": s}
+            for base in [
+                {"--serve-box": None, "--ball-speed": 9, "--no-plot": None,
+                 "--softmin-beta": 1e6},
+            ]
+            for mode in ("full", "softmin_only")
+            for s in range(1, 201)
+        ],
+    ),
 }
 
 
