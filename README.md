@@ -1,370 +1,460 @@
-# RM-65 网球机器人 — MPC+iLQR+Tube 击打仿真与真机部署
+# RM-65 Tennis Robot — MPC + iLQR + Tube Hitting Simulation and Real-Robot Deployment
 
-RM-65 双臂机器人网球击打项目。使用 **MPC（模型预测控制）** 作为外层闭环框架，**iLQR（迭代线性二次调节器）** 作为内层轨迹优化求解器，**Tube-based Robust Hitting** 实现时空鲁棒性，**多层安全滤波**保障关节/TCP 约束。
+**English** | [简体中文](README.zh-CN.md)
 
-支持两种控制模式：
-- **力矩模式（默认）**：MPC 输出关节力矩，MuJoCo 直接驱动
-- **位置模式（`--position-mode`）**：MPC 输出关节角度，MuJoCo PD 执行器模拟真机控制器，iLQR 直接规划 q_desired 轨迹
+A tennis-hitting robot project on the dual-arm RM-65B manipulator. **MPC (model
+predictive control)** forms the outer closed loop, **iLQR (iterative linear
+quadratic regulator)** is the inner trajectory optimizer, a **spatial-corridor
+("Tube") terminal cost** provides spatio-temporal robustness under prediction
+error, and a **multi-layer safety filter** enforces the joint/TCP constraints.
 
-真机部署使用 Realman SDK 角度控制（IP 通信 `rm_movej_follow`），三层安全架构（控制器固件 + 软件监控 + 紧急停止）。
+Two control modes are supported:
+- **Torque mode (default)**: MPC outputs joint torques, applied directly in MuJoCo
+- **Position mode (`--position-mode`)**: MPC outputs joint angles; MuJoCo PD
+  actuators emulate the real controller and iLQR plans the q_desired trajectory
+
+Real-robot deployment uses angle control through the Realman SDK (IP
+communication, `rm_movej_follow`) with a three-layer safety architecture
+(controller firmware + software monitor + emergency stop).
 
 ---
 
-## 环境安装
+## Environment Setup
 
 ```bash
-# 创建 conda 环境
+# Create the conda environment
 conda create -n mujoco_tennis python=3.11
 conda activate mujoco_tennis
 pip install -r requirements.txt
 
-# 编译 C++ 加速模块（iLQR 线性化 + 前向/后向传递，1.50× 加速）
+# Build the C++ acceleration module (iLQR linearization + forward/backward passes, 1.50x speedup)
 python setup.py build_ext --inplace
 
-# Linux 环境需要设置 MuJoCo 库路径
+# Linux: point MuJoCo at its shared libraries
 export LD_LIBRARY_PATH="$(python -c 'import mujoco, os; print(os.path.dirname(mujoco.__file__))'):$LD_LIBRARY_PATH"
 ```
 
-依赖：`mujoco>=3.0`, `numpy>=1.24`, `scipy>=1.10`, `matplotlib>=3.7`, `pyyaml>=6.0`
+Dependencies: `mujoco>=3.0`, `numpy>=1.24`, `scipy>=1.10`, `matplotlib>=3.7`, `pyyaml>=6.0`
 
 ---
 
-## 快速开始
+## Quick Start
 
-### 仿真
+### Simulation
 
 ```bash
-# ★ V12 最新版 — EpisodeRunner 管线架构（力矩模式，默认）
+# V12 — current main script (EpisodeRunner pipeline, torque mode by default)
 python scripts/rm65_mpc_v12.py --serve-box --ball-speed 7 --viewer
 
-# V12 位置模式（模拟真机角度控制）
+# Position mode (emulates real-robot angle control)
 python scripts/rm65_mpc_v12.py --serve-box --ball-speed 7 --position-mode --viewer
 
-# 指定随机种子
+# Fixed random seed
 python scripts/rm65_mpc_v12.py --serve-box --ball-speed 7 --seed 42 --viewer
 
-# 离线仿真（无渲染，更快）
+# Offline run (no rendering, faster)
 python scripts/rm65_mpc_v12.py --serve-box --ball-speed 9 --no-plot
 
-# 关节调节查看器（拖动滑条控制关节）
+# Joint viewer (slider control of every joint)
 python scripts/tools/rm65_joint_viewer.py
 ```
 
-### 真机部署
+### Real-Robot Deployment
 
 ```bash
-# 1. 修改真机配置（IP 地址、安全参数、PD 增益）
+# 1. Edit the real-robot configuration (IP address, safety limits, PD gains)
 vim configs/real_robot.yaml
 
-# 2. 逐个验证真机接口（先只读，后运动）
-python scripts/tools/test_real_robot/01_connect_disconnect.py    # 连接测试
-python scripts/tools/test_real_robot/02_read_joints.py           # 读关节角度
-python scripts/tools/test_real_robot/04_send_zero_pose.py        # 回零位
-# ...完整清单见 scripts/tools/test_real_robot/README.md
+# 2. Verify the SDK interfaces one by one (read-only first, motion later)
+python scripts/tools/test_real_robot/01_connect_disconnect.py    # connect / disconnect
+python scripts/tools/test_real_robot/02_read_joints.py           # read joint angles
+python scripts/tools/test_real_robot/04_send_zero_pose.py        # move to zero pose
+# ...see scripts/tools/test_real_robot/README.md for the full list
 ```
 
-### 测试
+### Tests
 
 ```bash
-# 运行全部测试（332 tests）
+# Run the full test suite (662 tests)
 pytest tests/
 
-# 代码检查
+# Linting
 ruff check src/ tests/ scripts/
 ```
 
 ---
 
-## 双模式执行器
+## Reproducing the Paper Results
 
-项目支持力矩和位置两种控制模式，仿真和真机共用同一套 MPC+iLQR 框架。
+The statistics and figures of the accompanying manuscript are regenerated from
+the tracked per-episode results by three scripts; no simulation re-runs are
+required (the single-episode run below is an optional sanity check).
 
-### 力矩模式（默认）
+### 1. Setup
 
-MPC 输出关节力矩 `u = tau(6)`，MuJoCo `motor` 执行器直接输出力矩到关节。
+Follow [Environment Setup](#environment-setup). The C++ module is optional (a
+NumPy fallback exists), but it is used for the numbers reported here.
+
+### 2. Sanity check: one simulated episode
+
+```bash
+MUJOCO_GL=egl python scripts/rm65_mpc_v12.py --serve-box --ball-speed 7 --seed 1 --no-plot
+```
+
+Expected: a final `__RESULT__` line with `hit_type=active` (about 1.4 s on a
+single workstation; exact error values may vary slightly across platforms).
+
+### 3. Reproduce all statistics
+
+```bash
+python scripts/extract/paired_stats.py   # per-episode paired analysis -> statistics JSON
+python scripts/extract/aux_stats.py      # sensitivity sweep + TCP-cap diagnostics
+```
+
+`paired_stats.py` writes `experiment_data/paper_stats_active.json` — the exact
+statistics JSON used by the manuscript (tracked reference copy, sha256
+`4cddd8aa87cab34b724b273ff26a9960d59af757394869faedcb1b80b8f0cd4c`).
+`aux_stats.py` writes `experiment_data/aux_stats.json` and reproduces the
+sensitivity sweep (93.9–94.9 %; corridor-only 84.8 %) and the TCP-cap
+diagnostics (19.2 % of episodes exceed 1.0 m/s, mean 1.09, p90 1.01).
+
+### 4. Reproduce figures and tables
+
+```bash
+python scripts/plot/paper_figs.py --fig 1hero 3alt 4 5 6 7 8 table --out repro_outputs
+```
+
+Writes `repro_outputs/*.pdf` (Fig. 1 and Fig. 3–8) and
+`repro_outputs/table_data/table1_comparison.tex` + `table2_ablation.tex`
+(Tables I–II), identical to the manuscript versions.
+
+### 5. Expected outputs
+
+| Quantity | Expected |
+|---|---|
+| `paper_stats_active.json` sha256 | `4cddd8aa87cab34b724b273ff26a9960d59af757394869faedcb1b80b8f0cd4c` |
+| Table I, nominal 7 m/s, full | 83.8 % |
+| Table I, nominal 9 m/s, full | 95.9 % |
+| E1 speed sweep, 7 m/s | 84.3 % |
+| E2 TCP 1.0 m/s cap, 7 m/s | 35.9 % (vs 84.4 % uncapped) |
+| Sensitivity sweep (9 m/s) | 93.9–94.9 % (corridor-only 84.8 %) |
+| TCP-cap exceedance | 19.2 % of episodes (mean 1.09, p90 1.01 m/s) |
+
+### 6. Data map
+
+| Experiment | Directory | Feeds |
+|---|---|---|
+| E1 capability sweep | `experiment_data/exp15_speed_v2` | Fig. 5, text |
+| E2 limit cost | `experiment_data/exp16_limits_v2` | Fig. 5, TCP diagnostics |
+| E3 nominal four-tier | `experiment_data/exp17d_mechanism` | Fig. 6(a), Table I |
+| E4 perturbation grid | `experiment_data/exp17b_perturb`, `exp17f_mechanism_perturb` | Fig. 6(b,c), Table I |
+| E5 perception sweep | `experiment_data/exp17a_noise`, `exp17c_obsfreq` | artifact only |
+| E7 high-power corners | `experiment_data/exp17g_spatial_power`, `exp17h_extreme` | Fig. 6(d), Table I |
+| E8 limit x mechanism | `experiment_data/exp17i_limits_ablation` | Table II, text |
+| E6 real-time budget | `experiment_data/exp18_fig_assets/timing.json` | Fig. 8 |
+| Trajectory assets | `experiment_data/exp18_fig_assets/raw/*.npz` | Fig. 1, 3, 4, 7 |
+| Sensitivity sweep | `experiment_data/exp18_sensitivity` | text (Sec. VI) |
+| TCP exemption | `experiment_data/exp18_tcp_exempt` | text (Sec. VI) |
+
+---
+
+## Dual-Mode Actuator
+
+Both modes share the same MPC + iLQR framework; the difference is what the
+controller outputs and how the linearization treats the actuator.
+
+### Torque Mode (default)
+
+MPC outputs joint torques `u = tau(6)`; MuJoCo `motor` actuators apply them
+directly to the joints.
 
 ```bash
 python scripts/rm65_mpc_v12.py --serve-box --ball-speed 7
 ```
 
-### 位置模式（`--position-mode`）
+### Position Mode (`--position-mode`)
 
-MPC 输出期望关节角度 `u = q_desired(6)`，MuJoCo `general` 执行器内部 PD 闭环：
+MPC outputs desired joint angles `u = q_desired(6)`; MuJoCo `general` actuators
+close the PD loop internally:
+
 ```
 tau = Kp * (q_desired - q) - Kd * qdot
 ```
-iLQR 在 PD 执行器动态下规划最优 q_desired 轨迹，前馈补偿重力+科氏力。
+
+iLQR plans the optimal q_desired trajectory under the PD-actuator dynamics,
+with feedforward compensation of gravity and Coriolis terms.
 
 ```bash
 python scripts/rm65_mpc_v12.py --serve-box --ball-speed 7 --position-mode
 ```
 
-**真机使用位置模式** — Realman SDK `rm_movej_follow` 接受角度指令，PlanningEnv 用 MuJoCo PD 执行器模拟真机控制器。
+**The real robot uses position mode** — the Realman SDK `rm_movej_follow` accepts
+angle commands, and `PlanningEnv` models the real controller with MuJoCo PD
+actuators.
 
-### 关键差异
+### Key Differences
 
-| 特性 | 力矩模式 | 位置模式 |
-|------|---------|---------|
-| 控制量 u | tau(6) 力矩 | q_desired(6) 期望角度 |
-| B 矩阵 | `dt * M⁻¹` | `dt * M⁻¹ * diag(Kp)` |
-| 安全滤波 β 缩放 | `beta * u` 力矩缩放 | `q + beta*(u - q)` 位置插值 |
-| 紧急制动 | `u = -20·qdot` 阻尼力矩 | 保持当前角度 |
-| 随挥 | `J^T * F` PD 控制器 | `solve_ik()` 逆运动学 |
-| 真机部署 | ❌ SDK 无力矩 API | ✅ `rm_movej_follow` |
+| Property | Torque mode | Position mode |
+|----------|-------------|---------------|
+| Control input u | tau(6) torques | q_desired(6) angles |
+| B matrix | `dt * M^-1` | `dt * M^-1 * diag(Kp)` |
+| Safety-filter beta scaling | `beta * u` (torque) | `q + beta*(u - q)` (position) |
+| Emergency braking | `u = -20*qdot` damping torque | hold current angles |
+| Follow-through | `J^T * F` PD controller | `solve_ik()` inverse kinematics |
+| Real-robot deployment | no (SDK has no torque API) | yes (`rm_movej_follow`) |
 
 ---
 
-## 真机部署架构
+## Real-Robot Deployment Architecture
 
 ```
-                    真机控制管线
-┌─────────────────────────────────────────────────┐
-│  每个控制 tick:                                   │
-│                                                  │
-│  RobotInterface.get_arm_state()  ← 真机关节角度   │
-│  BallPerceiver.get_latest_filtered() ← 动捕+KF   │
-│           ↓                                      │
-│  PlanningEnv (MuJoCo 纯计算)                     │
-│    • set_arm_state(x_real)  ← 把真机状态搬进仿真  │
-│    • iLQR 在仿真中规划最优轨迹                    │
-│    • step_from_state(x, u)  ← 试不同的控制        │
-│           ↓                                      │
-│  RobotInterface.send_joint_command(q_desired)    │
-│    → rm_movej_follow → 真机执行                   │
-└─────────────────────────────────────────────────┘
+                    Real-robot control pipeline
++---------------------------------------------------+
+|  Every control tick:                              |
+|                                                   |
+|  RobotInterface.get_arm_state()   <- joint angles |
+|  BallPerceiver.get_latest_filtered() <- mocap+KF  |
+|           |                                       |
+|  PlanningEnv (pure MuJoCo computation)            |
+|    * set_arm_state(x_real)  <- inject real state  |
+|    * iLQR plans the optimal trajectory            |
+|    * step_from_state(x, u)  <- try control inputs |
+|           |                                       |
+|  RobotInterface.send_joint_command(q_desired)     |
+|    -> rm_movej_follow -> real robot               |
++---------------------------------------------------+
 ```
 
-| 模块 | 文件 | 职责 |
-|------|------|------|
-| **PlanningEnv** | `src/ilqt/planning_env.py` | MuJoCo 纯计算（FK/Jacobian/前向仿真），不接触真机 |
-| **RobotInterface** | `src/real/robot_interface.py` | Realman SDK 封装（角度控制 + 连接时配置控制器安全） |
-| **BallPerceiver** | `src/real/ball_perceiver.py` | 球感知（sensor → KF 滤波 → pos/vel） |
-| **SafetyMonitor** | `src/real/safety_monitor.py` | 软件安全检查（关节/TCP 超限 → 急停） |
-| **配置** | `configs/real_robot.yaml` | 7 节配置（连接/控制/安全/PD/感知 + 丰富注释） |
+| Module | File | Responsibility |
+|--------|------|----------------|
+| **PlanningEnv** | `src/ilqt/planning_env.py` | Pure MuJoCo computation (FK/Jacobian/forward simulation), no hardware |
+| **RobotInterface** | `src/real/robot_interface.py` | Realman SDK wrapper (angle control + controller safety at connect) |
+| **BallPerceiver** | `src/real/ball_perceiver.py` | Ball perception (sensor -> KF filtering -> pos/vel) |
+| **SafetyMonitor** | `src/real/safety_monitor.py` | Software safety checks (joint/TCP limits -> stop) |
+| **Configuration** | `configs/real_robot.yaml` | 7 sections (connection/control/safety/PD/perception) with comments |
 
-### 三层安全架构
+### Three-Layer Safety Architecture
 
 ```
-Layer 1: 控制器固件（连接时自动配置）
+Layer 1: Controller firmware (configured at connect time)
   rm_set_collision_state / rm_set_self_collision_enable / rm_set_controller_torque_limit
 
-Layer 2: SafetyMonitor（每 tick 软件检查）
-  关节位置/速度/TCP 速度超限 → slow_stop()
+Layer 2: SafetyMonitor (software check every tick)
+  joint position / velocity / TCP speed violation -> slow_stop()
 
-Layer 3: 紧急停止（兜底）
-  rm_set_arm_stop()（不可恢复）/ 硬件急停按钮
+Layer 3: Emergency stop (last resort)
+  rm_set_arm_stop() (not recoverable) / hardware e-stop button
 ```
 
-### 真机接口测试工具
+### Interface Test Tools
 
-逐个验证 SDK API，确保可靠后才集成到项目中。位于 `scripts/tools/test_real_robot/`：
+SDK APIs are verified one at a time before being integrated. Located in
+`scripts/tools/test_real_robot/`:
 
-| 脚本 | 风险 | 说明 |
-|------|------|------|
-| `01_connect_disconnect.py` | 零 | 连接→安全配置→读角度→断开 |
-| `02_read_joints.py` | 零 | 持续表格显示角度/速度 |
-| `03_read_temperature.py` | 零 | 持续读温度/电压/电流 |
-| `04_send_zero_pose.py` | 微 | 流式插值回零位 |
-| `05_send_joint_command.py` | 中 | 发送任意角度（`--deg`/`--rad`/交互式） |
-| `06_safety_config_verify.py` | 零 | 读回安全参数验证 |
-| `07_emergency_stop.py` | 中 | 缓停+急停测试 |
-| `08_full_motion_test.py` | 中 | 正弦波运动测试 |
+| Script | Risk | Purpose |
+|--------|------|---------|
+| `01_connect_disconnect.py` | none | connect -> configure safety -> read angles -> disconnect |
+| `02_read_joints.py` | none | continuous table of angles/velocities |
+| `03_read_temperature.py` | none | continuous temperature/voltage/current readout |
+| `04_send_zero_pose.py` | low | streamed interpolation back to zero pose |
+| `05_send_joint_command.py` | medium | send arbitrary angles (`--deg`/`--rad`/interactive) |
+| `06_safety_config_verify.py` | none | read back and verify safety parameters |
+| `07_emergency_stop.py` | medium | slow-stop and emergency-stop tests |
+| `08_full_motion_test.py` | medium | sinusoidal motion test |
 
-详见 [`scripts/tools/test_real_robot/README.md`](scripts/tools/test_real_robot/README.md)
+See [`scripts/tools/test_real_robot/README.md`](scripts/tools/test_real_robot/README.md) (Chinese).
 
 ---
 
-## 核心算法
+## Core Algorithms
 
-### MPC + iLQR 闭环架构
-
-```
-每 N 步重规划（由 replan-interval 控制）:
-  1. 观测球当前位置和速度
-  2. find_hitting_point_physics → 物理仿真预测击打点
-  3. Softmin 多终端代价 → 允许在候选时间窗口内任意时刻击球
-  4. 生成 Warm-start 控制序列（后摆轨迹 PD）
-  5. solve_few_iters → iLQR 优化轨迹
-  6. 安全滤波（关节/TCP/半空间约束）
-  7. 执行第一个控制指令（力矩或角度）
-  8. 下一时间步重复
-```
-
-### Tube-based Robust Hitting
-
-不确定性管道建模球到达时间的偏差，通过空间走廊式代价提升鲁棒性：
+### MPC + iLQR Closed Loop
 
 ```
-σ(t) = σ₀ + σᵥ·t + σₐ·t²       （不确定性管道）
-候选击球窗口：以 best_k 为中心，window_half_ms 为半宽
-
-走廊代价（不绑定时间-空间对应）:
-  1. 垂直偏离代价（hinge loss）
-  2. 速度方向代价（球拍沿球轨迹线方向运动）
-  3. 法向量代价（拍面朝向来球方向）
+Replan every N steps (controlled by replan-interval):
+  1. Observe the current ball position and velocity
+  2. find_hitting_point_physics -> physics-based hit-point prediction
+  3. Softmin multi-terminal cost -> allow hitting anywhere in the candidate time window
+  4. Generate a warm-start control sequence (backswing trajectory PD)
+  5. solve_few_iters -> iLQR trajectory optimization
+  6. Safety filtering (joint / TCP / half-space constraints)
+  7. Execute the first control command (torque or angle)
+  8. Repeat at the next time step
 ```
 
-### 多层安全滤波
+### Spatial-Corridor Robust Hitting ("Tube")
+
+The robustness layer does not model a time-varying uncertainty tube; it shapes
+the terminal cost so that a band of feasible contact states is accepted:
 
 ```
-1. 关节约束：位置/速度/加速度/力矩 四重限制
-2. TCP 速度硬限制
-3. X 平面墙：臂不越过身体中线（X=0）
-4. 逐步安全滤波：β = [1.0, 0.8, 0.6, 0.4, 0.2, 0.0]
+Candidate window: centered on the predicted best hit step best_k,
+                  half-width window_half_ms (default 50 ms)
+
+Spatial corridor (perpendicular hinge loss, no time-space correspondence):
+  cost = 0.5 * s_k * Q_p_tube * max(0, ||P_perp (p_ee - p_ball,k)|| - r_racket)^2
+  half-width = racket radius (0.12 m), zero cost inside the corridor
+
+Softmin terminal aggregation over candidate ball states (sharpness beta):
+  l_N^sm = softmin_i ( c_i ),  all candidates evaluated at the shared terminal state
 ```
 
-### 感知层：BallEstimator 6D 卡尔曼滤波器
+Velocity-direction and racket-normal terms are carried by the terminal cost, not
+by the corridor, which keeps the corridor a pure spatial relaxation. The
+`Tube*` module names are historical; in the manuscript this relaxation is called
+the spatial corridor.
 
-在噪声观测下估计球的真实位置和速度：
+### Multi-Layer Safety Filter
 
 ```
-状态向量: x = [px, py, pz, vx, vy, vz]  （6D 位置+速度）
-过程模型: 匀速 + 重力（F 矩阵考虑 g=9.81 对 Vz 的衰减）
-观测模型: H = I₆（全状态直接观测）
-弹跳保护: Z < 0.01m 时 slam 位置、速度处理反弹/落地
+1. Joint constraints: position / velocity / acceleration / torque
+2. TCP speed hard limit (default 1.8 m/s in simulation)
+3. X-plane wall: the arm must stay at X >= -0.1 (no crossing the body midline)
+4. Stepwise safety filter: beta descent [0.8, 0.6, 0.4, 0.2, 0.0];
+   if every beta fails -> emergency braking
 ```
 
-三层感知架构：仿真真值 → 噪声注入（`add_observation_noise`）→ 卡尔曼滤波（`BallEstimator`）→ 规划消费。
+### Perception: BallEstimator 6D Kalman Filter
+
+Estimates the ball's true position and velocity under noisy observations:
+
+```
+State:        x = [px, py, pz, vx, vy, vz]  (6D position + velocity)
+Process:      constant velocity + gravity (F accounts for g=9.81 on Vz)
+Observation:  H = I6 (full-state direct observation)
+Bounce guard: for Z < 0.01 m the position is slammed and the velocity is
+              kept on bounce / zeroed on landing
+```
+
+Three-layer perception architecture: simulation ground truth -> noise injection
+(`add_observation_noise`) -> Kalman filtering (`BallEstimator`) -> planner
+consumption.
 
 ---
 
-## V12 命令行参数
+## V12 Command-Line Arguments
 
-| 参数 | 类型 | 默认 | 说明 |
-|------|------|------|------|
-| `--serve-box` | flag | — | 使用长方体发球区模式 |
-| `--ball-speed` | float | None | 球到达击打点时水平速度 (m/s) |
-| `--position-mode` | flag | — | 位置模式（默认力矩模式） |
-| `--seed` | int | None | 随机种子 |
-| `--viewer` | flag | — | MuJoCo 查看器回放 |
-| `--no-plot` | flag | — | 禁用 matplotlib 可视化 |
-| `--horizon` | int | None | 短地平线步数 |
-| `--iter` | int | None | 每次重规划迭代数 |
-| `--replan-interval` | int | None | 重规划间隔步数 |
-| `--window-ms` | float | 50.0 | Tube 候选窗口半宽 (ms) |
-| `--softmin-beta` | float | 5.0 | Softmin 温度参数 |
-| `--max-tcp` | float | None | TCP 线速度硬限制 (m/s) |
-| `--terminal-exempt-steps` | int | None | 终段 qdot/TCP 豁免步数 |
+| Argument | Type | Default | Description |
+|----------|------|---------|-------------|
+| `--serve-box` | flag | — | box-shaped serve region |
+| `--ball-speed` | float | None | horizontal ball speed at the hit point (m/s) |
+| `--position-mode` | flag | — | position mode (default: torque) |
+| `--seed` | int | None | random seed |
+| `--viewer` | flag | — | MuJoCo viewer replay |
+| `--no-plot` | flag | — | disable matplotlib visualization |
+| `--horizon` | int | None | short horizon length (steps) |
+| `--iter` | int | None | iLQR iterations per replan |
+| `--replan-interval` | int | None | replanning interval (steps) |
+| `--window-ms` | float | 50.0 | candidate time-window half-width (ms) |
+| `--softmin-beta` | float | 5.0 | softmin sharpness |
+| `--corridor-radius` | float | 0.12 | corridor half-width (m) |
+| `--max-tcp` | float | None | TCP speed hard limit (m/s) |
+| `--terminal-exempt-steps` | int | None | final-segment qdot/TCP exemption steps |
 
-> V11 已废弃，请使用 V12。完整参数列表运行 `python scripts/rm65_mpc_v12.py --help`
+> V11 is retired; use V12. Full argument list: `python scripts/rm65_mpc_v12.py --help`
 
 ---
 
-## 目录结构
+## Repository Layout
 
 ```
-mujoco_sim/
-├── README.md                             # 本文件
-├── AGENTS.md                             # 项目开发规范（详细）
+.
+├── README.md                             # this file (English)
+├── README.zh-CN.md                       # Chinese version
+├── AGENTS.md                             # detailed project conventions (Chinese)
 ├── requirements.txt
-├── setup.py                              # C++ 扩展构建（pybind11）
+├── setup.py                              # C++ extension build (pybind11)
 │
 ├── configs/
-│   ├── default.yaml                      # 基础仿真参数
-│   ├── mpc.yaml                          # MPC 专用参数
-│   ├── v5_active_hit.yaml                # V5 主动击球配置
-│   └── real_robot.yaml                   # 真机配置（7节+丰富注释）
+│   ├── default.yaml                      # base simulation parameters
+│   ├── mpc.yaml                          # MPC-specific parameters
+│   ├── v5_active_hit.yaml                # V5 active-hit configuration
+│   └── real_robot.yaml                   # real-robot configuration (7 sections)
 │
 ├── scripts/
-│   ├── rm65_mpc_v12.py                   # ★ V12 最新仿真主脚本（EpisodeRunner 管线架构）
-│   ├── rm65_mpc_v11.py                   # V11 薄壳（委托到 V12）
-│   ├── archive/                          # 已归档脚本（V6-V10 + tube + 旧实验）
+│   ├── rm65_mpc_v12.py                   # current main simulation script (EpisodeRunner pipeline)
+│   ├── rm65_mpc_v11.py                   # V11 shim (delegates to V12)
+│   ├── archive/                          # archived scripts (V6-V10 + tube + old experiments)
 │   ├── tools/
-│   │   ├── rm65_joint_viewer.py          # 关节调节查看器
-│   │   ├── test_real_robot/              # 真机接口测试工具（01-08）
-│   │   │   ├── README.md                 # 安全须知 + 使用说明
-│   │   │   ├── _connect.py               # 公共连接/预检模块
-│   │   │   └── 01~08_*.py                # 逐个 API 测试脚本
+│   │   ├── rm65_joint_viewer.py          # joint-slider viewer
+│   │   ├── test_real_robot/              # interface test tools (01-08)
 │   │   └── ...
-│   ├── exp/                              # 批量实验设施
-│   ├── extract/                          # 结果提取
-│   └── plot/                             # 论文图表
+│   ├── exp/                              # batch-experiment infrastructure
+│   ├── extract/                          # result extraction (paired_stats, aux_stats, ...)
+│   └── plot/                             # paper figures and tables (paper_figs.py)
 │
 ├── src/
 │   ├── robot/
-│   │   └── rm65_model.xml                # MuJoCo 模型（双臂12DOF + 球拍 + 球）
-│   ├── sim/                               # MuJoCo 仿真 + 回放 + 击打检测
-│   │   ├── rm65_env.py                   # RM65Env 仿真环境（力矩/位置双模式）
-│   │   ├── replay.py                     # 轨迹回放共享模块（碰撞窗口 + 弹性反弹）
-│   │   └── hit_detection.py              # 击打检测共享模块
-│   ├── ilqt/                             # iLQR + MPC + 管线 + 策略 + 组件
-│   │   ├── solver.py                     # iLQR 后向-前向迭代
-│   │   ├── cost.py                       # 代价函数（Tube + Softmin）
-│   │   ├── planning_env.py               # PlanningEnv 规划计算环境
-│   │   ├── mpc_controller.py             # ★ MPCController（策略注入 + MPCConfig）
-│   │   ├── episode_runner.py             # ★ EpisodeRunner（4 组件 + 5 hook）
-│   │   ├── step_context.py               # StepContext hook 数据容器
-│   │   ├── strategy_config.py            # StrategyConfig 策略注入容器
-│   │   ├── robot_env_protocol.py         # RobotEnv Protocol
-│   │   ├── async_replanner.py            # 异步重规划器
-│   │   ├── robot_limits.py               # 安全滤波
-│   │   ├── strategies/                   # 可插拔策略（5 个 Protocol）
-│   │   └── components/                   # 可组合组件（3 Protocol + SimComponent + Safety）
-│   ├── real/                             # 真机部署模块（纯真机接口，不含 MuJoCo）
-│   │   ├── config.py                     # RealRobotConfig
-│   │   ├── robot_interface.py            # Realman SDK 封装
-│   │   ├── ball_sensor.py                # BallSensor ABC + SimulatedBallSensor
-│   │   ├── ball_perceiver.py             # BallPerceiver（KF 滤波）
-│   │   ├── safety_monitor.py             # SafetyMonitor
-│   │   ├── adaptive_timer.py             # 自适应频率控制
-│   │   └── torque_to_position.py         # 力矩→位置积分器（备用）
-│   ├── dynamics/                         # 动力学线性化
-│   ├── perception/                       # 卡尔曼滤波器
-│   ├── tennis/                           # 网球轨迹预测 + 击打点计算
-│   ├── cpp/                              # C++ 加速（pybind11）
-│   └── utils/                            # 工具（模型加载/噪声注入/数学）
+│   │   └── rm65_model.xml                # MuJoCo model (dual arm 12 DOF + racket + ball)
+│   ├── sim/                              # MuJoCo simulation + replay + hit detection
+│   ├── ilqt/                             # iLQR + MPC + pipeline + strategies + components
+│   │   ├── solver.py                     # iLQR backward-forward iteration
+│   │   ├── cost.py                       # cost terms (corridor + softmin)
+│   │   ├── planning_env.py               # PlanningEnv planning environment
+│   │   ├── mpc_controller.py             # MPCController (strategy injection + MPCConfig)
+│   │   ├── episode_runner.py             # EpisodeRunner (4 components + 5 hooks)
+│   │   ├── strategies/                   # pluggable strategies
+│   │   └── components/                   # composable pipeline components
+│   ├── real/                             # real-robot deployment modules
+│   ├── dynamics/                         # dynamics linearization
+│   ├── perception/                       # Kalman filter
+│   ├── tennis/                           # ball trajectory prediction + hit-point computation
+│   ├── cpp/                              # C++ acceleration (pybind11)
+│   └── utils/                            # shared utilities (model loading / noise / math)
 │
-├── tests/                                # 单元测试（332 tests）
-├── docs/                                 # 技术文档
-└── paper/                                # 论文 LaTeX 工程
+├── tests/                                # unit tests (662)
+├── experiment_data/                      # per-episode results, logs, figure assets (tracked subset)
+├── docs/                                 # technical documentation (Chinese)
+└── paper/                                # manuscript LaTeX project (local only, not tracked)
 ```
 
-> 详细模块说明见 [`src/README.md`](src/README.md)，脚本清单见 [`scripts/README.md`](scripts/README.md)
+> Module details: [`src/README.md`](src/README.md); script index: [`scripts/README.md`](scripts/README.md) (both Chinese).
 
 ---
 
-## 配置文件
+## Configuration
 
-### `configs/default.yaml` — 仿真参数
+### `configs/default.yaml` — simulation parameters
 
 ```yaml
 sim:
-  dt: 0.005              # 仿真步长 (s)
+  dt: 0.005              # simulation step (s)
 
 cost:
-  Q_p: [50000, 50000, 50000]   # 终端位置代价权重
-  Q_v: [200, 200, 200]         # 终端速度代价权重
-  R: 0.0001                    # 控制代价权重
+  Q_p: [50000, 50000, 50000]   # terminal position cost weights
+  Q_v: [200, 200, 200]         # terminal velocity cost weights
+  R: 0.0001                    # control cost weight
 
 hitting:
-  racket_speed: 1.8             # 期望击球速度 (m/s)
-  workspace_radius: 0.85        # 工作空间半径 (m)
+  racket_speed: 5.0            # nominal racket speed (m/s)
+  workspace_radius: 0.85       # reachable workspace radius (m)
 ```
 
-### `configs/real_robot.yaml` — 真机配置
+### `configs/real_robot.yaml` — real-robot configuration
 
 ```yaml
 robot:
-  ip: "192.168.1.18"             # 机械臂 IP 地址
+  ip: "192.168.1.18"             # arm IP address
   port: 8080
 
 control:
-  control_mode: "ip"             # "ip"(rm_movej_follow) | "canfd"(rm_movej_canfd)
-  dt: 0.005                      # MPC 规划步长
+  control_mode: "ip"             # "ip" (rm_movej_follow) | "canfd" (rm_movej_canfd)
+  dt: 0.005                      # MPC planning step
 
 safety:
-  collision_stage: 5             # 碰撞灵敏度 0-8（⚠️ 首次5，稳定后降低）
-  torque_limit: [50, 50, 50, 30, 30, 30]  # N·m
-  max_tcp_speed: 1.0             # TCP 最大线速度 m/s（⚠️ 实验时调整）
+  collision_stage: 5             # collision sensitivity 0-8 (start at 5; lower later)
+  torque_limit: [50, 50, 50, 30, 30, 30]  # N*m
+  max_tcp_speed: 1.0             # TCP speed limit (m/s)
 
 position_mode:
-  kp: [200, 200, 100, 50, 50, 20]   # PD 位置增益（⚠️ 实验时调整）
-  kd: [20, 20, 10, 5, 5, 2]         # PD 速度增益
-  enable_feedforward: true           # 重力+科氏力前馈补偿
+  kp: [200, 200, 100, 50, 50, 20]   # PD position gains
+  kd: [20, 20, 10, 5, 5, 2]         # PD velocity gains
+  enable_feedforward: true           # gravity + Coriolis feedforward
 
 perception:
   sensor_type: "simulated"       # "simulated" / "optitrack" / "realsense"
-  pos_noise_std: 0.005           # 位置噪声 m（⚠️ 标定后修改）
+  pos_noise_std: 0.005           # position noise (m)
 ```
 
-> 完整配置说明和参数注释见 `configs/real_robot.yaml`，标记说明见 [`AGENTS.md`](AGENTS.md) § 真机部署架构
+> Full parameter documentation: comments inside `configs/real_robot.yaml` and
+> [`AGENTS.md`](AGENTS.md) (Chinese).
