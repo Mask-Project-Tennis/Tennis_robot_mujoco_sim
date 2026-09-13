@@ -1,45 +1,37 @@
 {
-  "generated": "2026-09-10 17:51:05",
+  "generated": "2026-09-13 00:11:06",
   "targets": [
     {
       "name": "a_hit_clean",
       "desc": "基线 9 m/s 干净命中（fig3 走廊示意 + fig4 基准 + 视频）",
-      "seed": 1,
-      "outcome": "hit",
-      "npz": "a_hit_clean.npz",
-      "wall_s": 1.29,
-      "hit_type": "active",
-      "pos_error": 0.06683
+      "seed": null,
+      "outcome": null,
+      "npz": null,
+      "scanned": 0
     },
     {
       "name": "b_hit_space_perturb",
       "desc": "空间扰动 0.1m 命中（fig4 对照 + fig8 走廊激活）",
-      "seed": 1,
-      "outcome": "hit",
-      "npz": "b_hit_space_perturb.npz",
-      "wall_s": 1.3,
-      "hit_type": "active",
-      "pos_error": 0.052261
+      "seed": null,
+      "outcome": null,
+      "npz": null,
+      "scanned": 0
     },
     {
       "name": "c_miss_combined_perturb",
       "desc": "t=50ms + s=0.2m 组合扰动 miss（fig8 失败模式 + 视频）",
-      "seed": 3,
-      "outcome": "miss",
-      "npz": "c_miss_combined_perturb.npz",
-      "wall_s": 1.3,
-      "hit_type": "miss",
-      "pos_error": 0.331478
+      "seed": null,
+      "outcome": null,
+      "npz": null,
+      "scanned": 0
     },
     {
       "name": "d_hit_noise_kf",
       "desc": "噪声 σp=0.02 + KF 命中（fig8 感知面板备选）",
-      "seed": 3,
-      "outcome": "hit",
-      "npz": "d_hit_noise_kf.npz",
-      "wall_s": 1.31,
-      "hit_type": "active",
-      "pos_error": 0.093317
+      "seed": null,
+      "outcome": null,
+      "npz": null,
+      "scanned": 0
     }
   ]
 }

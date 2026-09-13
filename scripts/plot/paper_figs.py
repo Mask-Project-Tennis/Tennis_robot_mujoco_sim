@@ -160,8 +160,11 @@ def fig1_hero(npz_path: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz") ->
     ax.plot(b[:, 0], b[:, 1], color=C["ball"], lw=1.5, zorder=3)
     ax.plot(r[:, 0], r[:, 1], color=C["racket"], lw=1.3, zorder=2)
     ax.scatter([b[-1, 0]], [b[-1, 1]], color="k", marker="*", s=50, zorder=5)
+    # 标注置于星标下方（va="top"）：轨迹右上方是标题与图边缘，下方为空白区，
+    # 避免两行文字向上顶进面板标题造成叠压
     ax.annotate("single\n$(t, p)$", (b[-1, 0], b[-1, 1]),
-                textcoords="offset points", xytext=(7, 7), fontsize=7.5)
+                textcoords="offset points", xytext=(8, -8), fontsize=7.5,
+                va="top")
     ax.set_xlabel("X (m)")
     ax.set_ylabel("Y (m)")
     ax.set_title("(a) Point target: one instant, one point", fontsize=8)
@@ -190,9 +193,9 @@ def fig1_hero(npz_path: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz") ->
             idx = len(b) - 1 + kk
             ax.scatter([b[idx, 0]], [b[idx, 1]], color="k", marker="*", s=18,
                        zorder=5, alpha=0.75 if kk else 1.0)
-    ax.annotate("candidate\ninstants", (b[-1, 0], b[-1, 1] + off[1]),
-                textcoords="offset points", xytext=(-6, 10), fontsize=7.5,
-                ha="right")
+    ax.annotate("candidate\ninstants", (b[-1, 0], b[-1, 1]),
+                textcoords="offset points", xytext=(8, -8), fontsize=7.5,
+                va="top")
     ax.set_xlabel("X (m)")
     ax.set_ylabel("Y (m)")
     ax.set_title("(b) Corridor + time window: a band, any instant", fontsize=8)
