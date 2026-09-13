@@ -316,9 +316,9 @@ def fig3_alt_2d(npz_path: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz") 
                     label="Corridor ($\\pm0.12$ m)")
     ax.plot(r[:, 1], r[:, 2], color=C["racket"], lw=1.4, label="Racket center")
     ax.scatter(b[-1, 1], b[-1, 2], color="k", marker="*", s=40, zorder=5)
-    # hit 标注移到锚点左上方：命中点在轨迹右端，原偏移贴右边框（judge 意见）
+    # hit 标注置于命中点左下方（走廊带内空白区）：左上偏移会被球轨迹线穿过词面
     ax.annotate("hit", (b[-1, 1], b[-1, 2]), textcoords="offset points",
-                xytext=(-6, 6), fontsize=8, ha="right")
+                xytext=(-8, -12), fontsize=8, ha="right", va="top")
     ax.set_xlabel("Y (m)")
     ax.set_ylabel("Z (m)")
     ax.set_title("(a) Side view: corridor along the ball line", fontsize=8)
@@ -380,6 +380,10 @@ def fig4(npz_a: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz",
     hit_b = int(db["hit_step"]) * float(db["dt"]) * 1000
     names = ["J0", "J1", "J2", "J3", "J4", "J5"]
     colors = ["#0072B2", "#D55E00", "#009E73", "#56B4E9", "#E69F00", "#CC79A7"]
+    # 灰度打印下单靠颜色无法区分 6 条曲线（审稿人意见）：每条曲线给唯一线型，
+    # J4/J5 再叠稀疏空心 marker，保证黑白下仍可逐条追踪
+    styles = ["-", "--", "-.", ":", "-", "--"]
+    markers = [None, None, None, None, ("o", 60), ("s", 60)]
 
     # 版式：(a)(b) 上下同宽共享时间轴（同列，竖直对照成立），(c) 占右列两行。
     # 旧版 (a) 通栏而 (b) 只有 55% 宽：上下同宽的时间轴被拉成不同比例，
@@ -402,16 +406,23 @@ def fig4(npz_a: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz",
                       np.abs(np.radians(lim["q_max_deg"][:6]) - q0))
     util = 100.0 * np.abs(da["q_actual"] - q0) / head
     for j in range(6):
-        ax.plot(t_a, util[:, j], color=colors[j], lw=1.0, label=names[j])
+        mk = markers[j]
+        kw = {}
+        if mk is not None:
+            kw = dict(marker=mk[0], markevery=mk[1], markersize=2.6,
+                      markerfacecolor="none", markeredgewidth=0.7)
+        ax.plot(t_a, util[:, j], color=colors[j], lw=1.0, ls=styles[j],
+                label=names[j], **kw)
     ax.axhline(100, color="gray", ls="--", lw=0.8)
     ax.annotate("joint limit", xy=(0.985, 100), xycoords=("axes fraction", "data"),
                 ha="right", va="bottom", fontsize=7, color="dimgray")
     ax.axvline(hit_a, color="k", ls=":", lw=0.8)
     ax.set_ylabel("Utilization (%)")
     ax.set_ylim(0, 130)
-    # 图例锚在 100% 限位线上方空白带（judge 意见：原位置把虚线中断在中部）
+    # 图例锚在 100% 限位线上方空白带（judge 意见：原位置把虚线中断在中部）；
+    # handlelength 加长以便虚/点线型在图例中可辨认（灰度可读性，审稿人意见）
     ax.legend(ncol=6, loc="lower left", bbox_to_anchor=(0.0, 0.80),
-              fontsize=7, columnspacing=0.7, handlelength=1.1, labelspacing=0.2,
+              fontsize=7, columnspacing=0.7, handlelength=1.5, labelspacing=0.2,
               borderpad=0.25, framealpha=0.9)
     ax.set_title("(a) Joint excursion vs. available limit headroom", fontsize=9)
     ax.tick_params(labelbottom=False)
@@ -444,28 +455,25 @@ def fig4(npz_a: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz",
     axi = fig.add_subplot(gs[0:2, 1])
     m_a = (t_a > hit_a - 120) & (t_a < hit_a + 120)
     m_b = (t_b > hit_b - 120) & (t_b < hit_b + 120)
-    axi.plot(t_a[m_a] - hit_a, v_a[m_a], color="#4D4D4D", lw=1.1)
-    axi.plot(t_b[m_b] - hit_b, v_b[m_b], color="#999999", lw=1.1, ls="--")
+    axi.plot(t_a[m_a] - hit_a, v_a[m_a], color="#4D4D4D", lw=1.1,
+             label="nominal")
+    axi.plot(t_b[m_b] - hit_b, v_b[m_b], color="#999999", lw=1.1, ls="--",
+             label="space-perturbed")
     axi.axhline(1.8, color="gray", ls="--", lw=0.8)
     axi.set_xlabel("$t-t_{hit}$ (ms)")
     axi.set_ylabel("TCP speed (m/s)")
     axi.set_ylim(0, max(v_a[m_a].max(), v_b[m_b].max()) * 1.15)
-    # 行内直标两条曲线（judge 意见：放大图须能独立阅读，不依赖 (b) 的图例）
-    i_a, i_b = int(np.argmax(v_a[m_a])), int(np.argmax(v_b[m_b]))
-    axi.annotate("nominal", (t_a[m_a][i_a] - hit_a, v_a[m_a][i_a]),
-                 textcoords="offset points", xytext=(-30, 3), fontsize=7,
-                 color="#4D4D4D")
-    axi.annotate("space-perturbed", (t_b[m_b][i_b] - hit_b, v_b[m_b][i_b]),
-                 textcoords="offset points", xytext=(2, 5), fontsize=7,
-                 color="#808080")
-    # 量化两 run 的分离（审稿人：panel (c) 应给具体量，而非只说 "diverge"）
+    # 两条曲线的身份用小图例在左下角标出（审稿人意见：原内嵌标签与 Δv 文字
+    # 在曲线峰值附近互相压字；左下 [−120,−40] ms 区全空，figure 内其余位置
+    # 右下被回收段占据）。Δv_max / hit shift 数值移入 caption，此处 print 供核对。
     xa, xb = t_a[m_a] - hit_a, t_b[m_b] - hit_b
     common = np.union1d(xa, xb)
     dv = np.abs(np.interp(common, xa, v_a[m_a])
                 - np.interp(common, xb, v_b[m_b])).max()
-    axi.text(0.03, 0.96, f"$\\Delta v_{{\\max}}={dv:.2f}$ m/s; "
-             f"hit shift ${hit_b - hit_a:+.0f}$ ms",
-             transform=axi.transAxes, fontsize=7, va="top", color="k")
+    print(f"fig4(c): dv_max={dv:.2f} m/s, hit shift={hit_b - hit_a:+.0f} ms")
+    axi.legend(loc="lower left", ncol=2, fontsize=6.5, framealpha=0.9,
+               handlelength=1.3, columnspacing=0.9, borderpad=0.3,
+               labelspacing=0.2)
     axi.set_title("(c) Zoom: hit neighbourhood", fontsize=9)
     style_ax(axi)
 
@@ -673,12 +681,14 @@ def fig_realtime(stats: dict, timing_path: Path = DATA / "exp18_fig_assets/timin
         ("Steady-state, p95", ss["p95_ms"]),
         ("Steady-state, max", ss["max_ms"]),
     ]
-    # 标题已含 (a) 与单位，不再另起一行 "Replanning time (ms)"（与标题重复）
-    ax.text(0.07, 1.06, "(a) Replanning time (ms)", fontsize=9, va="top",
+    # 标题已含 (a) 与单位，不再另起一行 "Replanning time (ms)"（与标题重复）；
+    # 表头横线下移到标题降部以下（judge 意见：原 0.96 横线穿过标题括号/降部）
+    ax.text(0.07, 1.09, "(a) Replanning time (ms)", fontsize=9, va="top",
             transform=ax.transAxes)
-    ax.plot([0.07, 0.95], [0.96, 0.96], transform=ax.transAxes, lw=0.7, color="k")
+    ax.plot([0.07, 0.95], [0.925, 0.925], transform=ax.transAxes, lw=0.7,
+            color="k")
     for i, (name, val) in enumerate(rows):
-        y = 0.88 - i * 0.135
+        y = 0.855 - i * 0.132
         ax.text(0.07, y, name, fontsize=7.5, va="center", transform=ax.transAxes)
         ax.text(0.93, y, f"{val:.1f}", fontsize=7.5, va="center", ha="right",
                 transform=ax.transAxes, color=C["none"] if val > 100 else "k")
