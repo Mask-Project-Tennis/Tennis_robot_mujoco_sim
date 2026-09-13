@@ -105,6 +105,15 @@ class _StepTimer:
                 f"max={ordered[-1]:.2f} n_over_period={over} "
                 f"period_ms={period_ms:.2f} deciles={deciles}")
 
+    def latencies_line(self) -> str:
+        """生成逐步耗时原始序列单行（供真 per-step ECDF 图使用）。
+
+        Returns:
+            形如 ``__STEP_LATENCIES__: 0.26,0.27,...`` 的字符串（2 位小数，步序保留）。
+        """
+        return ("__STEP_LATENCIES__: "
+                + ",".join(f"{v:.2f}" for v in self.deltas_ms))
+
 
 # ==============================================================================
 # 可视化（从 V11 复用）
@@ -219,6 +228,8 @@ def main() -> None:
                         help="日志级别（默认 INFO; 计时分析需 DEBUG 以输出稳态 REPLAN）")
     parser.add_argument("--dump-step-timing", action="store_true",
                         help="输出每步主循环耗时摘要（__STEP_TIMING__, 同步/异步停顿对比用）")
+    parser.add_argument("--dump-step-latencies", action="store_true",
+                        help="额外输出逐步耗时原始序列（__STEP_LATENCIES__, 真 per-step ECDF 数据源）")
     args = parser.parse_args()
     logging.getLogger().setLevel(getattr(logging, args.log_level))
 
@@ -755,6 +766,8 @@ def main() -> None:
     t_mpc_end = time.perf_counter()
     if step_timer is not None:
         print(step_timer.summary(period_ms=dt * 1000.0))
+        if args.dump_step_latencies:
+            print(step_timer.latencies_line())
 
     # ==========================================================================
     # 14. 击打后继续仿真（V11 2225-2243，PD 保持 20 步）

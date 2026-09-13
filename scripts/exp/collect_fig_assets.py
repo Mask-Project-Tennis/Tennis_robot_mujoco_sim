@@ -55,6 +55,7 @@ ASYNC_RE = re.compile(
     r"horizon=(\d+) t=(\d+)ms")
 RESULT_RE = re.compile(r"__RESULT__: (.+)")
 STEP_RE = re.compile(r"__STEP_TIMING__: (.+)")
+LAT_RE = re.compile(r"__STEP_LATENCIES__: (.+)")
 RUN_TIMEOUT_S = 180
 
 BASE_9MS: dict[str, Any] = {"--serve-box": None, "--ball-speed": 9, "--no-plot": None}
@@ -172,12 +173,14 @@ def collect_series(episodes: int, async_mode: bool, tag: str) -> dict[str, Any]:
         timing.json 中的一条序列记录。
     """
     params: dict[str, Any] = {**BASE_9MS, "--log-level": "DEBUG",
-                             "--dump-step-timing": None}
+                             "--dump-step-timing": None,
+                             "--dump-step-latencies": None}
     if async_mode:
         params["--async-replan"] = None
     pattern = ASYNC_RE if async_mode else SYNC_RE
     records: list[dict[str, int]] = []
     stall_rows: list[dict[str, float]] = []
+    raw_pool: list[float] = []
     per_episode: list[dict[str, Any]] = []
     for seed in range(1, episodes + 1):
         text, fields, wall = run_episode({**params, "--seed": seed})
@@ -197,6 +200,10 @@ def collect_series(episodes: int, async_mode: bool, tag: str) -> dict[str, Any]:
                 else:
                     row[k] = float(v)
             stall_rows.append(row)
+        # 逐步原始耗时（真 per-step ECDF 数据源，--dump-step-latencies 输出）
+        m_lat = LAT_RE.search(text)
+        if m_lat:
+            raw_pool.extend(float(x) for x in m_lat.group(1).split(",") if x)
         per_episode.append({
             "seed": seed, "n_replans": len(hits), "wall_s": round(wall, 2),
             "mean_ms": (round(statistics.fmean([h["t_ms"] for h in hits]), 1)
@@ -234,6 +241,8 @@ def collect_series(episodes: int, async_mode: bool, tag: str) -> dict[str, Any]:
             "p99_ms_max": max(r["p99"] for r in stall_rows),
             "max_ms_max": max(r["max"] for r in stall_rows),
             "deciles_pooled": sorted(pooled),
+            # 逐步原始耗时池（fig8(b) 真 per-step ECDF；与 total_steps 同口径）
+            "raw_pool": sorted(raw_pool),
         }
     return {
         "episodes": episodes,

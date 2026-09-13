@@ -56,6 +56,22 @@
       "outcome": "active",
       "npz": "raw/co_hit_s20.npz",
       "scanned": 0
+    },
+    {
+      "name": "pt_miss_s20_s77",
+      "desc": "point-target seed77 固定 s=-0.2m miss（fig7 空间配对 (c)，min 122mm）",
+      "seed": 77,
+      "outcome": "miss",
+      "npz": "raw/pt_miss_s20_s77.npz",
+      "scanned": 0
+    },
+    {
+      "name": "co_hit_s20_s77",
+      "desc": "corridor-only seed77 固定 s=-0.2m hit（fig7 空间配对 (d)，min 76mm）",
+      "seed": 77,
+      "outcome": "active",
+      "npz": "raw/co_hit_s20_s77.npz",
+      "scanned": 0
     }
   ]
 }
