@@ -39,7 +39,7 @@ PROJECT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT))
 DATA = PROJECT / "experiment_data"
 OUT = PROJECT / "paper" / "figures"
-STATS_JSON = PROJECT / "paper" / "planning" / "06-stats-active.json"
+# 统计 JSON 由 resolve_stats_json() 解析：paper 工作区优先，主仓库内副本回退
 
 # ---------------------------------------------------------------------------
 # 全局样式（字号在 1.00 缩放下即最终字号）
@@ -83,12 +83,23 @@ MODE_ORDER = ["full", "tube_only", "softmin_only", "none"]
 # 工具
 # ---------------------------------------------------------------------------
 
-def load_stats() -> dict:
+def resolve_stats_json(explicit: Path | None = None,
+                       project: Path = PROJECT) -> Path:
+    """解析统计 JSON：显式路径 > paper 工作区 > 主仓库内副本。"""
+    if explicit is not None:
+        return explicit
+    for cand in (project / "paper" / "planning" / "06-stats-active.json",
+                 project / "experiment_data" / "paper_stats_active.json"):
+        if cand.exists():
+            return cand
+    raise FileNotFoundError(
+        "未找到统计 JSON；请先运行 scripts/extract/paired_stats.py")
+
+
+def load_stats(explicit: Path | None = None) -> dict:
     """读取配对统计 JSON（active-hit 口径，图与正文同源）。"""
-    if not STATS_JSON.exists():
-        raise FileNotFoundError(
-            f"缺少 {STATS_JSON}；请先运行 scripts/extract/paired_stats.py")
-    return json.loads(STATS_JSON.read_text(encoding="utf-8"))
+    path = resolve_stats_json(explicit)
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def style_ax(ax) -> None:
@@ -113,11 +124,11 @@ def fmt_pv(p: float) -> str:
 
 
 def save(fig, name: str) -> None:
-    """保存到 paper/figures（原生尺寸，无 tight bbox 以保持字号恒定）。"""
+    """保存图到输出目录（原生尺寸，无 tight bbox 以保持字号恒定）。"""
     OUT.mkdir(parents=True, exist_ok=True)
     fig.savefig(OUT / name, dpi=300)
     plt.close(fig)
-    print(f"已保存 paper/figures/{name}")
+    print(f"已保存 {OUT / name}")
 
 
 # =============================================================================
@@ -202,9 +213,9 @@ def fig1_hero(npz_path: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz") ->
     style_ax(ax)
 
     fig.tight_layout(pad=0.3)
-    fig.savefig(OUT / "fig1_hero.pdf", dpi=300)
+    save(fig, "fig1_hero.pdf")
     plt.close(fig)
-    print("已保存 paper/figures/fig1_hero.pdf （hero 概念图）")
+    print(f"已保存 {OUT / 'fig1_hero.pdf'} （hero 概念图）")
 
 
 def fig3_3d(npz_path: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz") -> None:
@@ -260,7 +271,7 @@ def fig3_3d(npz_path: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz") -> N
     fig.legend(handles, labels, loc="lower center", bbox_to_anchor=(0.5, 0.0),
                ncol=2, fontsize=6.2, frameon=False, columnspacing=0.9,
                handlelength=1.5, handletextpad=0.4, labelspacing=0.25)
-    fig.savefig(OUT / "fig3_tube_corridor.pdf", dpi=300)
+    save(fig, "fig3_tube_corridor.pdf")
     plt.close(fig)
     print("已保存 paper/figures/fig3_tube_corridor.pdf （3D 正文版）")
 
@@ -334,9 +345,9 @@ def fig3_alt_2d(npz_path: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz") 
     style_ax(ax)
 
     fig.tight_layout(pad=0.3)
-    fig.savefig(OUT / "fig3_alt_2d.pdf", dpi=300)
+    save(fig, "fig3_alt_2d.pdf")
     plt.close(fig)
-    print("已保存 paper/figures/fig3_alt_2d.pdf （2D 备选版）")
+    print(f"已保存 {OUT / 'fig3_alt_2d.pdf'} （2D 备选版）")
 
 
 # =============================================================================
@@ -714,11 +725,12 @@ def fig_diagnostic() -> None:
 # Table I / II（统计量读 JSON，含 n 与配对 p）
 # =============================================================================
 
-def tables(stats: dict) -> None:
+def tables(stats: dict, out_dir: Path | None = None) -> None:
     """生成 Table I（含 n）与 Table II（含配对 p 与 DiD p）。"""
     e3, e4, e7, e8 = (stats["E3_nominal"], stats["E4_grid"],
                       stats["E7_corners"], stats["E8_limit_mechanism"])
-    out_dir = OUT / "table_data"
+    if out_dir is None:
+        out_dir = OUT / "table_data"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     def cell(kind: str, key: str) -> float:
@@ -740,19 +752,36 @@ def tables(stats: dict) -> None:
                   *[m for m in MODE_ORDER])]
     rows_corner = [("Corner 12 m/s, $t{=}0$, $s{=}0.2$ m", "E7",
                     *[f"12|s0.2|t0|{m}" for m in MODE_ORDER])]
+    rows_all = rows12 + rows_grid + rows_corner
+
+    def ci_half_pp(kind: str, key: str) -> float:
+        """Wilson 95% CI 半宽（pp）。"""
+        src = {"E3": e3["cells"], "E4": e4["merged_20cell"],
+               "E7": e7["cells"]}[kind]
+        lo, hi = src[key]["ci95"]
+        return (hi - lo) / 2.0
+
+    # caption 的数字全部由 stats JSON 计算（与正文数字同源，避免手改失同步）
+    nom_hw = [ci_half_pp(k, key) for _, k, *keys in rows12 for key in keys]
+    gc_hw = [ci_half_pp(k, key)
+             for _, k, *keys in rows_grid + rows_corner for key in keys]
+    nom_n = [n_of(k, keys[0]) for _, k, *keys in rows12]
 
     lines = [r"\begin{table*}[t]", r"\centering",
-             r"\caption{Active-hit rate (\%) of the four configurations across "
-             r"conditions; $n$ is the number of valid runs per cell (Wilson 95\% "
-             r"intervals are within $\pm3$ pp for the nominal rows and "
-             r"$\pm2$ pp for the grid corner row).}", r"\label{tab:ablation}",
-             r"\begin{tabular}{lccccr}", r"\toprule",
-             r"Condition & full & corridor-only & softmin-only & point-target & $n$ \\",
+             r"\caption{Active-hit rate (\%) of the four configurations across conditions;",
+             r"$n$ is the number of valid runs per cell. Wilson 95\% intervals are",
+             f"$\\pm{min(nom_hw):.1f}$--${max(nom_hw):.1f}$ pp for the nominal rows "
+             f"($n{{=}}{min(nom_n)}$--${max(nom_n)}$) and "
+             f"$\\pm{min(gc_hw):.1f}$--${max(gc_hw):.1f}$ pp",
+             r"for the grid and corner rows; exact intervals are provided in the artifact.}",
+             r"\label{tab:ablation}",
+             r"\begin{tabular}{lccccrc}", r"\toprule",
+             r"Condition & full & corridor-only & softmin-only & point-target & $n$ & Exp. \\",
              r"\midrule"]
-    for label, kind, *keys in rows12 + rows_grid + rows_corner:
+    for label, kind, *keys in rows_all:
         vals = " & ".join(f"{cell(kind, k):.1f}" for k in keys)
         n = n_of(kind, keys[0])
-        lines.append(f"{label} & {vals} & {n} \\\\")
+        lines.append(f"{label} & {vals} & {n} & {kind} \\\\")
     lines += [r"\bottomrule", r"\end{tabular}", r"\end{table*}", ""]
     (out_dir / "table1_comparison.tex").write_text("\n".join(lines), encoding="utf-8")
 
@@ -785,7 +814,7 @@ def tables(stats: dict) -> None:
                      f"(sign test $p{fmt_p(d.get('p_sign', 1))}$)}} \\\\")
     lines += [r"\bottomrule", r"\end{tabular}", r"\end{table}", ""]
     (out_dir / "table2_ablation.tex").write_text("\n".join(lines), encoding="utf-8")
-    print("已保存 paper/figures/table_data/table1_comparison.tex + table2_ablation.tex")
+    print(f"已保存 {out_dir}/table1_comparison.tex + table2_ablation.tex")
 
 
 # =============================================================================
@@ -794,11 +823,18 @@ def tables(stats: dict) -> None:
 
 def main() -> None:
     """按 --fig 参数生成图表。"""
+    global OUT
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--fig", nargs="*", default=["3", "3alt", "4", "5", "6", "7", "8", "table"])
+    ap.add_argument("--stats", type=Path, default=None,
+                    help="统计 JSON 路径（默认自动解析 paper/planning 或 experiment_data）")
+    ap.add_argument("--out", type=Path, default=None,
+                    help="输出目录（默认 paper/figures；表格写入 <out>/table_data）")
     args = ap.parse_args()
+    if args.out is not None:
+        OUT = args.out
     want = set(args.fig)
-    stats = load_stats()
+    stats = load_stats(args.stats)
     if "1hero" in want:
         fig1_hero()
     if "3" in want:
