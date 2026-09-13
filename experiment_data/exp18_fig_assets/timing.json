@@ -9,7 +9,7 @@
     "episodes": 30,
     "async_mode": false,
     "n_replans": 291,
-    "n_first_plan": 56,
+    "n_first_plan": 28,
     "all": {
       "n": 291,
       "mean_ms": 97.9,
@@ -19,12 +19,12 @@
       "min_ms": 3
     },
     "first_plan": {
-      "n": 56,
-      "mean_ms": 469.8,
-      "median_ms": 454.0,
-      "p95_ms": 951,
+      "n": 28,
+      "mean_ms": 935.5,
+      "median_ms": 936.5,
+      "p95_ms": 952,
       "max_ms": 954,
-      "min_ms": 4
+      "min_ms": 903
     },
     "steady_state": {
       "n": 235,

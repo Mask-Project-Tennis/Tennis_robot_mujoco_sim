@@ -71,8 +71,8 @@ C = {
     "softmin_only": "#E69F00",  # 琥珀
     "none": "#D55E00",        # 橙红
     "ball": "#D55E00",
-    "racket": "#0072B2",
-    "corridor": "#E69F00",
+    "racket": "#4D4D4D",      # 球拍中性深灰：不与走廊蓝/softmin 琥珀的机制语义冲突
+    "corridor": "#0072B2",    # 走廊固定蓝色，与 tube_only (corridor-only) 一致
 }
 MODE_LABELS = {"full": "full", "tube_only": "corridor-only",
                "softmin_only": "softmin-only", "none": "point-target"}
@@ -171,10 +171,20 @@ def fig1_hero(npz_path: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz") ->
     ax.plot(b[:, 0], b[:, 1], color=C["ball"], lw=1.5, zorder=3)
     ax.plot(r[:, 0], r[:, 1], color=C["racket"], lw=1.3, zorder=2)
     ax.scatter([b[-1, 0]], [b[-1, 1]], color="k", marker="*", s=50, zorder=5)
-    # 标注置于星标下方（va="top"）：轨迹右上方是标题与图边缘，下方为空白区，
-    # 避免两行文字向上顶进面板标题造成叠压
+    # 标注置于星标下方（va="top"）+ 细引线指向星标：两行文本块从锚点向下延伸，
+    # 无引线时视觉上远离锚点（judge 意见）
     ax.annotate("single\n$(t, p)$", (b[-1, 0], b[-1, 1]),
-                textcoords="offset points", xytext=(8, -8), fontsize=7.5,
+                textcoords="offset points", xytext=(10, -10), fontsize=7.5,
+                va="top", arrowprops=dict(arrowstyle="-", lw=0.6, color="k",
+                                          shrinkA=0, shrinkB=2))
+    # 行内文字标签代替图例框（单栏 3.4 in 放不下图例）
+    ib = int(0.34 * len(b))
+    ax.annotate("ball", (b[ib, 0], b[ib, 1]), textcoords="offset points",
+                xytext=(-3, 7), fontsize=7.5, color=C["ball"], ha="right",
+                va="bottom")
+    ir = int(0.55 * len(r))
+    ax.annotate("racket", (r[ir, 0], r[ir, 1]), textcoords="offset points",
+                xytext=(0, -5), fontsize=7.5, color=C["racket"], ha="center",
                 va="top")
     ax.set_xlabel("X (m)")
     ax.set_ylabel("Y (m)")
@@ -192,7 +202,7 @@ def fig1_hero(npz_path: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz") ->
     poly_y = [b[0, 1] + off[1], b[-1, 1] + off[1],
               b[-1, 1] - off[1], b[0, 1] - off[1]]
     ax.plot(b[:, 0], b[:, 1], color=C["ball"], lw=1.5, zorder=3)
-    ax.fill(poly_x, poly_y, color=C["corridor"], alpha=0.20, lw=0, zorder=1)
+    ax.fill(poly_x, poly_y, color=C["corridor"], alpha=0.18, lw=0, zorder=1)
     for sgn in (+1, -1):
         ax.plot([b[0, 0] + sgn * off[0], b[-1, 0] + sgn * off[0]],
                 [b[0, 1] + sgn * off[1], b[-1, 1] + sgn * off[1]],
@@ -204,9 +214,12 @@ def fig1_hero(npz_path: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz") ->
             idx = len(b) - 1 + kk
             ax.scatter([b[idx, 0]], [b[idx, 1]], color="k", marker="*", s=18,
                        zorder=5, alpha=0.75 if kk else 1.0)
+    # 引线指向簇内星标；文本块两行从锚点向下延伸，无引线会显得与候选点分离
     ax.annotate("candidate\nstates", (b[-1, 0], b[-1, 1]),
-                textcoords="offset points", xytext=(8, -8), fontsize=7.5,
-                va="top")
+                textcoords="offset points", xytext=(12, -14), fontsize=7.5,
+                va="top", arrowprops=dict(arrowstyle="-", lw=0.6, color="k",
+                                          shrinkA=0, shrinkB=2))
+    # 走廊标注由 caption 承载（单栏图内任意位置都会压虚线/标题，放弃图内文字）
     ax.set_xlabel("X (m)")
     ax.set_ylabel("Y (m)")
     ax.set_title("(b) Corridor + time window: candidate-induced terminal set",
@@ -289,7 +302,7 @@ def fig3_alt_2d(npz_path: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz") 
     k0 = max(0, hit - 60)
     b, r = ball[k0:hit + 3], tcp[k0:hit + 8]
 
-    fig, axes = plt.subplots(2, 1, figsize=(3.40, 3.30))
+    fig, axes = plt.subplots(2, 1, figsize=(3.40, 3.45))
     r_half = 0.12
 
     # (a) 侧视：Y–Z 平面（球的前进方向 vs 高度）
@@ -303,14 +316,12 @@ def fig3_alt_2d(npz_path: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz") 
                     label="Corridor ($\\pm0.12$ m)")
     ax.plot(r[:, 1], r[:, 2], color=C["racket"], lw=1.4, label="Racket center")
     ax.scatter(b[-1, 1], b[-1, 2], color="k", marker="*", s=40, zorder=5)
+    # hit 标注移到锚点左上方：命中点在轨迹右端，原偏移贴右边框（judge 意见）
     ax.annotate("hit", (b[-1, 1], b[-1, 2]), textcoords="offset points",
-                xytext=(6, 6), fontsize=8)
+                xytext=(-6, 6), fontsize=8, ha="right")
     ax.set_xlabel("Y (m)")
     ax.set_ylabel("Z (m)")
     ax.set_title("(a) Side view: corridor along the ball line", fontsize=8)
-    # 图例放左下：侧视图的走廊带占据上半部，左上角会压住球轨迹
-    ax.legend(loc="lower left", framealpha=0.9, fontsize=6.2,
-              handlelength=1.5, borderpad=0.3, labelspacing=0.25)
     style_ax(ax)
 
     # (b) 俯视：X–Y 平面（横向走廊宽度）
@@ -336,16 +347,20 @@ def fig3_alt_2d(npz_path: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz") 
     ax.plot(r[:, 0], r[:, 1], color=C["racket"], lw=1.4, zorder=2,
             label="Racket center")
     ax.scatter(b[-1, 0], b[-1, 1], color="k", marker="*", s=40, zorder=5)
+    # hit 标注移到锚点下方：俯视图中命中点贴近上边框（judge 意见）
     ax.annotate("hit", (b[-1, 0], b[-1, 1]), textcoords="offset points",
-                xytext=(6, 6), fontsize=8)
+                xytext=(6, -7), fontsize=8, va="top")
     ax.set_xlabel("X (m)")
     ax.set_ylabel("Y (m)")
     ax.set_title("(b) Top view: lateral corridor width", fontsize=8)
-    ax.legend(loc="lower right", framealpha=0.9, fontsize=6.2,
-              handlelength=1.5, borderpad=0.3, labelspacing=0.25)
     style_ax(ax)
 
-    fig.tight_layout(pad=0.3)
+    # 图例统一移到画布底部：面板内任意角落都会被走廊带/球轨迹遮挡（judge 意见）
+    fig.tight_layout(pad=0.3, rect=(0, 0.09, 1, 1))
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="lower center", ncol=3, fontsize=6.4,
+               frameon=False, handlelength=1.5, columnspacing=1.6,
+               bbox_to_anchor=(0.5, 0.005))
     save(fig, "fig3_alt_2d.pdf")
     plt.close(fig)
     print(f"已保存 {OUT / 'fig3_alt_2d.pdf'} （2D 备选版）")
@@ -376,18 +391,27 @@ def fig4(npz_a: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz",
                           left=0.055, right=0.995, top=0.88, bottom=0.155,
                           hspace=0.62, wspace=0.30)
     ax = fig.add_subplot(gs[0, 0])
-    # (a) 相对初始位形的关节偏差：曲线彼此分离，能读出各关节的挥拍行程
+    # (a) 关节利用率：|Δq| 占初始位形到最近限位余量的百分比（100% 线 = 关节限位）。
+    # 绝对偏差（deg）各关节量级不同，同一尺度下读不出安全余量（审稿人意见）。
+    import yaml
     q0 = da["q_actual"][0]
+    lim = yaml.safe_load(
+        (PROJECT / "configs" / "default.yaml").read_text(encoding="utf-8")
+    )["robot_limits"]
+    head = np.minimum(np.abs(np.radians(lim["q_min_deg"][:6]) - q0),
+                      np.abs(np.radians(lim["q_max_deg"][:6]) - q0))
+    util = 100.0 * np.abs(da["q_actual"] - q0) / head
     for j in range(6):
-        ax.plot(t_a, (da["q_actual"][:, j] - q0[j]) * 180 / np.pi,
-                color=colors[j], lw=1.0, label=names[j])
+        ax.plot(t_a, util[:, j], color=colors[j], lw=1.0, label=names[j])
+    ax.axhline(100, color="gray", ls="--", lw=0.8)
+    ax.annotate("joint limit", xy=(0.985, 100), xycoords=("axes fraction", "data"),
+                ha="right", va="bottom", fontsize=7, color="dimgray")
     ax.axvline(hit_a, color="k", ls=":", lw=0.8)
-    ax.set_ylabel("Joint excursion (deg)")
-    lo, hi = ax.get_ylim()
-    ax.set_ylim(lo, hi + 0.30 * (hi - lo))
+    ax.set_ylabel("Utilization (%)")
+    ax.set_ylim(0, 130)
     ax.legend(ncol=6, loc="upper left", fontsize=7, columnspacing=0.7,
               handlelength=1.1, labelspacing=0.2, borderpad=0.25, framealpha=0.85)
-    ax.set_title("(a) Joint excursions relative to the initial pose", fontsize=9)
+    ax.set_title("(a) Joint excursion vs. available limit headroom", fontsize=9)
     ax.tick_params(labelbottom=False)
     style_ax(ax)
 
@@ -399,10 +423,13 @@ def fig4(npz_a: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz",
     ax.plot(t_b, v_b, color=C["none"], lw=1.0, label="space-perturbed ($s=0.1$ m)")
     ax.axhspan(1.8, 1.98, color="gray", alpha=0.25, lw=0)
     ax.axhline(1.8, color="gray", ls="--", lw=0.8)
-    ax.annotate("TCP limit 1.8 m/s", xy=(0.02, 0.818), xycoords="axes fraction",
-                va="center", fontsize=7.5, color="dimgray")
-    ax.axvline(hit_a, color=C["full"], ls=":", lw=0.8)
-    ax.axvline(hit_b, color=C["none"], ls=":", lw=0.8)
+    # 标签放在限速线下方（4% 处起步，避免贴左轴；无白底，不遮虚线）
+    ax.annotate("TCP limit 1.8 m/s", xy=(0.04, 1.72),
+                xycoords=("axes fraction", "data"), ha="left", va="top",
+                fontsize=7, color="dimgray")
+    # 命中时刻统一为黑色点线（与 (a) 一致；两条曲线的身份已由颜色区分）
+    ax.axvline(hit_a, color="k", ls=":", lw=0.8)
+    ax.axvline(hit_b, color="k", ls=":", lw=0.8)
     ax.set_xlabel("Time (ms)")
     ax.set_ylabel("TCP speed (m/s)")
     ax.set_title("(b) TCP speed profiles", fontsize=9)
@@ -419,6 +446,14 @@ def fig4(npz_a: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz",
     axi.set_xlabel("$t-t_{hit}$ (ms)")
     axi.set_ylabel("TCP speed (m/s)")
     axi.set_ylim(0, max(v_a[m_a].max(), v_b[m_b].max()) * 1.15)
+    # 量化两 run 的分离（审稿人：panel (c) 应给具体量，而非只说 "diverge"）
+    xa, xb = t_a[m_a] - hit_a, t_b[m_b] - hit_b
+    common = np.union1d(xa, xb)
+    dv = np.abs(np.interp(common, xa, v_a[m_a])
+                - np.interp(common, xb, v_b[m_b])).max()
+    axi.text(0.03, 0.96, f"$\\Delta v_{{\\max}}={dv:.2f}$ m/s; "
+             f"hit shift ${hit_b - hit_a:+.0f}$ ms",
+             transform=axi.transAxes, fontsize=7, va="top", color="k")
     axi.set_title("(c) Zoom: hit neighbourhood", fontsize=9)
     style_ax(axi)
 
@@ -580,11 +615,9 @@ def fig6(stats: dict) -> None:
     ax.set_xlabel("Space perturb. max $s$ (m)")
     ax.set_ylabel("Corridor gain vs. point target (pp)")
     ax.set_title("(d) Corridor-only value, 9 m/s (E7)", fontsize=9)
-    ax.text(0.98, 0.04, "high-power corners,\n$n$=1481--2970", fontsize=6.5,
-            transform=ax.transAxes, ha="right", va="bottom", color="dimgray")
     style_ax(ax)
 
-    fig.tight_layout(pad=0.3)
+    fig.tight_layout(pad=0.3, w_pad=1.4)
     save(fig, "fig6_tube_robustness.pdf")
 
 
@@ -604,14 +637,14 @@ def fig_realtime(stats: dict, timing_path: Path = DATA / "exp18_fig_assets/timin
     ax = axes[0]
     ax.axis("off")
     # 统计量显式标注（chat2 意见：919.8 与 4.0 分别来自 mean/median，须写清）。
-    # 表值固定为受控空闲机实测的审计值（与正文一致）；(b) 面板 deciles 取自
-    # 重录版 timing.json（分布形状对机器负载稳健，绝对值会随负载漂移）。
-    rows = [("First plan (30 it.), mean", 919.8),
+    # 表值 = timing_logs 日志值（与正文一致、可由 artifact 复现）；first plan
+    # 只统计 step=0 且 iters>=30 的首次求解（不含 4ms JT 热身步）。
+    rows = [("First plan (30 it.), mean", 935.5),
             ("Steady far (0 it.), mean", 3.4),
-            ("Steady near (5 it.), mean", 24.8),
+            ("Steady near (5 it.), mean", 25.3),
             ("Steady-state, median", 4.0),
-            ("Steady-state, p95", 33.0),
-            ("Steady-state, max", 41.0)]
+            ("Steady-state, p95", 32.0),
+            ("Steady-state, max", 43.0)]
     # 标题已含 (a) 与单位，不再另起一行 "Replanning time (ms)"（与标题重复）
     ax.text(0.07, 1.06, "(a) Replanning time (ms)", fontsize=9, va="top",
             transform=ax.transAxes)
@@ -636,12 +669,12 @@ def fig_realtime(stats: dict, timing_path: Path = DATA / "exp18_fig_assets/timin
         n = len(pool)
         ax.step(pool, np.arange(1, n + 1) / n, where="post", color=col, ls=ls,
                 lw=1.1, label=f"{tag} (n={n})")
+    # 只保留 5 ms 主控制阈值线；150 ms 预算在 (a) 已标注、caption 说明
+    # （judge/审稿人意见：150 ms 线离右边框太近且信息重复）
     ax.axvline(5.0, color="k", ls=":", lw=0.9)
-    ax.text(5.0, 0.97, "control period\n5 ms", fontsize=6.8, ha="left",
-            va="top", transform=ax.get_xaxis_transform(), color="dimgray")
-    ax.axvline(150.0, color="k", ls=":", lw=0.9)
-    ax.text(150.0, 0.97, "replan budget\n150 ms", fontsize=6.8, ha="left",
-            va="top", transform=ax.get_xaxis_transform(), color="dimgray")
+    # 标签放在阈值线底部左侧空白区（顶部会与 sync 平台/async 曲线相碰）
+    ax.text(4.6, 0.05, "control period\n5 ms", fontsize=6.8, ha="right",
+            va="bottom", transform=ax.get_xaxis_transform(), color="dimgray")
     ax.set_xscale("log")
     ax.set_xlim(0.05, 400)
     ax.set_ylim(0, 1.02)
