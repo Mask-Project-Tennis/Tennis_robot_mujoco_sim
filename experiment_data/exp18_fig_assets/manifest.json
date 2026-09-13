@@ -32,6 +32,30 @@
       "outcome": null,
       "npz": null,
       "scanned": 0
+    },
+    {
+      "name": "pt_miss_t50",
+      "desc": "point-target seed52 固定 t=+50ms miss（fig7 三联面板1）",
+      "seed": 52,
+      "outcome": "miss",
+      "npz": "raw/pt_miss_t50.npz",
+      "scanned": 0
+    },
+    {
+      "name": "sm_hit_t50",
+      "desc": "softmin-only seed52 固定 t=+50ms hit（fig7 三联面板2）",
+      "seed": 52,
+      "outcome": "active",
+      "npz": "raw/sm_hit_t50.npz",
+      "scanned": 0
+    },
+    {
+      "name": "co_hit_s20",
+      "desc": "corridor-only seed52 固定 s=-0.2m hit（fig7 三联面板3）",
+      "seed": 52,
+      "outcome": "active",
+      "npz": "raw/co_hit_s20.npz",
+      "scanned": 0
     }
   ]
 }

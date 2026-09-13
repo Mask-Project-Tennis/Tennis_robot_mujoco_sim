@@ -204,12 +204,13 @@ def fig1_hero(npz_path: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz") ->
             idx = len(b) - 1 + kk
             ax.scatter([b[idx, 0]], [b[idx, 1]], color="k", marker="*", s=18,
                        zorder=5, alpha=0.75 if kk else 1.0)
-    ax.annotate("candidate\ninstants", (b[-1, 0], b[-1, 1]),
+    ax.annotate("candidate\nstates", (b[-1, 0], b[-1, 1]),
                 textcoords="offset points", xytext=(8, -8), fontsize=7.5,
                 va="top")
     ax.set_xlabel("X (m)")
     ax.set_ylabel("Y (m)")
-    ax.set_title("(b) Corridor + time window: a band, any instant", fontsize=8)
+    ax.set_title("(b) Corridor + time window: candidate-induced terminal set",
+                 fontsize=8)
     style_ax(ax)
 
     fig.tight_layout(pad=0.3)
@@ -672,9 +673,9 @@ def fig_diagnostic() -> None:
 
     env = RM65Env(PROJECT / "src" / "robot" / "rm65_model.xml")
     specs = [
-        ("b_hit_space_perturb", "Corridor hit", C["full"]),
-        ("c_miss_combined_perturb", "Miss", C["none"]),
-        ("d_hit_noise_kf", "Noise+filter hit", C["softmin_only"]),
+        ("pt_miss_t50", "Point-target miss", C["none"]),
+        ("sm_hit_t50", "Softmin-only hit", C["softmin_only"]),
+        ("co_hit_s20", "Corridor-only hit", C["tube_only"]),
     ]
     fig, axes = plt.subplots(1, 3, figsize=(7.16, 1.78))
     series: list[tuple[np.ndarray, np.ndarray]] = []
@@ -714,7 +715,7 @@ def fig_diagnostic() -> None:
     y_all = np.concatenate([dist for _, dist in series])
     for ax in axes:
         ax.set_xlim(x_all.min(), x_all.max())
-        ax.set_ylim(40.0, 1.05 * float(y_all.max()))
+        ax.set_ylim(0.55 * float(y_all.min()), 1.05 * float(y_all.max()))
         ax.set_xlabel("$t - t_{hit}^{nom}$ (ms)")
 
     fig.tight_layout(pad=0.3)
@@ -776,12 +777,14 @@ def tables(stats: dict, out_dir: Path | None = None) -> None:
              r"for the grid and corner rows; exact intervals are provided in the artifact.}",
              r"\label{tab:ablation}",
              r"\begin{tabular}{lccccrc}", r"\toprule",
-             r"Condition & full & corridor-only & softmin-only & point-target & $n$ & Exp. \\",
+             r"Condition & full & corridor-only & softmin-only & point-target & $n$ & Design \\",
              r"\midrule"]
+    kind_label = {"E3": "nominal four-tier", "E4": "perturbation grid",
+                  "E7": "high-power corners"}
     for label, kind, *keys in rows_all:
         vals = " & ".join(f"{cell(kind, k):.1f}" for k in keys)
         n = n_of(kind, keys[0])
-        lines.append(f"{label} & {vals} & {n} & {kind} \\\\")
+        lines.append(f"{label} & {vals} & {n} & {kind_label[kind]} \\\\")
     lines += [r"\bottomrule", r"\end{tabular}", r"\end{table*}", ""]
     (out_dir / "table1_comparison.tex").write_text("\n".join(lines), encoding="utf-8")
 
