@@ -20,8 +20,9 @@
 # ============================================================================
 set -u
 set -o pipefail  # 管道中前一命令（gate/batch_runner）的失败不被 tee 吞掉
-PROJECT="/data/fxy/research/Tennis_robot_mujoco_sim"
-PY="/home/fxy/.local/miniforge3/envs/mujoco_tennis/bin/python"
+# 项目根目录按脚本位置解析；PY 可用环境变量覆盖（默认本机 conda 环境）
+PROJECT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+PY="${PY:-$HOME/.local/miniforge3/envs/mujoco_tennis/bin/python}"
 export OMP_NUM_THREADS=1
 export MUJOCO_GL="${MUJOCO_GL:-egl}"
 cd "$PROJECT"
