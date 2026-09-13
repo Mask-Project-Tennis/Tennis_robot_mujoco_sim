@@ -211,7 +211,8 @@ def collect_series(episodes: int, async_mode: bool, tag: str) -> dict[str, Any]:
     by_iters: dict[str, Any] = {}
     for rec in records:
         by_iters.setdefault(str(rec["iters"]), []).append(rec["t_ms"])
-    n_first = sum(1 for r in records if r["step"] == 0)
+    # 首次规划只统计真实首解（iters>=30），不含 step=0 的 4ms JT 热身步
+    n_first = sum(1 for r in records if r["step"] == 0 and r["iters"] >= 30)
     # 主循环停顿（每步墙钟）：同步 replan 阻塞步会拉长间隔, 异步保持平稳
     total_steps = int(sum(r["n"] for r in stall_rows))
     total_over = int(sum(r.get("n_over_period", 0) for r in stall_rows))
@@ -240,7 +241,8 @@ def collect_series(episodes: int, async_mode: bool, tag: str) -> dict[str, Any]:
         "n_replans": len(records),
         "n_first_plan": n_first,
         "all": _stats([r["t_ms"] for r in records]),
-        "first_plan": _stats([r["t_ms"] for r in records if r["step"] == 0]),
+        "first_plan": _stats([r["t_ms"] for r in records
+                              if r["step"] == 0 and r["iters"] >= 30]),
         "steady_state": _stats([r["t_ms"] for r in records if r["step"] > 0]),
         "by_iters": {k: _stats(v) for k, v in sorted(
             by_iters.items(), key=lambda kv: int(kv[0]))},
