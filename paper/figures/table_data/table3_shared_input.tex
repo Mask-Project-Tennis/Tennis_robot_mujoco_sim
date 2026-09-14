@@ -2,22 +2,25 @@
 % 数字来源：experiment_data/exp24_shared_full/results.csv（9 m/s × 5 格 × 4 档 × 100 seeds = 2000 runs），
 % 配对同 seed、bootstrap 95% CI、精确配对 McNemar（scripts/extract/paired_stats.py）。
 % 走廊增益显著集中在空间通道 (t=0)；full ≡ candidate-set-only 全部 5 格 0 不一致对。
-\begin{table*}[t]
+% chat15 审稿意见：通栏 table* 太稀疏 → 改单栏 table 并补走廊-vs-点目标配对 p 列
+% （5 格 p 值来自 analyze_chat12_night.py exp24 分节；Holm 校正 p=0.059 与正文一致）
+\begin{table}[t]
 \centering
 \caption{Shared-input end-to-end check: active-hit rate (\%) of the four
 tiers over five $(t,s)$ cells at $9$\,{\upshape m/s}, $n{=}98$ paired
-episodes per tier (see \Cref{sec:results}).}
+episodes per tier; last column: paired McNemar $p$ of corridor-only vs.\
+point-target (Holm-adjusted $0.059$ over the five cells).}
 \label{tab:shared}
-\setlength{\tabcolsep}{6pt}
-\begin{tabular}{@{}lcccc@{}}
+\setlength{\tabcolsep}{2.5pt}
+\begin{tabular}{@{}lccccc@{}}
 \toprule
-$(t,s)$ cell & full & corridor-only & candidate-set-only & point-target \\
+$(t,s)$ cell & full & \shortstack{corridor-\\only} & \shortstack{candidate-\\set-only} & \shortstack{point-\\target} & $p$ \\
 \midrule
-$(0,0.1)$ & $59.2$ & $65.3$ & $59.2$ & $54.1$ \\
-$(0,0.2)$ & $32.7$ & $37.8$ & $32.7$ & $32.7$ \\
-$(0,0.3)$ & $23.5$ & $27.6$ & $23.5$ & $18.4$ \\
-$(25,0.2)$ & $39.8$ & $32.7$ & $39.8$ & $33.7$ \\
-$(50,0.2)$ & $36.7$ & $31.6$ & $36.7$ & $37.8$ \\
+$(0,0.1)$ & $59.2$ & $65.3$ & $59.2$ & $54.1$ & $0.013$ \\
+$(0,0.2)$ & $32.7$ & $37.8$ & $32.7$ & $32.7$ & $0.180$ \\
+$(0,0.3)$ & $23.5$ & $27.6$ & $23.5$ & $18.4$ & $0.012$ \\
+$(25,0.2)$ & $39.8$ & $32.7$ & $39.8$ & $33.7$ & $1.0$ \\
+$(50,0.2)$ & $36.7$ & $31.6$ & $36.7$ & $37.8$ & $0.146$ \\
 \bottomrule
 \end{tabular}
-\end{table*}
+\end{table}

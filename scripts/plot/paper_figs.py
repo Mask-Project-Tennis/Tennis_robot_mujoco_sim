@@ -823,10 +823,10 @@ def fig5(stats: dict) -> None:
     # 改为上排 (a)(b) + 下排 (c) 横跨全宽，柱间距与数值标注获得可用宽度
     # constrained_layout：自动为标题/轴标签/刻度分配边距，避免上排刻度标签
     # 与下排标题相撞（手调边距在下排标题较长时反复冲突）
-    fig = plt.figure(figsize=(7.16, 1.82), constrained_layout=True)
+    fig = plt.figure(figsize=(7.16, 2.40), constrained_layout=True)
     gs = fig.add_gridspec(2, 3, height_ratios=[1.0, 1.05],
                           width_ratios=[1.55, 0.62, 0.83],
-                          hspace=0.06, wspace=0.06)
+                          hspace=0.10, wspace=0.06)
     axes = [fig.add_subplot(gs[0, 0]), fig.add_subplot(gs[0, 1:]),
             fig.add_subplot(gs[1, :])]
     ax = axes[0]
@@ -888,7 +888,7 @@ def fig5(stats: dict) -> None:
                    yerr=[[v - lo], [hi - v]], capsize=1.3,
                    error_kw=dict(lw=0.7, ecolor="0.25"))
             ax.text(x0 + ti, hi + 0.8 if v >= 0 else lo - 0.8, f"{v:+.0f}",
-                    ha="center", va="bottom" if v >= 0 else "top", fontsize=6.5)
+                    ha="center", va="bottom" if v >= 0 else "top", fontsize=7)
     ax.axhline(0, color="gray", lw=0.7, ls="--")
     ax.set_xticks([ci * 3 + 1 for ci in range(len(cells))],
                   [f"{spd:g}$\\times${tcp:g}" for spd, tcp in cells])
@@ -896,12 +896,13 @@ def fig5(stats: dict) -> None:
     ax.set_ylabel("Gain (pp)")
     ax.set_ylim(-34, 44)
     # chat14 P6：面板名去「反转区域」的因果暗示，只陈述已测设置下的增益
-    ax.set_title("(c) Gain across speed--cap settings", fontsize=8.5)
+    ax.set_title("(c) Gain across speed--cap settings", fontsize=9)
     from matplotlib.patches import Patch
-    # chat14 P6：图例移出数据区——(c) 横跨全宽后置于顶部横排（不压任何柱）
+    # chat14 P6：图例不压数据——右下象限为空（9 m/s 各格增益全正），
+    # chat15：上方居中原与 7--9 m/s 小增益柱顶标注相撞（渲染检测出 3 处重叠）
     ax.legend(handles=[Patch(facecolor=C[k], label=lab, alpha=0.9)
                        for k, lab in tiers],
-              loc="upper left", ncol=3, fontsize=6.5, framealpha=0.9,
+              loc="lower right", ncol=3, fontsize=7, framealpha=0.9,
               borderpad=0.3, labelspacing=0.25, handlelength=1.2,
               columnspacing=1.2)
     style_ax(ax)
@@ -937,7 +938,7 @@ def fig6(stats: dict) -> None:
     e3, e4, e7 = stats["E3_nominal"], stats["E4_grid"], stats["E7_corners"]
     # chat9 审稿意见：这是核心结果图，应获得更多面积（旧版 2.25 in 四子图明显变扁），
     # 面板标题缩短、方法/速度/单位移入坐标轴与图注
-    fig, axes = plt.subplots(2, 2, figsize=(7.16, 2.02))
+    fig, axes = plt.subplots(2, 2, figsize=(7.16, 2.45))
 
     def asym_err(v: dict) -> tuple[float, float]:
         """配对 bootstrap CI 的上下误差条（以 diff_pp 为基准）。"""
@@ -986,8 +987,6 @@ def fig6(stats: dict) -> None:
                 k = f"t{t}|s{s}"
                 gain[i, j] = e4["per_cell_paired"][f"{k}|{cmp}"]["diff_pp"]
         im = ax.imshow(gain, aspect="auto", cmap="RdBu_r", vmin=-20, vmax=20)
-        # 面板压扁后 5 行刻度标签会互相贴上：热图 y 刻度单独用小一号字体
-        ax.tick_params(axis="y", labelsize=6.5)
         ax.set_xticks(range(len(ss)), [f"{s:.2f}" for s in ss])
         ax.set_yticks(range(len(ts)), [f"{t}" for t in ts])
         ax.set_xlabel("Spatial max $s$ (m), 9 m/s")
@@ -1265,15 +1264,14 @@ def tables(stats: dict, out_dir: Path | None = None) -> None:
     (out_dir / "table1_comparison.tex").write_text("\n".join(lines), encoding="utf-8")
 
     # Table II：TCP 限速层内配对 p + 跨层配对 DiD
+    # （chat15：DiD 三行通栏文本改对齐子表、caption 压短——表格更密）
     lines = [r"\begin{table}[t]", r"\centering",
-             r"\caption{Gain (pp) of each configuration over the point-target "
-             r"baseline under the two TCP speed caps ($7$ m/s, $n=394$ paired "
-             r"seeds); $p$ from the exact paired McNemar test; DiD is the paired "
-             r"per-seed difference in gain (mean with paired-bootstrap $95\%$ CI; "
-             r"sign test on the per-seed direction); all $p$-values are unadjusted "
-             r"tests for the pre-specified mechanism comparisons.}",
+             r"\caption{Gain ({\upshape pp}) over the point-target baseline under "
+             r"the two TCP caps ($7$\,{\upshape m/s}, $n{=}394$ paired seeds; paired McNemar "
+             r"$p$, unadjusted). DiD: paired per-seed gain shift from TCP 1.8 to "
+             r"TCP 1.0 (bootstrap $95\%$ CI, sign-test $p$).}",
              r"\label{tab:limits}",
-             r"\setlength{\tabcolsep}{4pt}",
+             r"\setlength{\tabcolsep}{3.5pt}",
              r"\begin{tabular}{lcccr}", r"\toprule",
              r"Config. & \multicolumn{2}{c}{Gain over point-target (pp)} & "
              r"\multicolumn{2}{c}{$p$} \\",
@@ -1286,17 +1284,17 @@ def tables(stats: dict, out_dir: Path | None = None) -> None:
             f"{MODE_LABELS[mode]} & ${p18.get('diff_pp', 0):+.1f}$ & "
             f"${p10.get('diff_pp', 0):+.1f}$ & ${fmt_pv(p18.get('p_mcnemar', 1))}$ & "
             f"${fmt_pv(p10.get('p_mcnemar', 1))}$ \\\\")
+    lines += [r"\bottomrule", r"\end{tabular}", "",
+              r"\vspace{2pt}",
+              r"\begin{tabular}{lccc}", r"\toprule",
+              r"DiD (TCP 1.8 $\to$ TCP 1.0) & DiD (pp) & $95\%$ CI & sign-test $p$ \\",
+              r"\midrule"]
     did = e8["did"]
-    lines += [r"\midrule",
-              r"\multicolumn{5}{l}{Paired DiD (gain shift from TCP 1.8 to "
-              r"TCP 1.0):} \\"]
     for mode in ("tube_only", "softmin_only", "full"):
         d = did.get(mode, {})
         lo, hi = d.get("ci95", [np.nan, np.nan])
-        lines.append(f"\\quad {MODE_LABELS[mode]} & \\multicolumn{{4}}{{l}}"
-                     f"{{${d.get('mean_did_pp', 0):+.1f}$ pp "
-                     f"(CI $[{lo:.1f},{hi:.1f}]$; sign test "
-                     f"$p{fmt_p(d.get('p_sign', 1))}$)}} \\\\")
+        lines.append(f"{MODE_LABELS[mode]} & ${d.get('mean_did_pp', 0):+.1f}$ & "
+                     f"$[{lo:.1f},{hi:.1f}]$ & ${fmt_pv(d.get('p_sign', 1))}$ \\\\")
     lines += [r"\bottomrule", r"\end{tabular}", r"\end{table}", ""]
     (out_dir / "table2_ablation.tex").write_text("\n".join(lines), encoding="utf-8")
     print(f"已保存 {out_dir}/table1_comparison.tex + table2_ablation.tex")
