@@ -193,6 +193,8 @@ def main() -> None:
                         help="统一观测扰动（chat12 C2）: ballstate 口径下时序/可达性也消费受扰球态")
     parser.add_argument("--no-freeze-first-plan", action="store_true",
                         help="不冻结时间端到端（chat12 C1）: 首次规划期间球继续飞行，计算延迟计入任务时间")
+    parser.add_argument("--always-collision", action="store_true",
+                        help="击球前球-拍碰撞常开（chat14 碰撞窗口验证）: 绕过 k_hit/距离窗口判定")
     parser.add_argument("--random-perturb", action="store_true", help="随机扰动")
     parser.add_argument("--perturb-sign", choices=["random", "positive", "negative"],
                         default="random", help="扰动符号方向")
@@ -732,6 +734,7 @@ def main() -> None:
     sim_component = SimComponent(
         env, mpc, robot_limits, init_q, is_position_mode,
         _hard_x_body_ids, initial_hitting_tube, tube_cfg, dt,
+        always_collision=args.always_collision,
     )
     # 初始化 history（与 V11 一致：X_history[0] = x0）
     sim_component.X_history = [x0.copy()]

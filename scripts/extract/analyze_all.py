@@ -12,6 +12,7 @@
 4. ``check_shared_input.py``共享输入（ballstate）交叉验证
 5. ``analyze_chat12_night.py`` 夜跑五实验（exp23-27：不冻结端到端 / 统一共享输入 /
                             候选选择基线 / 速度×TCP 网格 / 击球质量）
+6. ``analyze_exp28_collision.py`` 碰撞窗口验证（exp28 常开碰撞 vs 窗口口径裁决对照）
 
 用法::
 
@@ -58,10 +59,11 @@ REPORTED: dict[str, str] = {
     "exp25_select_one": "RQ1 候选选择基线",
     "exp26_tcp_grid": "RQ3 速度×TCP 网格",
     "exp27_ball_quality": "RQ1 击球质量",
+    "exp28_always_collision": "碰撞窗口验证（常开对照 180 次重跑）",
 }
 SUBMODULES: tuple[str, ...] = (
     "paired_stats", "aux_stats", "extract_chat8_aux", "check_shared_input",
-    "analyze_chat12_night",
+    "analyze_chat12_night", "analyze_exp28_collision",
 )
 
 

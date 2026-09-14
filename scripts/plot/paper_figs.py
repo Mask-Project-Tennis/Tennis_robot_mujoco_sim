@@ -32,6 +32,7 @@ from pathlib import Path
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.ticker import FormatStrFormatter
 import numpy as np
 
 PROJECT = Path(__file__).resolve().parent.parent.parent
@@ -193,7 +194,8 @@ def fig1_hero(npz_path: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz") ->
     half_x = 0.17                                       # 拍面沿轨迹半长
     half_y = 0.15                                       # 拍面横向半轴 + 余量
     x_lo = float(b[:, 1].min()) - 0.02
-    x_hi = float(p_face[0]) + max(0.36, half_x + 0.14)  # 含拍柄
+    # chat14：原 0.36 只够拍柄长度，椭圆拍面被右边界裁掉——加大右余量
+    x_hi = float(p_face[0]) + max(0.34, half_x + 0.22)
     y_from_path = [float(b[:, 0].min()) - 0.115,        # 走廊下边界 + 标签
                    float(b[:, 0].max()) + 0.13]         # 走廊上边界（完整）
     y_lo = min(y_from_path[0], float(p_face[1]) - half_y - 0.02)
@@ -258,12 +260,12 @@ def fig1_hero(npz_path: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz") ->
     ax.scatter([b[-1, 1]], [b[-1, 0]], marker="*", s=75, color=C["ball"],
                edgecolor="white", lw=0.5, zorder=6)
     ax.annotate("single target", (b[-1, 1], b[-1, 0]), textcoords="offset points",
-                xytext=(-13, 11), fontsize=9.2, ha="right", va="bottom",
+                xytext=(-13, 11), fontsize=12.9, ha="right", va="bottom",
                 color=C["ball"], zorder=7,
                 arrowprops=dict(arrowstyle="-", lw=0.6, color=C["ball"],
                                 shrinkA=0, shrinkB=4))
     ax.text(0.005, 0.995, "(a) Point target", transform=ax.transAxes,
-            fontsize=9.4, ha="left", va="top")
+            fontsize=12.6, ha="left", va="top")
 
     # ---------------- (b) 候选窗口终端 + 走廊 ----------------
     ax = axes[1]
@@ -287,16 +289,17 @@ def fig1_hero(npz_path: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz") ->
                                 shrinkA=1, shrinkB=1), zorder=5)
     k_lab = int(ks[1])
     ax.annotate("candidate ball states", (b[k_lab, 1], b[k_lab, 0]),
-                textcoords="offset points", xytext=(-5, 11), fontsize=9.2,
+                textcoords="offset points", xytext=(-5, 11), fontsize=12.9,
                 ha="right", va="bottom", color=C["ball"], zorder=7,
                 arrowprops=dict(arrowstyle="-", lw=0.6, color=C["ball"],
                                 shrinkA=0, shrinkB=3))
     mid = cw[len(cw) // 2] - 1.35 * r_half * nrm[len(cw) // 2]
     ax.annotate("spatial corridor", (mid[0], mid[1]),
-                textcoords="offset points", xytext=(0, -2), fontsize=9.2,
+                textcoords="offset points", xytext=(0, -2), fontsize=12.9,
                 ha="center", va="top", color=C["corridor"], zorder=7)
-    ax.text(0.005, 0.995, "(b) Candidate-window terminal + corridor",
-            transform=ax.transAxes, fontsize=9.4, ha="left", va="top")
+    # 标题字号放大后需缩短文案（原 "…terminal + corridor" 会超出画布右界）
+    ax.text(0.005, 0.995, "(b) Candidate window + corridor",
+            transform=ax.transAxes, fontsize=12.6, ha="left", va="top")
 
     save(fig, "fig1_hero.pdf")
 
@@ -390,7 +393,7 @@ def fig3_alt_2d(npz_path: Path = DATA / "exp18_fig_assets/raw/d_hit_noise_kf.npz
     GRAY = "0.65"
     r_half = 0.12
 
-    fig, axes = plt.subplots(2, 1, figsize=(3.40, 2.72), sharex=True)
+    fig, axes = plt.subplots(2, 1, figsize=(3.40, 2.30), sharex=True)
 
     # 放大区间（两面板共享 Y 轴范围）
     y_lo = float(seg[:, 1].min()) - 0.16
@@ -463,6 +466,10 @@ def fig3_alt_2d(npz_path: Path = DATA / "exp18_fig_assets/raw/d_hit_noise_kf.npz
                 ha="right", va="top", color=C["corridor"])
     ax.set_ylabel("Z (m)")
     ax.set_ylim(0.68, 1.08)
+    # chat14 审稿意见：两面板 Y 刻度数与标签格式统一（0.70/1.00 与 -0.70/-0.95 同宽），
+    # 面板刻度对齐后读者才能直接比较两视图的尺度
+    ax.set_yticks([0.70, 0.80, 0.90, 1.00])
+    ax.yaxis.set_major_formatter(FormatStrFormatter("%.2f"))
     ax.set_title("(a) Side view", fontsize=8.5)
     style_ax(ax)
 
@@ -481,6 +488,8 @@ def fig3_alt_2d(npz_path: Path = DATA / "exp18_fig_assets/raw/d_hit_noise_kf.npz
     ax.set_xlabel("Y (m)")
     ax.set_ylabel("X (m)")
     ax.set_ylim(-0.98, -0.60)
+    ax.set_yticks([-0.95, -0.85, -0.75, -0.65])
+    ax.yaxis.set_major_formatter(FormatStrFormatter("%.2f"))
     ax.set_title("(b) Top view", fontsize=8.5)
     style_ax(ax)
     # 两面板共享放大的 Y 轴范围（sharex=True，设一次即可）
@@ -661,7 +670,7 @@ def fig4(npz_a: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz",
 
     # 版式（chat12 审稿意见）：关节余量面板已移除（见 docstring），
     # 两面板并排：(a) 全程 TCP 速度、(b) 命中邻域放大。
-    fig = plt.figure(figsize=(7.16, 1.52))
+    fig = plt.figure(figsize=(7.16, 1.30))
     # 显式给四周留白（不用 tight_layout）：默认 subplot 参数会让坐标轴只占 125%-90% 宽
     gs = fig.add_gridspec(1, 2, width_ratios=[1.55, 1],
                           left=0.055, right=0.995, top=0.87, bottom=0.28,
@@ -765,6 +774,43 @@ def _exp26_paired_gains(csv_path: Path) -> dict[tuple[float, float], dict[str, f
     return gains
 
 
+def _exp26_gains_ci(csv_path: Path, n_boot: int = 20000) -> dict:
+    """exp26：每格每档相对点目标的配对增益 + 配对 bootstrap 95% CI（pp）。
+
+    返回 {(spd, tcp): {tier: (point, lo, hi)}}；与 analyze_chat12_night.py 的
+    paired_boot_ci 同口径（同 seed 配对、seed=0、两万次重抽），保证图与正文同源。
+    """
+    import csv as _csv
+    rows: dict[tuple[str, float, float], dict[int, bool]] = {}
+    with csv_path.open(encoding="utf-8") as f:
+        for r in _csv.DictReader(f):
+            if r.get("error"):
+                continue
+            cid = r["config_id"]
+            abl = cid.split("__")[0].replace("ablation", "")
+            spd = float(cid.split("ballspeed")[1].split("__")[0])
+            tcp = float(cid.split("maxtcp")[1].split("__")[0])
+            rows.setdefault((abl, spd, tcp), {})[int(r["seed"])] = (
+                r["hit_type"].strip().lower() == "active")
+    out: dict[tuple[float, float], dict[str, tuple[float, float, float]]] = {}
+    rng = np.random.default_rng(0)
+    for spd in (7.0, 9.0):
+        for tcp in (1.0, 1.4, 1.8):
+            base = rows[("none", spd, tcp)]
+            cell: dict[str, tuple[float, float, float]] = {}
+            for t in ("full", "tube_only", "softmin_only"):
+                trow = rows[(t, spd, tcp)]
+                common = sorted(set(base) & set(trow))
+                d = np.array([trow[s] - base[s] for s in common], dtype=float) * 100.0
+                n = len(d)
+                idx = rng.integers(0, n, size=(n_boot, n))
+                boot = np.sort(d[idx].mean(axis=1))
+                lo, hi = (float(x) for x in np.percentile(boot, [2.5, 97.5]))
+                cell[t] = (float(d.mean()), lo, hi)
+            out[(spd, tcp)] = cell
+    return out
+
+
 def fig5(stats: dict) -> None:
     """Fig.5: (a) active-hit vs 球速（E1，Wilson CI）(b) TCP 1.0 vs 1.8（E2）
     (c) 速度×TCP 网格各档配对增益（exp26，vs 点目标）。"""
@@ -773,15 +819,25 @@ def fig5(stats: dict) -> None:
     rates = [e1[str(s)]["rate"] for s in speeds]
     errs = [ci_half(e1[str(s)]) for s in speeds]
 
-    fig, axes = plt.subplots(1, 3, figsize=(7.16, 1.48),
-                             gridspec_kw={"width_ratios": [1.55, 0.9, 1.6]})
+    # chat14 P7 审稿意见：三面板过挤（(b) 标题压 (c) 轴标签、图例越界）——
+    # 改为上排 (a)(b) + 下排 (c) 横跨全宽，柱间距与数值标注获得可用宽度
+    # constrained_layout：自动为标题/轴标签/刻度分配边距，避免上排刻度标签
+    # 与下排标题相撞（手调边距在下排标题较长时反复冲突）
+    fig = plt.figure(figsize=(7.16, 1.82), constrained_layout=True)
+    gs = fig.add_gridspec(2, 3, height_ratios=[1.0, 1.05],
+                          width_ratios=[1.55, 0.62, 0.83],
+                          hspace=0.06, wspace=0.06)
+    axes = [fig.add_subplot(gs[0, 0]), fig.add_subplot(gs[0, 1:]),
+            fig.add_subplot(gs[1, :])]
     ax = axes[0]
     # 中性深灰：单序列实验条件不占机制配色（绿=full 档，见 figs 6/7）
     # chat12 审稿意见：图例补明曲线对应的配置（默认 sweep 跑的就是 full 档）
+    # chat14：图例缩短——原 "Full configuration, default limits (TCP 1.8 m/s)"
+    # 在 2.4 in 宽面板里越界压到 (b)（审稿意见 P7），配置全称移到图注
     ax.errorbar(speeds, rates, yerr=errs, color="#4D4D4D", marker="o", capsize=2.5,
-                lw=1.0, label="Full configuration, default limits (TCP 1.8 m/s)")
+                lw=1.0, label="full config., default limits")
     ax.set_xlabel("Ball speed (m/s)")
-    ax.set_ylabel("Active-hit rate (%)")
+    ax.set_ylabel("Hit rate (%)")
     ax.set_ylim(0, 105)
     ax.set_title("(a) Hit rate vs. ball speed", fontsize=9)
     ax.legend(loc="lower left", framealpha=0.9)
@@ -803,7 +859,7 @@ def fig5(stats: dict) -> None:
                 fontsize=8)
     # n 并入类别刻度（保持柱顶只放数值）
     ax.set_xticks(np.arange(2),
-                  [f"TCP 1.8\n$n$={ns[0]}", f"TCP 1.0\n$n$={ns[1]}"])
+                  [f"TCP 1.8 ($n$={ns[0]})", f"TCP 1.0 ($n$={ns[1]})"])
     # 配对差值（TCP1.0 − TCP1.8，与正文 −48.7 pp 同源）；缺失时退化为边际差
     paired = e2.get("paired_TCP10_vs_TCP18", {})
     d_pp = paired.get("diff_pp")
@@ -811,39 +867,45 @@ def fig5(stats: dict) -> None:
         d_pp = vals[1] - vals[0]
     ax.text(0.5, 0.995, f"paired diff ${d_pp:+.1f}$ pp", ha="center", va="top",
             transform=ax.transAxes, fontsize=7.5)
-    ax.set_ylabel("Active-hit rate (%)")
+    # (a)(b) y 轴同义：只保留 (a) 的标签，避免两处文字在中缝相撞
+    ax.set_ylabel("")
     ax.set_ylim(0, 116)
     ax.set_title("(b) Robot-derived TCP constraint set (7 m/s)", fontsize=9)
     style_ax(ax)
 
     # (c) 反转区域：exp26 {7,9} m/s × {1.0,1.4,1.8} 网格，每格三档配对增益（vs 点目标）
     ax = axes[2]
-    gains = _exp26_paired_gains(DATA / "exp26_tcp_grid" / "results.csv")
+    gains = _exp26_gains_ci(DATA / "exp26_tcp_grid" / "results.csv")
     cells = [(spd, tcp) for spd in (7.0, 9.0) for tcp in (1.0, 1.4, 1.8)]
     tiers = [("full", "full"), ("tube_only", "corridor-only"),
              ("softmin_only", "candidate-set-only")]
     for ci, (spd, tcp) in enumerate(cells):
         x0 = ci * 3
         for ti, (key, _) in enumerate(tiers):
-            v = gains[(spd, tcp)][key]
-            ax.bar(x0 + ti, v, 0.62, color=C[key], alpha=0.9)
-            ax.text(x0 + ti, v + (0.8 if v >= 0 else -0.8), f"{v:+.0f}",
+            v, lo, hi = gains[(spd, tcp)][key]
+            # chat14 P6：每格每档补配对 bootstrap 95% CI 误差棒（原只有点估计）
+            ax.bar(x0 + ti, v, 0.62, color=C[key], alpha=0.9,
+                   yerr=[[v - lo], [hi - v]], capsize=1.3,
+                   error_kw=dict(lw=0.7, ecolor="0.25"))
+            ax.text(x0 + ti, hi + 0.8 if v >= 0 else lo - 0.8, f"{v:+.0f}",
                     ha="center", va="bottom" if v >= 0 else "top", fontsize=6.5)
     ax.axhline(0, color="gray", lw=0.7, ls="--")
     ax.set_xticks([ci * 3 + 1 for ci in range(len(cells))],
                   [f"{spd:g}$\\times${tcp:g}" for spd, tcp in cells])
     ax.set_xlabel("Ball speed (m/s) $\\times$ TCP cap (m/s)")
-    ax.set_ylabel("Gain over point target (pp)")
-    ax.set_ylim(-30, 30)
-    ax.set_title("(c) Reversal region", fontsize=9)
+    ax.set_ylabel("Gain (pp)")
+    ax.set_ylim(-34, 44)
+    # chat14 P6：面板名去「反转区域」的因果暗示，只陈述已测设置下的增益
+    ax.set_title("(c) Gain across speed--cap settings", fontsize=8.5)
     from matplotlib.patches import Patch
+    # chat14 P6：图例移出数据区——(c) 横跨全宽后置于顶部横排（不压任何柱）
     ax.legend(handles=[Patch(facecolor=C[k], label=lab, alpha=0.9)
                        for k, lab in tiers],
-              loc="lower right", ncol=1, fontsize=6.5, framealpha=0.9,
-              borderpad=0.3, labelspacing=0.25, handlelength=1.2)
+              loc="upper left", ncol=3, fontsize=6.5, framealpha=0.9,
+              borderpad=0.3, labelspacing=0.25, handlelength=1.2,
+              columnspacing=1.2)
     style_ax(ax)
 
-    fig.tight_layout(pad=0.3)
     save(fig, "fig5_hit_rate_vs_speed.pdf")
 
 
@@ -875,7 +937,7 @@ def fig6(stats: dict) -> None:
     e3, e4, e7 = stats["E3_nominal"], stats["E4_grid"], stats["E7_corners"]
     # chat9 审稿意见：这是核心结果图，应获得更多面积（旧版 2.25 in 四子图明显变扁），
     # 面板标题缩短、方法/速度/单位移入坐标轴与图注
-    fig, axes = plt.subplots(2, 2, figsize=(7.16, 2.45))
+    fig, axes = plt.subplots(2, 2, figsize=(7.16, 2.02))
 
     def asym_err(v: dict) -> tuple[float, float]:
         """配对 bootstrap CI 的上下误差条（以 diff_pp 为基准）。"""
@@ -924,6 +986,8 @@ def fig6(stats: dict) -> None:
                 k = f"t{t}|s{s}"
                 gain[i, j] = e4["per_cell_paired"][f"{k}|{cmp}"]["diff_pp"]
         im = ax.imshow(gain, aspect="auto", cmap="RdBu_r", vmin=-20, vmax=20)
+        # 面板压扁后 5 行刻度标签会互相贴上：热图 y 刻度单独用小一号字体
+        ax.tick_params(axis="y", labelsize=6.5)
         ax.set_xticks(range(len(ss)), [f"{s:.2f}" for s in ss])
         ax.set_yticks(range(len(ts)), [f"{t}" for t in ts])
         ax.set_xlabel("Spatial max $s$ (m), 9 m/s")
@@ -963,7 +1027,7 @@ def fig6(stats: dict) -> None:
     ax.set_title("(d) Corridor under spatial offsets", fontsize=9)
     style_ax(ax)
 
-    fig.tight_layout(pad=0.3, w_pad=2.2)
+    fig.tight_layout(pad=0.3, w_pad=2.2, h_pad=0.6)
     save(fig, "fig6_tube_robustness.pdf")
 
 
@@ -976,7 +1040,7 @@ def fig_realtime(stats: dict, timing_path: Path = DATA / "exp18_fig_assets/timin
     t = json.loads(Path(timing_path).read_text(encoding="utf-8"))
     sync, async_ = t["sync"], t["async"]
 
-    fig, axes = plt.subplots(1, 2, figsize=(7.16, 1.34),
+    fig, axes = plt.subplots(1, 2, figsize=(7.16, 1.15),
                             gridspec_kw={"width_ratios": [1.3, 1.7]})
 
     # (a) 数值表：只有 3 个点，表格比 log 坐标轴更紧凑也不误导

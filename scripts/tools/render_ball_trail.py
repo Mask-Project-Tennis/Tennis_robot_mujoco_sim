@@ -1,8 +1,14 @@
-"""渲染球轨迹残影单图（论文 Fig.2 场景图）。
+"""渲染球轨迹残影单图（论文 Fig.2「一帧看全任务」场景图）。
 
 用法（mujoco_tennis 环境，需 MUJOCO_GL=egl 走离屏渲染）:
-    # 定稿方案：单图全景 + 球轨迹残影（相机 = 已认可的 az130°/el−34°/d3.0）
-    MUJOCO_GL=egl python scripts/tools/render_ball_trail.py
+    # 定稿方案：通栏全景 2160×800，完整 episode（发球→弹跳→击球→回球）一帧收齐
+    MUJOCO_GL=egl python scripts/tools/render_ball_trail.py --path-line
+    # → paper/figures/fig_scene_trajectory.png
+
+    # 近景特写（早期方案，保留）：11 点方向俯视 34°，3 m 取景
+    MUJOCO_GL=egl python scripts/tools/render_ball_trail.py \
+        --azimuth 130 --elevation -34 --distance 3.0 --lookat -0.35 -0.45 1.0 \
+        --fovy 45 --width 2160 --height 1440 --out results/scene_angles/closeup.png
 
     # 调参示例：频闪 25 ms + 更亮的带 + 细轨迹线 + 机器人取击球前 60 ms 位姿
     MUJOCO_GL=egl python scripts/tools/render_ball_trail.py \
@@ -40,7 +46,7 @@ from pathlib import Path
 
 import mujoco
 import numpy as np
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageDraw, ImageEnhance, ImageFilter
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(REPO_ROOT))
@@ -48,27 +54,31 @@ from src.utils.mujoco_loader import load_mujoco_model
 
 MODEL_XML = REPO_ROOT / "src" / "robot" / "rm65_model.xml"
 
-W, H = 2160, 1440                  # 画面分辨率（7.2 in @300dpi）
+W, H = 2160, 1440                  # 画面分辨率（7.2 in @300dpi）—— 可用 CLI 覆盖
 BALL_R = 0.033                     # 网球半径（与 rm65_model.xml 一致）
 BALL_RGB = (0.98, 0.95, 0.25)      # 比真球略亮，保证叠在绿色场地上的对比度
 N_BALL = 320                       # 残影池槽位数（覆盖整条 episode 的 307 步）
 HIDDEN = np.array([0.0, 0.0, -50.0])   # 隐藏槽位位置（地板下方、画面外）
 
 
-def build_pool_model() -> mujoco.MjModel:
+def build_pool_model(ball_scale: float = 1.0, fovy: float = 45.0,
+                     w: int = W, h: int = H) -> mujoco.MjModel:
     """构建含球残影池的包装模型（原模型 include + 提亮光照 + N_BALL 个透明球槽）。
 
     池内 geom 默认隐藏（位置在地板下方 + alpha=0），由残影逻辑按需放置。
+    ball_scale: 残影球半径缩放（远景全景图需放大球径，否则印刷尺寸下不可辨）。
+    fovy: 竖向视场角（度）——远景用长焦（小 fovy）压缩透视。
+    w/h: 离屏帧缓冲尺寸（需与 Renderer 一致，否则残影会被静默丢弃）。
     """
     ghosts = "".join(
-        f'    <geom name="ghost_{k}" type="sphere" size="{BALL_R}" '
+        f'    <geom name="ghost_{k}" type="sphere" size="{BALL_R * ball_scale:.4f}" '
         f'pos="{HIDDEN[0]} {HIDDEN[1]} {HIDDEN[2]}" rgba="1 1 1 0" '
         f'contype="0" conaffinity="0"/>\n' for k in range(N_BALL))
     wrapper = (
         "<mujoco>\n"
         f'  <include file="{MODEL_XML.as_posix()}"/>\n'
         "  <visual>\n"
-        f'    <global offwidth="{W}" offheight="{H}"/>\n'
+        f'    <global offwidth="{w}" offheight="{h}" fovy="{fovy}"/>\n'
         # 提亮：头灯（跟随相机）+ 顶部定向光，避免俯视时机器人背面全黑
         '    <headlight ambient="0.35 0.35 0.35" diffuse="0.7 0.7 0.7" '
         'specular="0.15 0.15 0.15"/>\n'
@@ -152,16 +162,16 @@ def main() -> None:
         / "full_seed040.npz",
         help="轨迹 NPZ（含 q_actual/ball_pos/hit_step/init_q_left/dt）")
     parser.add_argument("--out", type=str,
-                        default="paper/figures/fig2_trajectory.png",
+                        default="paper/figures/fig_scene_trajectory.png",
                         help="输出 PNG 路径（相对仓库根）")
-    # 相机（默认 = 已认可的 Fig.2 角度：11 点方向俯视 34°）
-    parser.add_argument("--azimuth", type=float, default=130.0,
-                        help="方位角（度，相对 +X 轴）")
-    parser.add_argument("--elevation", type=float, default=-34.0,
-                        help="俯仰角（度，负值 = 相机在上方俯视机器人）")
-    parser.add_argument("--distance", type=float, default=3.0, help="相机距离（m）")
+    # 相机（默认 = 定稿全景配置：+x 侧 205° 视线、俯视 16°、长焦 14°，见下方 main 注释）
+    parser.add_argument("--azimuth", type=float, default=205.0,
+                        help="视线方位角（度，相对 +X 轴；0=沿 +x 看）")
+    parser.add_argument("--elevation", type=float, default=-16.0,
+                        help="视线俯仰（度；负值=俯视，相机在上方）")
+    parser.add_argument("--distance", type=float, default=14.5, help="相机距离（m）")
     parser.add_argument("--lookat", type=float, nargs=3,
-                        default=[-0.35, -0.45, 1.00],
+                        default=[0.0, -2.9, 0.80],
                         metavar=("X", "Y", "Z"), help="相机注视点（世界系）")
     parser.add_argument("--pose-offset", type=int, default=0,
                         help="机器人位姿相对击球步的偏移（步）；0 = 接触瞬间")
@@ -177,6 +187,18 @@ def main() -> None:
     parser.add_argument("--path-line-alpha", type=int, default=130)
     parser.add_argument("--no-shadows", action="store_true",
                         help="关闭地面投影（机器人接触阴影会一起消失）")
+    parser.add_argument("--ball-scale", type=float, default=1.0,
+                        help="残影球半径缩放（远景全景图需 >1 才可辨）")
+    parser.add_argument("--fovy", type=float, default=14.0,
+                        help="竖向视场角（度）——远景用长焦（小 fovy）压缩透视")
+    parser.add_argument("--width", type=int, default=2160, help="画面宽度（px）")
+    parser.add_argument("--height", type=int, default=800, help="画面高度（px）")
+    parser.add_argument("--brighten", type=float, default=1.15,
+                        help="整图亮度增益（远景全景图偏暗时用 >1）")
+    parser.add_argument("--crop-top", type=int, default=0,
+                        help="渲染后从顶部裁掉的像素（压缩版面高度用）")
+    parser.add_argument("--crop-bottom", type=int, default=0,
+                        help="渲染后从底部裁掉的像素")
     args = parser.parse_args()
 
     rec = np.load(args.episode, allow_pickle=True)
@@ -189,9 +211,9 @@ def main() -> None:
           f"hit_type={md.get('hit_type')}  ball_speed={md.get('ball_speed')}  "
           f"pose_step={pose_step}")
 
-    model = build_pool_model()
+    model = build_pool_model(args.ball_scale, args.fovy, args.width, args.height)
     data = mujoco.MjData(model)
-    renderer = mujoco.Renderer(model, H, W)
+    renderer = mujoco.Renderer(model, args.height, args.width)
     ids = [mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, f"ghost_{k}")
            for k in range(N_BALL)]
     cam = mujoco.MjvCamera()
@@ -204,10 +226,10 @@ def main() -> None:
     # ── 1. 解析投影求「画面内」的球位（画面外放残影没有意义） ──
     set_pose(data, rec["q_actual"][pose_step], rec["init_q_left"], ball[pose_step])
     renderer.update_scene(data, camera=cam, scene_option=opt)
-    proj = Projector(model, renderer.scene.camera[0])
+    proj = Projector(model, renderer.scene.camera[0], w=args.width, h=args.height)
     px, ok = proj(ball)
-    inside = (ok & (px[:, 0] > -60) & (px[:, 0] < W + 60)
-              & (px[:, 1] > -60) & (px[:, 1] < H + 60))
+    inside = (ok & (px[:, 0] > -60) & (px[:, 0] < args.width + 60)
+              & (px[:, 1] > -60) & (px[:, 1] < args.height + 60))
     steps = np.flatnonzero(inside)
     strobe_steps = max(1, round(args.strobe_ms / (dt * 1000.0)))
     print(f"画面内球位: 步 {steps[0]}..{steps[-1]} "
@@ -240,10 +262,16 @@ def main() -> None:
     if args.path_line:
         img = draw_path_line(img, px, inside, width=args.path_line_width,
                              alpha=args.path_line_alpha)
+    out_img = Image.fromarray(img)
+    if args.crop_top or args.crop_bottom:
+        w, h = out_img.size
+        out_img = out_img.crop((0, args.crop_top, w, h - args.crop_bottom))
+    if args.brighten != 1.0:
+        out_img = ImageEnhance.Brightness(out_img).enhance(args.brighten)
     out = REPO_ROOT / args.out
     out.parent.mkdir(parents=True, exist_ok=True)
-    Image.fromarray(img).save(out, dpi=(300, 300))
-    print(f"saved: {out} ({img.shape[1]}x{img.shape[0]})")
+    out_img.save(out, dpi=(300, 300))
+    print(f"saved: {out} ({out_img.width}x{out_img.height})")
 
 
 if __name__ == "__main__":

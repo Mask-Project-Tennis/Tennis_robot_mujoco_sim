@@ -224,6 +224,10 @@ class RM65Env:
         """启用或禁用机械臂 geom 碰撞（用于规划时避免球拍-球碰撞干扰）。"""
         ball_geom_start = self.model.body("ball").geomadr[0]
         if enabled:
+            if not hasattr(self, "_arm_contype_save"):
+                # 首次调用即启用（如 --always-collision 对照实验）：无备份可恢复，
+                # 模型默认 geom 即为启用态，直接保持不动
+                return
             self.model.geom_contype[:ball_geom_start] = self._arm_contype_save
             self.model.geom_conaffinity[:ball_geom_start] = self._arm_conaffinity_save
         else:

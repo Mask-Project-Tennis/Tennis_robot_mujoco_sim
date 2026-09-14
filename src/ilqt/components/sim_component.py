@@ -42,6 +42,7 @@ class SimComponent:
         initial_hitting_tube: HittingTube | None,
         tube_cfg: TubeConfig,
         dt: float,
+        always_collision: bool = False,
     ) -> None:
         """初始化仿真组件。
 
@@ -55,6 +56,8 @@ class SimComponent:
             initial_hitting_tube: 初始候选窗口（tube_ready 诊断用）。
             tube_cfg: Tube 配置。
             dt: 仿真时间步长。
+            always_collision: 击球前球-拍碰撞常开（chat14 碰撞窗口验证，
+                绕过 k_hit/距离窗口判定，仅批量验证实验用）。
         """
         self._env = env
         self._mpc = mpc
@@ -65,6 +68,7 @@ class SimComponent:
         self._initial_tube = initial_hitting_tube
         self._tube_cfg = tube_cfg
         self._dt = dt
+        self._always_collision = always_collision
         self._nu = env.NU
         self._nq = env.NQ
 
@@ -155,9 +159,13 @@ class SimComponent:
         self.tube_ready_history.append(is_tube_ready)
 
         # ---- 碰撞窗口管理（V11 1914-1923）----
+        # --always-collision（chat14 验证）：击球前常开，绕过 k_hit/距离窗口
+        # 判定，用于核对"窗口外本会发生的接触被屏蔽"是否改变裁决
         enable_collision = False
         if not self.ball_was_hit:
-            if k_hit <= 30 and dist_cur < 0.35:
+            if self._always_collision:
+                enable_collision = True
+            elif k_hit <= 30 and dist_cur < 0.35:
                 enable_collision = True
             elif k_hit <= 10:
                 enable_collision = True

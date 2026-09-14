@@ -207,6 +207,49 @@ def _sensitivity_grid() -> list[dict[str, Any]]:
     return grid
 
 
+def _exp28_seed_pool(max_disc: int = 4) -> list[tuple[tuple[float, float] | None, list[int]]]:
+    """exp28（chat14 碰撞常开验证）代表 seed 选择：从 exp24 CSV 按格挑选。
+
+    每格优先级：tube 命中/full 未命中的不一致 seed（走廊>full 点估计的根源样本）、
+    point-target 命中、full 命中；另加一个名义（无扰动，9 m/s）组。
+    """
+    import csv
+    import json as _json
+
+    data_dir = Path(__file__).resolve().parent.parent.parent / "experiment_data"
+    rows: dict[tuple[tuple[float, float], str], dict[int, bool]] = {}
+    with (data_dir / "exp24_shared_full" / "results.csv").open(encoding="utf-8") as f:
+        for r in csv.DictReader(f):
+            if r.get("error"):
+                continue
+            cfg = _json.loads(r["config_json"])
+            cell = (float(cfg.get("--time-perturb-ms") or 0.0),
+                    float(cfg["--space-perturb-m"]))
+            rows.setdefault((cell, cfg["--ablation"]), {})[int(r["seed"])] = (
+                (r.get("hit_type") or "").strip() == "active")
+
+    cells = [(0.0, 0.1), (0.0, 0.2), (0.0, 0.3), (25.0, 0.2), (50.0, 0.2)]
+    pool: list[tuple[tuple[float, float] | None, list[int]]] = []
+    for cell in cells:
+        tube = rows.get((cell, "tube_only"), {})
+        full = rows.get((cell, "full"), {})
+        none_ = rows.get((cell, "none"), {})
+        seeds = sorted(set(tube) & set(full) & set(none_))
+        picked: list[int] = []
+        for s in seeds:                      # 1. 不一致 seed（走廊命中/full 未命中）
+            if tube[s] and not full[s] and len(picked) < max_disc:
+                picked.append(s)
+        for key, cap in ((none_, 2), (full, 2)):   # 2/3. pt 命中、full 命中
+            for s in seeds:
+                if key[s] and s not in picked and len(picked) < max_disc + 4:
+                    picked.append(s)
+        if not picked:                       # 兜底：任何 seed 都没有就取前 6 个
+            picked = seeds[:6]
+        pool.append((cell, picked))
+    pool.append((None, list(range(1, 6))))   # 名义组（无扰动）
+    return pool
+
+
 EXPERIMENTS: dict[str, ExperimentSpec] = {
     "exp13_arch": ExperimentSpec(
         name="exp13_arch",
@@ -514,6 +557,35 @@ EXPERIMENTS: dict[str, ExperimentSpec] = {
             for base in [{"--serve-box": None, "--ball-speed": speed,
                           "--ablation": mode, "--no-plot": None}]
             for seed in range(1, SEEDS_P2 + 1)
+        ],
+    ),
+    "exp28_always_collision": ExperimentSpec(
+        name="exp28_always_collision",
+        script=V12,
+        report_ref="chat14 审稿 P4（最建议）: 碰撞常开验证 —— --always-collision 使"
+                   "击球前球-拍碰撞常开（绕过 k_hit/距离窗口判定），对 exp24 五格与"
+                   "名义条件的代表 seed 重跑四档，核对裁决是否与窗口口径一致。"
+                   "每格 ≤10 seeds（不一致/pt 命中/full 命中优先）× 4 档 + 名义 5 seeds。",
+        grid=[
+            {**base, "--seed": seed}
+            for cell, seeds in _exp28_seed_pool()
+            for mode in MODES_MECHANISM
+            for base in [({
+                "--serve-box": None, "--ball-speed": 9,
+                "--ablation": mode, "--no-plot": None,
+                "--always-collision": None,
+            } if cell is None else {
+                "--serve-box": None, "--ball-speed": 9,
+                "--ablation": mode, "--no-plot": None,
+                "--always-collision": None,
+                "--random-perturb": None, "--perturb-sign": "random",
+                "--space-perturb-m": cell[1], "--space-perturb-min-m": 0.0,
+                "--spatial-perturb-target": "ballstate",
+                "--shared-input-full": None,
+                **({"--time-perturb-ms": cell[0], "--time-perturb-min-ms": 0}
+                   if cell[0] > 0 else {}),
+            })]
+            for seed in seeds
         ],
     ),
 }
