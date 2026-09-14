@@ -1,0 +1,5 @@
+# 由 batch_runner 自动生成
+# experiment: exp21_hardmin_tcp10
+# grid_size: 800
+# report_ref: chat9 审稿补跑: hard-min(β=1e6) × TCP1.0 @7 m/s，检验「低速下损失来自多目标对冲而非 softmin 平滑」是否在低速档同样成立。full/softmin_only × 400 seeds；β=5 对照复用 exp17i（同 seeds 1-400）。
+# config_ids: ['ablationfull__ballspeed7__limitsconfigconfigs_real_robot.yaml__noplot__servebox__softminbeta1000000.0', 'ablationsoftmin_only__ballspeed7__limitsconfigconfigs_real_robot.yaml__noplot__servebox__softminbeta1000000.0']

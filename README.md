@@ -148,6 +148,7 @@ Writes `repro_outputs/*.pdf` (Fig. 1 and Fig. 3–8) and
 | E2 limit cost | `experiment_data/exp16_limits_v2` | Fig. 5, TCP diagnostics |
 | E3 nominal four-tier | `experiment_data/exp17d_mechanism` | Fig. 6(a), Table I |
 | E4 perturbation grid | `experiment_data/exp17b_perturb`, `exp17f_mechanism_perturb` | Fig. 6(b,c), Table I |
+| E4b 7 m/s grid | `experiment_data/exp17e_perturb7` | Fig. 6(b,c), Table I |
 | E5 perception sweep | `experiment_data/exp17a_noise`, `exp17c_obsfreq` | artifact only |
 | E7 high-power corners | `experiment_data/exp17g_spatial_power`, `exp17h_extreme` | Fig. 6(d), Table I |
 | E8 limit x mechanism | `experiment_data/exp17i_limits_ablation` | Table II, text |
@@ -155,6 +156,10 @@ Writes `repro_outputs/*.pdf` (Fig. 1 and Fig. 3–8) and
 | Trajectory assets | `experiment_data/exp18_fig_assets/raw/*.npz` | Fig. 1, 3, 4, 7 |
 | Sensitivity sweep | `experiment_data/exp18_sensitivity` | text (Sec. VI) |
 | TCP exemption | `experiment_data/exp18_tcp_exempt` | text (Sec. VI) |
+| Hard-min baseline | `experiment_data/exp19_hardmin` | text (Sec. VI-C) |
+| Hard-min under TCP cap | `experiment_data/exp21_hardmin_tcp10` | text (Sec. VI-D) |
+| Shared-input check | `experiment_data/exp22_shared_spatial` | text (Sec. VI-C); `check_shared_input.py` |
+| Protocol pilots | `experiment_data/exp20_shared_pilot`, `exp20b_shared_fb`, `exp20c_shared_targets` | design record |
 
 ---
 

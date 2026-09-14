@@ -136,6 +136,7 @@ python scripts/plot/paper_figs.py --fig 1hero 3alt 4 5 6 7 8 table --out repro_o
 | E2 限速代价 | `experiment_data/exp16_limits_v2` | Fig. 5、TCP 诊断 |
 | E3 nominal 四档 | `experiment_data/exp17d_mechanism` | Fig. 6(a)、Table I |
 | E4 扰动网格 | `experiment_data/exp17b_perturb`、`exp17f_mechanism_perturb` | Fig. 6(b,c)、Table I |
+| E4b 7 m/s 网格 | `experiment_data/exp17e_perturb7` | Fig. 6(b,c)、Table I |
 | E5 感知扫描 | `experiment_data/exp17a_noise`、`exp17c_obsfreq` | 仅 artifact |
 | E7 高功率角点 | `experiment_data/exp17g_spatial_power`、`exp17h_extreme` | Fig. 6(d)、Table I |
 | E8 限速×机制 | `experiment_data/exp17i_limits_ablation` | Table II、正文 |
@@ -143,6 +144,10 @@ python scripts/plot/paper_figs.py --fig 1hero 3alt 4 5 6 7 8 table --out repro_o
 | 轨迹资产 | `experiment_data/exp18_fig_assets/raw/*.npz` | Fig. 1、3、4、7 |
 | 敏感性 sweep | `experiment_data/exp18_sensitivity` | 正文（Section VI） |
 | TCP 豁免 | `experiment_data/exp18_tcp_exempt` | 正文（Section VI） |
+| hard-min 基线 | `experiment_data/exp19_hardmin` | 正文（§VI-C） |
+| TCP 限速下 hard-min | `experiment_data/exp21_hardmin_tcp10` | 正文（§VI-D） |
+| 共享输入交叉验证 | `experiment_data/exp22_shared_spatial` | 正文（§VI-C）；`check_shared_input.py` |
+| 协议 pilot | `experiment_data/exp20_shared_pilot`、`exp20b_shared_fb`、`exp20c_shared_targets` | 设计记录 |
 
 ---
 

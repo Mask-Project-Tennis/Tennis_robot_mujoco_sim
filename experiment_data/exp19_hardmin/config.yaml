@@ -1,0 +1,5 @@
+# 由 batch_runner 自动生成
+# experiment: exp19_hardmin
+# grid_size: 400
+# report_ref: chat8 审稿补跑: hard-min 终端基线。β=1e6 ≈ 数值 hard-min（softmin 对数-和-指数实现数值稳定），区分「多候选目标集合」与「softmin 平滑聚合」两种解释。9 m/s 标称 × full/softmin_only × 200 seeds = 400 runs；β=5 标称与 point-target 基线复用 exp17b/exp17d（同 seeds 1-200）。
+# config_ids: ['ablationfull__ballspeed9__noplot__servebox__softminbeta1000000.0', 'ablationsoftmin_only__ballspeed9__noplot__servebox__softminbeta1000000.0']
