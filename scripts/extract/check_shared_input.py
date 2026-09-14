@@ -10,10 +10,11 @@
   规划器的球位置 `ball_pos_goal`，点目标 / 候选集合 / 走廊轴由同一份有偏输入生成；
   时序与可达性仍用当前观测。
 
-本脚本输出的三个量即论文中该段的三个数字：
+本脚本输出的四个量即论文中该段与 Table III 的数字：
   1) 两个高功效角点的 corridor-only 独立价值（两口径对照）；
   2) 9 m/s t=0 幅度扫描 s=0.2/0.3/0.4 的口径差；
-  3) 20 格合并网格上 softmin-only vs point-target 的时间窗增益（两口径对照）。
+  3) 20 格合并网格上 softmin-only vs point-target 的时间窗增益（两口径对照）；
+  4) 20 格合并网格上 full vs softmin-only 的额外走廊增益（两口径对照，chat12 表）。
 
 用法::
 
@@ -150,17 +151,17 @@ def main() -> None:
             f"p {d_old['p']:.2g} → {d_new['p']:.2g})"
         )
 
-    # 3) 20 格合并网格的时间窗增益（s>0 格换用 ballstate，限定 seed<=100 保证配对）
-    print("\n[3] 20 格合并网格 softmin-only vs point-target（时间窗增益）")
-    for label, swap in (("hitpoint ", False), ("ballstate", True)):
+    def merged_grid_pair(tier_a: str, tier_b: str, swap: bool) -> dict[str, Any] | None:
+        """20 格合并网格上 tier_a vs tier_b 的同 seed 配对。
+
+        swap=True 时 s>0 的格子换用 ballstate 口径（exp22），并限定 seed<=100
+        与主口径共用种子以保证配对。
+        """
         pool: dict[tuple[int, float, str, str], int] = {}
         for t in TS:
             for s in SS:
                 for tier in TIERS:
-                    if s == 0.0 or not swap:
-                        src_rows: list[dict[str, str]] = list(grid_rows)
-                    else:
-                        src_rows = shared
+                    src_rows: list[dict[str, str]] = list(shared if (swap and s > 0.0) else grid_rows)
                     hits = cell_hits(src_rows, 9, t, s, tier)
                     if swap and s > 0.0:
                         hits = {k: v for k, v in hits.items() if int(k) <= 100}
@@ -174,11 +175,21 @@ def main() -> None:
         b: dict[str, int] = {}
         for t in TS:
             for s in SS:
-                for seed, h in idx[(t, s, "softmin_only")].items():
+                for seed, h in idx[(t, s, tier_a)].items():
                     a[f"{t}|{s}|{seed}"] = h
-                for seed, h in idx[(t, s, "none")].items():
+                for seed, h in idx[(t, s, tier_b)].items():
                     b[f"{t}|{s}|{seed}"] = h
-        print(f"  {label}: {fmt(paired(a, b))}")
+        return paired(a, b)
+
+    # 3) 20 格合并网格的时间窗增益（s>0 格换用 ballstate，限定 seed<=100 保证配对）
+    print("\n[3] 20 格合并网格 softmin-only vs point-target（时间窗增益）")
+    for label, swap in (("hitpoint ", False), ("ballstate", True)):
+        print(f"  {label}: {fmt(merged_grid_pair('softmin_only', 'none', swap))}")
+
+    # 4) 20 格合并网格 full vs softmin-only（候选集之上的额外走廊增益，chat12 表）
+    print("\n[4] 20 格合并网格 full vs softmin-only（额外走廊增益）")
+    for label, swap in (("hitpoint ", False), ("ballstate", True)):
+        print(f"  {label}: {fmt(merged_grid_pair('full', 'softmin_only', swap))}")
 
     # 附带：口径引起的逐档 seed 判定翻转数（说明点目标/走廊几乎不变，softmin 档重排）
     print("\n[附] 角点逐档 seed 判定翻转数（ballstate vs hitpoint）")
@@ -191,10 +202,10 @@ def main() -> None:
             flips.append(f"{tier}={sum(1 for k in keys if a[k] != b[k])}/{len(keys)}")
         print(f"  {speed:>2} m/s t={t:<3} s={s:.2f}: " + " ".join(flips))
 
-    # 论文数字核对（§V-B「Shared-input check」段引用的三个量）
+    # 论文数字核对（「Shared-input check」段与 Table III 引用的量）
     print(
         "\n论文数字核对：corridor-only 角点 +4.3 / +7.0 pp；幅度扫描 |Δ| ≤ 0.4 pp；"
-        "合并网格 +8.9 → +10.2 pp"
+        "合并网格 +8.9 → +10.2 pp；full − softmin_only 网格 −0.3 / 0.0 pp"
     )
 
 
