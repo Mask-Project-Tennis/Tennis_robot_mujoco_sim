@@ -1060,10 +1060,11 @@ def fig_realtime(stats: dict, timing_path: Path = DATA / "exp18_fig_assets/timin
     # 标题已含 (a) 与单位，不再另起一行 "Replanning time (ms)"（与标题重复）；
     # 表头横线下移到标题降部以下（judge 意见：原 0.96 横线穿过标题括号/降部）
     ax.set_title("(a) Replanning time (ms)", fontsize=9)
-    ax.plot([0.07, 0.95], [0.94, 0.94], transform=ax.transAxes, lw=0.7,
+    ax.plot([0.07, 0.95], [0.90, 0.90], transform=ax.transAxes, lw=0.7,
             color="k")
+    # 面板压扁（1.34→1.15 in）后首行贴到表头横线：起点下移、行距略收
     for i, (name, val) in enumerate(rows):
-        y = 0.86 - i * 0.145
+        y = 0.80 - i * 0.140
         ax.text(0.07, y, name, fontsize=7.5, va="center", transform=ax.transAxes)
         ax.text(0.93, y, f"{val:.1f}", fontsize=7.5, va="center", ha="right",
                 transform=ax.transAxes, color=C["none"] if val > 100 else "k")
