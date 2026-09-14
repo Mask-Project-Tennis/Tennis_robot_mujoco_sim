@@ -173,7 +173,9 @@ def fig1_hero(npz_path: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz") ->
     ball = d["ball_pos"]
     tcp = d["tcp_pos"]
     hit = int(d["hit_step"])
-    k0 = max(0, hit - 23)
+    # chat12：显示段从 hit-23 延长到 hit-30（更扁的构图，同宽下留高更少，
+    # 为 p1 的 Artifact 段腾出空间——见 introduction.tex 宽度 0.88 的取值）
+    k0 = max(0, hit - 30)
     b = ball[k0:hit + 1]
     p_face = np.array([tcp[hit, 1], tcp[hit, 0]])       # 绘图坐标（x=Y, y=X）
     r_half = 0.12
@@ -185,14 +187,17 @@ def fig1_hero(npz_path: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz") ->
     u = tang[-1]                                        # 末端切向（拍面朝向）
 
     # ---- 内容包围盒 → 画布几何（内容填满面板，两面板一致）----
+    # chat12 审稿意见：裁掉图内空白——边距较原 0.14 收紧；上边界取 0.13
+    # （> 走廊半宽 0.12，保证走廊带完整不被面板顶裁角——0.11 时实测裁掉约
+    # 6 mm），下边界 0.115（"spatial corridor" 标签所需空间较小）。
     half_x = 0.17                                       # 拍面沿轨迹半长
     half_y = 0.15                                       # 拍面横向半轴 + 余量
-    x_lo = float(b[:, 1].min()) - 0.03
+    x_lo = float(b[:, 1].min()) - 0.02
     x_hi = float(p_face[0]) + max(0.36, half_x + 0.14)  # 含拍柄
-    y_from_path = [float(b[:, 0].min()) - 0.14,         # 走廊下边界 + 标签
-                   float(b[:, 0].max()) + 0.14]         # 走廊上边界
-    y_lo = min(y_from_path[0], float(p_face[1]) - half_y - 0.03)
-    y_hi = max(y_from_path[1], float(p_face[1]) + half_y + 0.03)
+    y_from_path = [float(b[:, 0].min()) - 0.115,        # 走廊下边界 + 标签
+                   float(b[:, 0].max()) + 0.13]         # 走廊上边界（完整）
+    y_lo = min(y_from_path[0], float(p_face[1]) - half_y - 0.02)
+    y_hi = max(y_from_path[1], float(p_face[1]) + half_y + 0.02)
     xlim, ylim = (x_lo, x_hi), (y_lo, y_hi)
 
     fig_w = 3.40
@@ -202,7 +207,7 @@ def fig1_hero(npz_path: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz") ->
     fig_h = 2 * panel_h + 0.30                          # 两面板 + 行距/边距
     fig, axes = plt.subplots(2, 1, figsize=(fig_w, fig_h))
     fig.subplots_adjust(left=0.012, right=0.988, top=0.995, bottom=0.005,
-                        hspace=0.10)
+                        hspace=0.06)
     print(f"  [fig1] xspan={x_hi - x_lo:.3f} m, yspan={y_hi - y_lo:.3f} m, "
           f"figsize=({fig_w:.2f},{fig_h:.2f})")
 
@@ -222,10 +227,14 @@ def fig1_hero(npz_path: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz") ->
                 solid_capstyle="round")
 
     def racket(ax) -> None:
-        """球拍：椭圆拍面（横向半轴 ≈ r_half）+ 短柄（沿出球方向）。"""
+        """球拍：椭圆拍面（横向半轴 ≈ r_half）+ 短柄（沿出球方向）。
+
+        chat12 审稿意见：拍面改半透明填充——原不透明浅灰会把走廊边界与
+        候选点盖住，削弱「一个目标变成一组目标」的视觉差异。
+        """
         ang = float(np.degrees(np.arctan2(u[1], u[0])))
         ax.add_patch(Ellipse(p_face, width=2 * 0.14, height=2 * r_half,
-                             angle=ang, facecolor="0.95",
+                             angle=ang, facecolor="0.90", alpha=0.55,
                              edgecolor=C["racket"], lw=1.0, zorder=4))
         h0, h1 = p_face + 0.15 * u, p_face + 0.36 * u
         ax.plot([h0[0], h1[0]], [h0[1], h1[1]], color=C["racket"], lw=2.6,
@@ -249,12 +258,12 @@ def fig1_hero(npz_path: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz") ->
     ax.scatter([b[-1, 1]], [b[-1, 0]], marker="*", s=75, color=C["ball"],
                edgecolor="white", lw=0.5, zorder=6)
     ax.annotate("single target", (b[-1, 1], b[-1, 0]), textcoords="offset points",
-                xytext=(-13, 11), fontsize=8, ha="right", va="bottom",
+                xytext=(-13, 11), fontsize=9.2, ha="right", va="bottom",
                 color=C["ball"], zorder=7,
                 arrowprops=dict(arrowstyle="-", lw=0.6, color=C["ball"],
                                 shrinkA=0, shrinkB=4))
     ax.text(0.005, 0.995, "(a) Point target", transform=ax.transAxes,
-            fontsize=8.5, ha="left", va="top")
+            fontsize=9.4, ha="left", va="top")
 
     # ---------------- (b) 候选窗口终端 + 走廊 ----------------
     ax = axes[1]
@@ -263,9 +272,11 @@ def fig1_hero(npz_path: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz") ->
     ball_path(ax)
     racket(ax)
     # 候选球态（窗口内 5 个时刻，中心最深、两侧渐浅）
+    # chat12 审稿意见：端点透明度提高（原 0.30 在拍面处几乎不可见），
+    # 保证「一组目标」在整条窗口上都读得出来
     ks = np.linspace(i_w0, i_w0 + 0.88 * (len(b) - 1 - i_w0), 5).round().astype(int)
-    for k, al in zip(ks, (0.30, 0.55, 1.0, 0.55, 0.30)):
-        ax.scatter([b[k, 1]], [b[k, 0]], s=30, color=C["ball"], alpha=al,
+    for k, al in zip(ks, (0.45, 0.70, 1.0, 0.70, 0.45)):
+        ax.scatter([b[k, 1]], [b[k, 0]], s=34, color=C["ball"], alpha=al,
                    edgecolor="white", lw=0.4, zorder=6)
     # 时间顺序箭头（沿轨迹，贴走廊带上缘，轻量）
     j_ar = int(0.88 * (len(cw) - 1))
@@ -276,16 +287,16 @@ def fig1_hero(npz_path: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz") ->
                                 shrinkA=1, shrinkB=1), zorder=5)
     k_lab = int(ks[1])
     ax.annotate("candidate ball states", (b[k_lab, 1], b[k_lab, 0]),
-                textcoords="offset points", xytext=(-5, 11), fontsize=8,
+                textcoords="offset points", xytext=(-5, 11), fontsize=9.2,
                 ha="right", va="bottom", color=C["ball"], zorder=7,
                 arrowprops=dict(arrowstyle="-", lw=0.6, color=C["ball"],
                                 shrinkA=0, shrinkB=3))
     mid = cw[len(cw) // 2] - 1.35 * r_half * nrm[len(cw) // 2]
     ax.annotate("spatial corridor", (mid[0], mid[1]),
-                textcoords="offset points", xytext=(0, -2), fontsize=8,
+                textcoords="offset points", xytext=(0, -2), fontsize=9.2,
                 ha="center", va="top", color=C["corridor"], zorder=7)
     ax.text(0.005, 0.995, "(b) Candidate-window terminal + corridor",
-            transform=ax.transAxes, fontsize=8.5, ha="left", va="top")
+            transform=ax.transAxes, fontsize=9.4, ha="left", va="top")
 
     save(fig, "fig1_hero.pdf")
 
@@ -636,64 +647,28 @@ def _fig3_alt_2d_old(npz_path: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.n
 
 def fig4(npz_a: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz",
          npz_b: Path = DATA / "exp18_fig_assets/raw/b_hit_space_perturb.npz") -> None:
-    """Fig.4: (a) 关节角相对初始位形的偏差；(b) TCP 速度 + 限速带 + 命中区放大 inset。"""
+    """Fig.4: (a) TCP 速度曲线（标称 vs 空间扰动 + 限速带）；(b) 命中邻域放大。
+
+    chat12 审稿意见：原 (a) 关节余量面板相对贡献占幅偏大、信息量低
+    （峰值 46% 限位余量一句话可概括），已整体移除；该数字并入图注文字，
+    本图只保留与速度预算论点直接相关的 TCP 曲线。
+    """
     da, db = np.load(npz_a), np.load(npz_b)
     t_a = da["timestamps"] * 1000
     t_b = db["timestamps"] * 1000
     hit_a = int(da["hit_step"]) * float(da["dt"]) * 1000
     hit_b = int(db["hit_step"]) * float(db["dt"]) * 1000
-    names = ["J0", "J1", "J2", "J3", "J4", "J5"]
-    colors = ["#0072B2", "#D55E00", "#009E73", "#56B4E9", "#E69F00", "#CC79A7"]
-    # 灰度打印下单靠颜色无法区分 6 条曲线（审稿人意见）：每条曲线给唯一线型，
-    # J4/J5 再叠稀疏空心 marker，保证黑白下仍可逐条追踪
-    styles = ["-", "--", "-.", ":", "-", "--"]
-    markers = [None, None, None, None, ("o", 60), ("s", 60)]
 
-    # 版式：(a)(b) 上下同宽共享时间轴（同列，竖直对照成立），(c) 占右列两行。
-    # 旧版 (a) 通栏而 (b) 只有 55% 宽：上下同宽的时间轴被拉成不同比例，
-    # 竖直对照失效；放大图早期是 (b) 的内嵌 inset，但 (b) 里没有足够大的
-    # 空白矩形（任意位置都会压住 1.8 m/s 限速线），故升为右列独立面板。
-    fig = plt.figure(figsize=(7.16, 1.88))
+    # 版式（chat12 审稿意见）：关节余量面板已移除（见 docstring），
+    # 两面板并排：(a) 全程 TCP 速度、(b) 命中邻域放大。
+    fig = plt.figure(figsize=(7.16, 1.52))
     # 显式给四周留白（不用 tight_layout）：默认 subplot 参数会让坐标轴只占 125%-90% 宽
-    gs = fig.add_gridspec(2, 2, height_ratios=[1.15, 1], width_ratios=[1.55, 1],
-                          left=0.055, right=0.995, top=0.87, bottom=0.185,
-                          hspace=0.62, wspace=0.30)
-    ax = fig.add_subplot(gs[0, 0])
-    # (a) 关节利用率：|Δq| 占初始位形到最近限位余量的百分比（100% 线 = 关节限位）。
-    # 绝对偏差（deg）各关节量级不同，同一尺度下读不出安全余量（审稿人意见）。
-    import yaml
-    q0 = da["q_actual"][0]
-    lim = yaml.safe_load(
-        (PROJECT / "configs" / "default.yaml").read_text(encoding="utf-8")
-    )["robot_limits"]
-    head = np.minimum(np.abs(np.radians(lim["q_min_deg"][:6]) - q0),
-                      np.abs(np.radians(lim["q_max_deg"][:6]) - q0))
-    util = 100.0 * np.abs(da["q_actual"] - q0) / head
-    for j in range(6):
-        mk = markers[j]
-        kw = {}
-        if mk is not None:
-            kw = dict(marker=mk[0], markevery=mk[1], markersize=2.6,
-                      markerfacecolor="none", markeredgewidth=0.7)
-        ax.plot(t_a, util[:, j], color=colors[j], lw=1.0, ls=styles[j],
-                label=names[j], **kw)
-    ax.axhline(100, color="gray", ls="--", lw=0.8)
-    ax.annotate("joint limit", xy=(0.985, 100), xycoords=("axes fraction", "data"),
-                ha="right", va="bottom", fontsize=7, color="dimgray")
-    ax.axvline(hit_a, color="k", ls=":", lw=0.8)
-    ax.set_ylabel("Utilization (%)")
-    ax.set_ylim(0, 130)
-    # 图例放在曲线峰值（≈45%）与 100% 限位线之间的空白带内（图高压缩后贴顶会压标题）；
-    # handlelength 加长以便虚/点线型在图例中可辨认（灰度可读性，审稿人意见）
-    ax.legend(ncol=6, loc="lower left", bbox_to_anchor=(0.0, 0.55),
-              fontsize=7, columnspacing=0.7, handlelength=1.5, labelspacing=0.2,
-              borderpad=0.25, framealpha=0.9)
-    ax.set_title("(a) Joint excursion vs. available limit headroom", fontsize=9)
-    ax.tick_params(labelbottom=False)
-    style_ax(ax)
+    gs = fig.add_gridspec(1, 2, width_ratios=[1.55, 1],
+                          left=0.055, right=0.995, top=0.87, bottom=0.28,
+                          wspace=0.30)
 
-    # (b) TCP 速度：两条曲线 + 限速带 + 命中时刻竖线
-    ax = fig.add_subplot(gs[1, 0], sharex=ax)
+    # (a) TCP 速度：两条曲线 + 限速带 + 命中时刻竖线
+    ax = fig.add_subplot(gs[0, 0])
     v_a = np.linalg.norm(np.gradient(da["tcp_pos"], axis=0), axis=1) / float(da["dt"])
     v_b = np.linalg.norm(np.gradient(db["tcp_pos"], axis=0), axis=1) / float(db["dt"])
     # 灰阶 = 实验条件（标称/扰动 run），机制配色只留给 cost 变体（figs 6/7）
@@ -711,15 +686,15 @@ def fig4(npz_a: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz",
     ax.axvline(hit_b, color="k", ls=":", lw=0.8)
     ax.set_xlabel("Time (ms)")
     ax.set_ylabel("TCP speed (m/s)")
-    ax.set_title("(b) TCP speed profiles", fontsize=9)
+    ax.set_title("(a) TCP speed profiles", fontsize=9)
     ax.legend(loc="upper right", framealpha=0.9, fontsize=7)
     style_ax(ax)
 
-    # (c) 命中邻域放大：两条曲线在此分离（整段画在一起时完全重合、读不出差异）
+    # (b) 命中邻域放大：两条曲线在此分离（整段画在一起时完全重合、读不出差异）
     # chat8 审稿意见：caption 给出 −5 ms 接触时间差，但旧版两曲线各自按自己的
     # 接触时刻对齐（差值被减掉），图中看不到两次接触事件。改为统一参考
     # t − hit_a，两次接触分别用与曲线同线型的竖线标出。
-    axi = fig.add_subplot(gs[0:2, 1])
+    axi = fig.add_subplot(gs[0, 1])
     m_a = (t_a > hit_a - 120) & (t_a < hit_a + 120)
     m_b = (t_b > hit_b - 120) & (t_b < hit_b + 120)
     shift_b = hit_b - hit_a
@@ -744,11 +719,11 @@ def fig4(npz_a: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz",
     common = np.union1d(xa, xb)
     dv = np.abs(np.interp(common, xa, v_a[m_a])
                 - np.interp(common, xb, v_b[m_b])).max()
-    print(f"fig4(c): dv_max={dv:.2f} m/s, hit shift={hit_b - hit_a:+.0f} ms")
+    print(f"fig4(b): dv_max={dv:.2f} m/s, hit shift={hit_b - hit_a:+.0f} ms")
     axi.legend(loc="lower left", ncol=2, fontsize=6.5, framealpha=0.9,
                handlelength=1.3, columnspacing=0.9, borderpad=0.3,
                labelspacing=0.2)
-    axi.set_title("(c) Zoom: hit neighbourhood", fontsize=9)
+    axi.set_title("(b) Zoom: hit neighbourhood", fontsize=9)
     style_ax(axi)
 
     # 不用 tight_layout：它会把上面 add_gridspec 设的 hspace/wspace 覆盖掉，
@@ -771,8 +746,9 @@ def fig5(stats: dict) -> None:
                             gridspec_kw={"width_ratios": [1.7, 1]})
     ax = axes[0]
     # 中性深灰：单序列实验条件不占机制配色（绿=full 档，见 figs 6/7）
+    # chat12 审稿意见：图例补明曲线对应的配置（默认 sweep 跑的就是 full 档）
     ax.errorbar(speeds, rates, yerr=errs, color="#4D4D4D", marker="o", capsize=2.5,
-                lw=1.0, label="Default limits (TCP 1.8 m/s)")
+                lw=1.0, label="Full configuration, default limits (TCP 1.8 m/s)")
     ax.set_xlabel("Ball speed (m/s)")
     ax.set_ylabel("Active-hit rate (%)")
     ax.set_ylim(0, 105)
