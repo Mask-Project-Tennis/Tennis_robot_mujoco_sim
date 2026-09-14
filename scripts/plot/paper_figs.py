@@ -151,102 +151,142 @@ def _corridor_band(ball: np.ndarray, hit: int, r_half: float = 0.12):
 
 
 def fig1_hero(npz_path: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz") -> None:
-    """Fig.1（hero 概念示意图，顶视）: (a) 单点目标 vs (b) 候选目标 + 走廊。
+    """Fig.1（hero 概念示意图，顶视）: (a) 单点目标 vs (b) 候选窗口终端 + 走廊。
 
-    chat9 审稿意见：旧版两个坐标框非常扁、候选窗口只占很小一段、球拍只是灰色
-    轨迹线。现按概念示意图重做：
-    - 两面板同一视角、同一坐标范围（x = Y 前进方向，y = X 横向），去掉刻度，
-      只画命中前最后一段飞行（具体坐标交给 Fig.3）；
-    - 球拍面画成半径 0.12 m 的圆（= 走廊半宽），使「容差 = 一个拍面半径」直接
-      可见，不再是看不见的灰线；
-    - 面板标题缩为 "Point target" / "Candidate targets + corridor"，图内只留
-      目标点、候选集合、窗口、球拍面四个要素。
+    chat10 审稿意见：坐标框边线像调试图、灰→橙轨迹有断口、空心圆不像球拍、
+    黑色候选点没有时间层次、图内文字压线、没有机器人线索。现按「开放画布 +
+    球拍轮廓 + 连续轨迹 + 橙/蓝配色」重做：
+    - 两面板共享同一条连续球轨迹（窗口外浅灰、窗口内橙，重叠一步保证无断口）；
+    - 球拍画成椭圆拍面 + 短柄，不用空心圆；横向半轴 ≈ 有效碰撞半径 0.12 m，
+      具体数值只写在图注里；
+    - 走廊 = 沿轨迹逐点 ±0.12 m 的浅蓝半透明带 + 蓝色虚线边界（与结果图同色）；
+    - 图内只留三个标签（single target / candidate ball states / spatial corridor），
+      面板编号 (a)/(b) 置于左上角；不显示刻度与坐标框。
+
+    坐标约定：npz 的 ball_pos 列为 (X, Y, Z)，本图顶视绘制 (x=Y, y=X)；
+    所有几何（切向、法向、拍面角度）都在绘图坐标下计算。画布高度按内容
+    长宽比反推，保证内容填满面板、两面板完全一致。
     """
+    from matplotlib.patches import Ellipse
+
     d = np.load(npz_path)
-    ball, tcp = d["ball_pos"], d["tcp_pos"]
+    ball = d["ball_pos"]
+    tcp = d["tcp_pos"]
     hit = int(d["hit_step"])
-    k0 = max(0, hit - 18)
-    b, r = ball[k0:hit + 1], tcp[k0:hit + 1]
+    k0 = max(0, hit - 23)
+    b = ball[k0:hit + 1]
+    p_face = np.array([tcp[hit, 1], tcp[hit, 0]])       # 绘图坐标（x=Y, y=X）
     r_half = 0.12
-    # 参考（命中）时刻的球位置与拍心位置：概念图里两者同刻
-    p_ball, p_face = b[-1, :2], r[-1, :2]
+    i_w0 = max(0, len(b) - 11)                          # 窗口起点（±50 ms ≈ 10 步）
+    cw = np.stack([b[i_w0:, 1], b[i_w0:, 0]], axis=1)   # 窗口段（绘图坐标）
+    tang = np.gradient(cw, axis=0)
+    tang = tang / (np.linalg.norm(tang, axis=1, keepdims=True) + 1e-12)
+    nrm = np.stack([-tang[:, 1], tang[:, 0]], axis=1)   # 左法向（逐点）
+    u = tang[-1]                                        # 末端切向（拍面朝向）
 
-    # 统一视角：两面板完全一致（顶视：x = Y，y = X），并保证拍面圆完整入框
-    xs = np.concatenate([[p_ball[1] - r_half, p_face[1] + r_half], b[:, 1]])
-    ys = np.concatenate([[p_ball[0] - r_half, p_face[0] + r_half,
-                          b[:, 0].min() - r_half, b[:, 0].max() + r_half], b[:, 0]])
-    xlim = (xs.min() - 0.06, xs.max() + 0.10)
-    ylim = (ys.min() - 0.02, ys.max() + 0.02)
+    # ---- 内容包围盒 → 画布几何（内容填满面板，两面板一致）----
+    half_x = 0.17                                       # 拍面沿轨迹半长
+    half_y = 0.15                                       # 拍面横向半轴 + 余量
+    x_lo = float(b[:, 1].min()) - 0.03
+    x_hi = float(p_face[0]) + max(0.36, half_x + 0.14)  # 含拍柄
+    y_from_path = [float(b[:, 0].min()) - 0.14,         # 走廊下边界 + 标签
+                   float(b[:, 0].max()) + 0.14]         # 走廊上边界
+    y_lo = min(y_from_path[0], float(p_face[1]) - half_y - 0.03)
+    y_hi = max(y_from_path[1], float(p_face[1]) + half_y + 0.03)
+    xlim, ylim = (x_lo, x_hi), (y_lo, y_hi)
 
-    fig, axes = plt.subplots(2, 1, figsize=(3.40, 2.35))
+    fig_w = 3.40
+    panel_w = fig_w * 0.976                             # subplots_adjust 后的面板宽
+    aspect = (y_hi - y_lo) / (x_hi - x_lo)
+    panel_h = aspect * panel_w
+    fig_h = 2 * panel_h + 0.30                          # 两面板 + 行距/边距
+    fig, axes = plt.subplots(2, 1, figsize=(fig_w, fig_h))
+    fig.subplots_adjust(left=0.012, right=0.988, top=0.995, bottom=0.005,
+                        hspace=0.10)
+    print(f"  [fig1] xspan={x_hi - x_lo:.3f} m, yspan={y_hi - y_lo:.3f} m, "
+          f"figsize=({fig_w:.2f},{fig_h:.2f})")
 
-    def draw_common(ax) -> None:
-        """两面板共用的要素：球轨迹（前段灰、末段橙）与球拍面圆。"""
-        iwin = max(0, len(b) - 11)
-        ax.plot(b[:iwin, 1], b[:iwin, 0], color="0.68", lw=1.2, zorder=2)
-        ax.plot(b[iwin:, 1], b[iwin:, 0], color=C["ball"], lw=1.5, zorder=3)
-        # 球拍面：半径 0.12 m 的圆（与走廊半宽同值）——顶视投影的示意
-        ax.add_patch(plt.Circle((p_face[1], p_face[0]), r_half,
-                                facecolor="none", edgecolor=C["racket"],
-                                lw=1.1, zorder=4))
+    def canvas(ax) -> None:
+        """开放画布：无坐标框、无刻度、等比例、两面板同视野。"""
         ax.set_xlim(*xlim)
         ax.set_ylim(*ylim)
-        ax.set_xticks([])
-        ax.set_yticks([])
+        ax.set_aspect("equal", adjustable="box")
+        ax.axis("off")
 
-    # (a) point-target：单一 (t, p) 目标
+    def ball_path(ax) -> None:
+        """整条球轨迹：窗口外浅灰、窗口内橙（窗口段向前多含一步，无断口）。"""
+        ax.plot(b[:, 1], b[:, 0], color="#B8B8B8", lw=1.4, zorder=2,
+                solid_capstyle="round")
+        j0 = i_w0 - 1 if i_w0 > 0 else 0
+        ax.plot(b[j0:, 1], b[j0:, 0], color=C["ball"], lw=1.8, zorder=3,
+                solid_capstyle="round")
+
+    def racket(ax) -> None:
+        """球拍：椭圆拍面（横向半轴 ≈ r_half）+ 短柄（沿出球方向）。"""
+        ang = float(np.degrees(np.arctan2(u[1], u[0])))
+        ax.add_patch(Ellipse(p_face, width=2 * 0.14, height=2 * r_half,
+                             angle=ang, facecolor="0.95",
+                             edgecolor=C["racket"], lw=1.0, zorder=4))
+        h0, h1 = p_face + 0.15 * u, p_face + 0.36 * u
+        ax.plot([h0[0], h1[0]], [h0[1], h1[1]], color=C["racket"], lw=2.6,
+                solid_capstyle="round", zorder=4)
+
+    def corridor(ax) -> None:
+        """走廊带：窗口段逐点 ±r_half 的浅蓝填充 + 蓝色虚线边界。"""
+        up, dn = cw + r_half * nrm, cw - r_half * nrm
+        ax.fill(np.concatenate([up[:, 0], dn[::-1, 0]]),
+                np.concatenate([up[:, 1], dn[::-1, 1]]),
+                color="#56B4E9", alpha=0.18, lw=0, zorder=1)
+        for edge in (up, dn):
+            ax.plot(edge[:, 0], edge[:, 1], color=C["corridor"], lw=0.9,
+                    ls=(0, (4, 2)), zorder=2)
+
+    # ---------------- (a) point-target：单一目标 ----------------
     ax = axes[0]
-    draw_common(ax)
-    ax.scatter([p_ball[1]], [p_ball[0]], color="k", marker="*", s=55, zorder=6)
-    ax.annotate("single target", (p_ball[1], p_ball[0]),
-                textcoords="offset points", xytext=(-6, 9), fontsize=8,
-                ha="right", va="bottom",
-                arrowprops=dict(arrowstyle="-", lw=0.6, color="k",
-                                shrinkA=0, shrinkB=3))
-    ax.annotate("racket face", (p_face[1], p_face[0] - r_half),
-                textcoords="offset points", xytext=(0, -3), fontsize=8,
-                ha="center", va="top", color=C["racket"])
-    ax.set_title("(a) Point target", fontsize=8.5)
+    canvas(ax)
+    ball_path(ax)
+    racket(ax)
+    ax.scatter([b[-1, 1]], [b[-1, 0]], marker="*", s=75, color=C["ball"],
+               edgecolor="white", lw=0.5, zorder=6)
+    ax.annotate("single target", (b[-1, 1], b[-1, 0]), textcoords="offset points",
+                xytext=(-13, 11), fontsize=8, ha="right", va="bottom",
+                color=C["ball"], zorder=7,
+                arrowprops=dict(arrowstyle="-", lw=0.6, color=C["ball"],
+                                shrinkA=0, shrinkB=4))
+    ax.text(0.005, 0.995, "(a) Point target", transform=ax.transAxes,
+            fontsize=8.5, ha="left", va="top")
 
-    # (b) 候选目标 + 走廊：±0.12 m 带 + 窗口内候选点
+    # ---------------- (b) 候选窗口终端 + 走廊 ----------------
     ax = axes[1]
-    draw_common(ax)
-    i_hit = len(b) - 1
-    i_w0 = max(0, i_hit - 10)
-    seg0, seg1 = b[i_w0, :2], b[i_hit, :2]
-    u = seg1 - seg0
-    u = u / (np.linalg.norm(u) + 1e-12)
-    off = r_half * np.array([-u[1], u[0]])
-    # 走廊带（蓝色，与结果图 corridor 同色）
-    poly_x = [seg0[1] + off[1], seg1[1] + off[1],
-              seg1[1] - off[1], seg0[1] - off[1]]
-    poly_y = [seg0[0] + off[0], seg1[0] + off[0],
-              seg1[0] - off[0], seg0[0] - off[0]]
-    ax.fill(poly_x, poly_y, color=C["corridor"], alpha=0.20, lw=0, zorder=1)
-    for sgn in (+1, -1):
-        ax.plot([seg0[1] + sgn * off[1], seg1[1] + sgn * off[1]],
-                [seg0[0] + sgn * off[0], seg1[0] + sgn * off[0]],
-                color=C["corridor"], lw=0.9, ls="--", zorder=2)
-    # 候选点（窗口内 5 个候选时刻的球位置）
-    for kk in (-10, -5, 0, 5, 10):
-        idx = i_hit + kk
-        if 0 <= idx <= i_hit:
-            ax.scatter([b[idx, 1]], [b[idx, 0]], color="k", marker="o", s=9,
-                       zorder=6)
-    ax.annotate("candidate targets", (b[i_hit - 5, 1], b[i_hit - 5, 0]),
-                textcoords="offset points", xytext=(-10, 16), fontsize=8,
-                ha="right", va="bottom",
-                arrowprops=dict(arrowstyle="-", lw=0.6, color="k",
-                                shrinkA=0, shrinkB=2))
-    ax.annotate("corridor ($\\pm0.12$ m)", (seg0[1], seg0[0]),
-                textcoords="offset points", xytext=(2, -5), fontsize=8,
-                ha="left", va="top", color=C["corridor"])
-    ax.annotate("racket face", (p_face[1], p_face[0] - r_half),
-                textcoords="offset points", xytext=(0, -4), fontsize=8,
-                ha="center", va="top", color=C["racket"])
-    ax.set_title("(b) Candidate targets + corridor", fontsize=8.5)
+    canvas(ax)
+    corridor(ax)
+    ball_path(ax)
+    racket(ax)
+    # 候选球态（窗口内 5 个时刻，中心最深、两侧渐浅）
+    ks = np.linspace(i_w0, i_w0 + 0.88 * (len(b) - 1 - i_w0), 5).round().astype(int)
+    for k, al in zip(ks, (0.30, 0.55, 1.0, 0.55, 0.30)):
+        ax.scatter([b[k, 1]], [b[k, 0]], s=30, color=C["ball"], alpha=al,
+                   edgecolor="white", lw=0.4, zorder=6)
+    # 时间顺序箭头（沿轨迹，贴走廊带上缘，轻量）
+    j_ar = int(0.88 * (len(cw) - 1))
+    m0 = cw[0] + 1.10 * r_half * nrm[0]
+    m1 = cw[j_ar] + 1.10 * r_half * nrm[j_ar]
+    ax.annotate("", xy=(m1[0], m1[1]), xytext=(m0[0], m0[1]),
+                arrowprops=dict(arrowstyle="->", lw=0.7, color="0.45",
+                                shrinkA=1, shrinkB=1), zorder=5)
+    k_lab = int(ks[1])
+    ax.annotate("candidate ball states", (b[k_lab, 1], b[k_lab, 0]),
+                textcoords="offset points", xytext=(-5, 11), fontsize=8,
+                ha="right", va="bottom", color=C["ball"], zorder=7,
+                arrowprops=dict(arrowstyle="-", lw=0.6, color=C["ball"],
+                                shrinkA=0, shrinkB=3))
+    mid = cw[len(cw) // 2] - 1.35 * r_half * nrm[len(cw) // 2]
+    ax.annotate("spatial corridor", (mid[0], mid[1]),
+                textcoords="offset points", xytext=(0, -2), fontsize=8,
+                ha="center", va="top", color=C["corridor"], zorder=7)
+    ax.text(0.005, 0.995, "(b) Candidate-window terminal + corridor",
+            transform=ax.transAxes, fontsize=8.5, ha="left", va="top")
 
-    fig.tight_layout(pad=0.25)
     save(fig, "fig1_hero.pdf")
 
 
@@ -402,16 +442,11 @@ def fig3_alt_2d(npz_path: Path = DATA / "exp18_fig_assets/raw/d_hit_noise_kf.npz
                label="Reference point (best candidate)")
     ax.scatter([ball[k_contact, 1]], [ball[k_contact, 2]], color="k",
                marker="*", s=45, zorder=8, label="Contact")
-    ax.annotate("reference point", (ball[k_ref, 1], ball[k_ref, 2]),
-                textcoords="offset points", xytext=(-6, 12), fontsize=7,
-                ha="right", va="bottom",
-                arrowprops=dict(arrowstyle="-", lw=0.6, color="k",
-                                shrinkA=0, shrinkB=3))
     ax.annotate("contact", (ball[k_contact, 1], ball[k_contact, 2]),
-                textcoords="offset points", xytext=(-6, -12), fontsize=7,
-                ha="right", va="top",
+                textcoords="offset points", xytext=(-9, -15), fontsize=7,
+                ha="right", va="top", color="k", zorder=9,
                 arrowprops=dict(arrowstyle="-", lw=0.6, color="k",
-                                shrinkA=0, shrinkB=3))
+                                shrinkA=0, shrinkB=4))
     ax.annotate("corridor axis", (seg[len(seg) // 2, 1], seg[len(seg) // 2, 2]),
                 textcoords="offset points", xytext=(-2, -20), fontsize=7,
                 ha="right", va="top", color=C["corridor"])
@@ -419,21 +454,6 @@ def fig3_alt_2d(npz_path: Path = DATA / "exp18_fig_assets/raw/d_hit_noise_kf.npz
     ax.set_ylim(0.68, 1.08)
     ax.set_title("(a) Side view", fontsize=8.5)
     style_ax(ax)
-
-    # 全轨迹定位小图（左上角）：整段飞行 + 放大区间矩形
-    ins = ax.inset_axes([0.03, 0.55, 0.30, 0.40])
-    ins.plot(ball[:, 1], ball[:, 2], color="0.6", lw=0.7)
-    ins.plot(tcp[:, 1], tcp[:, 2], color="0.75", lw=0.6)
-    ins.add_patch(plt.Rectangle((y_lo, 0.68), y_hi - y_lo, 0.40,
-                                facecolor="none", edgecolor=C["corridor"],
-                                lw=0.8))
-    ins.set_xlim(ball[:, 1].min() - 0.2, ball[:, 1].max() + 0.2)
-    ins.set_ylim(-0.05, 1.45)
-    ins.set_xticks([])
-    ins.set_yticks([])
-    for s in ins.spines.values():
-        s.set_linewidth(0.5)
-        s.set_color("gray")
 
     # (b) 顶视：Y–X（球前进方向 vs 横向）
     ax = axes[1]
@@ -445,11 +465,8 @@ def fig3_alt_2d(npz_path: Path = DATA / "exp18_fig_assets/raw/d_hit_noise_kf.npz
     ax.scatter([ball[k_ref, 1]], [ball[k_ref, 0]], color="w", edgecolor="k",
                marker="o", s=22, lw=0.9, zorder=7)
     ax.scatter([ball[k_contact, 1]], [ball[k_contact, 0]], color="k",
-               marker="*", s=45, zorder=8)
-    ax.annotate("window $\\pm50$ ms",
-                (0.5 * (seg[0, 1] + seg[-1, 1]), 0.5 * (seg[0, 0] + seg[-1, 0])),
-                textcoords="offset points", xytext=(0, -17), fontsize=7,
-                ha="center", va="top", color="0.35")
+               marker="*", s=40, zorder=8)
+    # chat10：窗口范围（±50 ms）改由图注说明，图内不再标注以去拥挤
     ax.set_xlabel("Y (m)")
     ax.set_ylabel("X (m)")
     ax.set_ylim(-0.98, -0.60)
@@ -1053,13 +1070,13 @@ def fig_diagnostic() -> None:
                 hs = int(d["hit_step"])
                 if 0 < hs < len(d["timestamps"]):
                     t_c = float((d["timestamps"][hs] - d["timestamps"][k_nom]) * 1000)
-                    ax.plot([t_c], [dist[hs]], marker="*", ms=9, color="k",
+                    ax.plot([t_c], [dist[hs]], marker="*", ms=6.5, color="k",
                             zorder=6, mew=0.6)
                     # 接触时刻单独标注（与最小距离分离，短引线指向星号）
                     ax.annotate("contact", (t_c, dist[hs]), textcoords="offset points",
-                                xytext=(14, 12), fontsize=7, ha="left", va="bottom",
-                                arrowprops=dict(arrowstyle="-", lw=0.5, color="k",
-                                                shrinkA=0, shrinkB=2))
+                                xytext=(16, 10), fontsize=7, ha="left", va="bottom",
+                                arrowprops=dict(arrowstyle="->", lw=0.6, color="k",
+                                                shrinkA=0, shrinkB=3))
             stats_txt.append(f"{lab.split(' (')[0]} {dmin:.0f}")
         ax.axhline(120, color="gray", ls="--", lw=0.9)
         ax.axvline(0, color="k", ls=":", lw=0.8)

@@ -124,7 +124,9 @@ diagnostics (19.2 % of episodes exceed 1.0 m/s, mean 1.09, p90 1.01).
 python scripts/plot/paper_figs.py --fig 1hero 3alt 4 5 6 7 8 table --out repro_outputs
 ```
 
-Writes `repro_outputs/*.pdf` (Fig. 1 and Fig. 3–8) and
+Writes `repro_outputs/*.pdf` (Fig. 1 and Fig. 3–7 of the manuscript, plus the
+representative-diagnostic figure `fig7_diagnostic.pdf`, which the manuscript
+cites as artifact-only) and
 `repro_outputs/table_data/table1_comparison.tex` + `table2_ablation.tex`
 (Tables I–II), identical to the manuscript versions.
 
@@ -152,8 +154,8 @@ Writes `repro_outputs/*.pdf` (Fig. 1 and Fig. 3–8) and
 | E5 perception sweep | `experiment_data/exp17a_noise`, `exp17c_obsfreq` | artifact only |
 | E7 high-power corners | `experiment_data/exp17g_spatial_power`, `exp17h_extreme` | Fig. 6(d), Table I |
 | E8 limit x mechanism | `experiment_data/exp17i_limits_ablation` | Table II, text |
-| E6 real-time budget | `experiment_data/exp18_fig_assets/timing.json` | Fig. 8 |
-| Trajectory assets | `experiment_data/exp18_fig_assets/raw/*.npz` | Fig. 1, 3, 4, 7 |
+| E6 real-time budget | `experiment_data/exp18_fig_assets/timing.json` | Fig. 7 |
+| Trajectory assets | `experiment_data/exp18_fig_assets/raw/*.npz` | Fig. 1, 3, 4; artifact-only diagnostic figure |
 | Sensitivity sweep | `experiment_data/exp18_sensitivity` | text (Sec. VI) |
 | TCP exemption | `experiment_data/exp18_tcp_exempt` | text (Sec. VI) |
 | Hard-min baseline | `experiment_data/exp19_hardmin` | text (Sec. VI-C) |
