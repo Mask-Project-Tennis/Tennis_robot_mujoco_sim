@@ -75,7 +75,7 @@ C = {
     "corridor": "#0072B2",    # 走廊固定蓝色，与 tube_only (corridor-only) 一致
 }
 MODE_LABELS = {"full": "full", "tube_only": "corridor-only",
-               "softmin_only": "softmin-only", "none": "point-target"}
+               "softmin_only": "candidate-set-only", "none": "point-target"}
 MODE_ORDER = ["full", "tube_only", "softmin_only", "none"]
 
 
@@ -830,7 +830,7 @@ def _holm_sig(pvals: dict[str, float]) -> dict[str, bool]:
 
 
 def fig6(stats: dict) -> None:
-    """Fig.6: (a) 标称增益两系列 (b) softmin 相对点目标增益热图 (c) 走廊增量热图
+    """Fig.6: (a) 标称增益两系列 (b) candidate-set 相对点目标增益热图 (c) 走廊增量热图
     full−softmin (d) 走廊独立价值 vs 扰动幅度（E7 高功效角点）。
 
     chat2 第二轮改版：(b) 原为 full−pt（混合两机制），拆成两张热图后
@@ -841,7 +841,7 @@ def fig6(stats: dict) -> None:
     e3, e4, e7 = stats["E3_nominal"], stats["E4_grid"], stats["E7_corners"]
     # chat9 审稿意见：这是核心结果图，应获得更多面积（旧版 2.25 in 四子图明显变扁），
     # 面板标题缩短、方法/速度/单位移入坐标轴与图注
-    fig, axes = plt.subplots(2, 2, figsize=(7.16, 2.65))
+    fig, axes = plt.subplots(2, 2, figsize=(7.16, 2.48))
 
     def asym_err(v: dict) -> tuple[float, float]:
         """配对 bootstrap CI 的上下误差条（以 diff_pp 为基准）。"""
@@ -853,7 +853,7 @@ def fig6(stats: dict) -> None:
     speeds = [7, 9, 12]
     width = 0.32
     for mi, (key, lab, col) in enumerate([
-            ("softmin_only_vs_none", "softmin-only", C["softmin_only"]),
+            ("softmin_only_vs_none", "candidate-set-only", C["softmin_only"]),
             ("tube_only_vs_none", "corridor-only", C["tube_only"])]):
         vals, errs = [], [[], []]
         for sp in speeds:
@@ -877,7 +877,7 @@ def fig6(stats: dict) -> None:
     ts = [0, 10, 25, 50, 100]
     ss = [0.0, 0.05, 0.1, 0.2]
     heat_specs = [
-        (axes[0][1], "softmin_only_vs_none", "(b) Softmin gain"),
+        (axes[0][1], "softmin_only_vs_none", "(b) Candidate-set gain"),
         (axes[1][0], "full_vs_softmin_only", "(c) Added corridor gain"),
     ]
     for ax, cmp, title in heat_specs:
@@ -1032,7 +1032,7 @@ def fig_diagnostic() -> None:
     panels = [
         ("(a) 50 ms temporal perturbation", [
             ("pt_miss_t50", "point-target (miss)", C_PT, "-", False),
-            ("sm_hit_t50", "softmin-only (hit)", C["softmin_only"], "--", True)]),
+            ("sm_hit_t50", "candidate-set-only (hit)", C["softmin_only"], "--", True)]),
         ("(b) 0.2 m spatial perturbation", [
             ("pt_miss_s20_s77", "point-target (miss)", C_PT, "-", False),
             ("co_hit_s20_s77", "corridor-only (hit)", C["tube_only"], "--", True)]),
@@ -1140,26 +1140,28 @@ def tables(stats: dict, out_dir: Path | None = None) -> None:
     nom_hw = [ci_half_pp(k, key) for _, k, *keys in rows12 for key in keys]
     gc_hw = [ci_half_pp(k, key)
              for _, k, *keys in rows_grid + rows_corner for key in keys]
-    nom_n = [n_of(k, keys[0]) for _, k, *keys in rows12]
+    nom_n = [n_of(k, key) for _, k, *keys in rows12 for key in keys]
 
     lines = [r"\begin{table*}[t]", r"\centering",
              r"\caption{Active-hit rate (\%) of the four configurations across conditions;",
-             r"$n$ = valid runs per configuration of the summarized condition "
-             r"(the perturbation-grid row pools its $20$ cells). Wilson 95\% intervals are",
+             r"$n$ = valid runs per configuration, given as the range across the four "
+             r"configurations (the perturbation-grid row pools its $20$ cells). Wilson 95\% "
+             r"intervals are "
              f"$\\pm{min(nom_hw):.1f}$--${max(nom_hw):.1f}$ pp for the nominal rows "
              f"($n{{=}}{min(nom_n)}$--${max(nom_n)}$) and "
-             f"$\\pm{min(gc_hw):.1f}$--${max(gc_hw):.1f}$ pp",
-             r"for the grid and corner rows; exact intervals are in the artifact.}",
+             f"$\\pm{min(gc_hw):.1f}$--${max(gc_hw):.1f}$ pp for the grid and corner rows; exact intervals are in the "
+             r"artifact.}",
              r"\label{tab:ablation}",
              r"\begin{tabular}{lccccrc}", r"\toprule",
-             r"Condition & full & corridor-only & softmin-only & point-target & $n$ & Design \\",
+             r"Condition & full & corridor-only & candidate-set-only & point-target & $n$ & Design \\",
              r"\midrule"]
     kind_label = {"E3": "nominal four-tier", "E4": "perturbation grid",
                   "E7": "high-power corners"}
     for label, kind, *keys in rows_all:
         vals = " & ".join(f"{cell(kind, k):.1f}" for k in keys)
-        n = n_of(kind, keys[0])
-        lines.append(f"{label} & {vals} & {n} & {kind_label[kind]} \\\\")
+        ns = [n_of(kind, k) for k in keys]
+        n_str = f"{min(ns)}" if min(ns) == max(ns) else f"{min(ns)}--{max(ns)}"
+        lines.append(f"{label} & {vals} & {n_str} & {kind_label[kind]} \\\\")
     lines += [r"\bottomrule", r"\end{tabular}", r"\end{table*}", ""]
     (out_dir / "table1_comparison.tex").write_text("\n".join(lines), encoding="utf-8")
 
@@ -1168,7 +1170,11 @@ def tables(stats: dict, out_dir: Path | None = None) -> None:
              r"\caption{Gain (pp) of each configuration over the point-target "
              r"baseline under the two TCP speed caps ($7$ m/s, $n=394$ paired "
              r"seeds); $p$ from the exact paired McNemar test; DiD is the paired "
-             r"per-seed difference in gain (sign test).}", r"\label{tab:limits}",
+             r"per-seed difference in gain (mean with paired-bootstrap $95\%$ CI; "
+             r"sign test on the per-seed direction); all $p$-values are unadjusted "
+             r"tests for the pre-specified mechanism comparisons.}",
+             r"\label{tab:limits}",
+             r"\setlength{\tabcolsep}{4pt}",
              r"\begin{tabular}{lcccr}", r"\toprule",
              r"Config. & \multicolumn{2}{c}{Gain over point-target (pp)} & "
              r"\multicolumn{2}{c}{$p$} \\",
@@ -1187,9 +1193,11 @@ def tables(stats: dict, out_dir: Path | None = None) -> None:
               r"TCP 1.0):} \\"]
     for mode in ("tube_only", "softmin_only", "full"):
         d = did.get(mode, {})
+        lo, hi = d.get("ci95", [np.nan, np.nan])
         lines.append(f"\\quad {MODE_LABELS[mode]} & \\multicolumn{{4}}{{l}}"
                      f"{{${d.get('mean_did_pp', 0):+.1f}$ pp "
-                     f"(sign test $p{fmt_p(d.get('p_sign', 1))}$)}} \\\\")
+                     f"(CI $[{lo:.1f},{hi:.1f}]$; sign test "
+                     f"$p{fmt_p(d.get('p_sign', 1))}$)}} \\\\")
     lines += [r"\bottomrule", r"\end{tabular}", r"\end{table}", ""]
     (out_dir / "table2_ablation.tex").write_text("\n".join(lines), encoding="utf-8")
     print(f"已保存 {out_dir}/table1_comparison.tex + table2_ablation.tex")
