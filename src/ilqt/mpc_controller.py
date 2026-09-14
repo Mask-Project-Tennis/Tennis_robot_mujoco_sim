@@ -111,6 +111,10 @@ class MPCConfig:
     #   "ballstate"（chat9 审稿建议）= 偏移喂给规划器的球状态估计，
     #   使单点目标、候选集合、走廊轴、warm start 同源于一份有偏预测。
     spatial_perturb_target: str = "hitpoint"
+    # 统一观测扰动（chat12 审稿 C2）：ballstate 口径下进一步让到达时刻预测
+    # 与可达性门限也消费同一份受扰球态 —— 所有规划模块共用同一观测，
+    # 端到端的预测偏差实验（而非"目标几何有偏、时序通道无偏"的解耦口径）。
+    shared_input_full: bool = False
 
     # ── R 退火 ──
     use_r_decay: bool = False

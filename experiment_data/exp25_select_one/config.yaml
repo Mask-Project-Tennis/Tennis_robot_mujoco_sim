@@ -1,0 +1,5 @@
+# 由 batch_runner 自动生成
+# experiment: exp25_select_one
+# grid_size: 600
+# report_ref: chat12 审稿 C3（高度建议）: 候选选择基线 —— 从候选窗口按 IK 关节裕度硬选单一目标，再跑标准 point-target MPC（--ablation select_one）。回答「是否必须把候选集合嵌入 softmin，还是目标选择本身就足够」。对照 = exp17a/17d 标称四档（同 seeds）。{7,9,12} × 200 seeds = 600 runs。
+# config_ids: ['ablationselect_one__ballspeed12__noplot__servebox', 'ablationselect_one__ballspeed7__noplot__servebox', 'ablationselect_one__ballspeed9__noplot__servebox']

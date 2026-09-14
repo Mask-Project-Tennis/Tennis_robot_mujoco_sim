@@ -1,0 +1,5 @@
+# 由 batch_runner 自动生成
+# experiment: exp27_ball_quality
+# grid_size: 800
+# report_ref: chat12 审稿 C6（高度建议）: 标称条件重跑收集出球质量指标（ball_out_speed / ball_out_vy，弹性反弹模型的出球速度与 Y 分量）。与 Table II nominal 同条件（9/12 m/s × 4 档 × 100 seeds = 800 runs），回答「active contact 是否产生有意义的回击」。
+# config_ids: ['ablationfull__ballspeed12__noplot__servebox', 'ablationfull__ballspeed9__noplot__servebox', 'ablationnone__ballspeed12__noplot__servebox', 'ablationnone__ballspeed9__noplot__servebox', 'ablationsoftmin_only__ballspeed12__noplot__servebox', 'ablationsoftmin_only__ballspeed9__noplot__servebox', 'ablationtube_only__ballspeed12__noplot__servebox', 'ablationtube_only__ballspeed9__noplot__servebox']

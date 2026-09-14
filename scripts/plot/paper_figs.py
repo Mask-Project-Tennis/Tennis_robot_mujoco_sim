@@ -735,15 +735,46 @@ def fig4(npz_a: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz",
 # fig5 命中率 vs 球速（统计量读 JSON）
 # =============================================================================
 
+def _exp26_paired_gains(csv_path: Path) -> dict[tuple[float, float], dict[str, float]]:
+    """exp26 速度×TCP 网格：每格每档相对点目标的配对增益（pp，同 seed 配对）。
+
+    无裁决行（error 非空）剔除；配对差值取两档共同有效 seed 的命中差均值。
+    """
+    import csv as _csv
+    rows: dict[tuple[str, float, float], dict[int, bool]] = {}
+    with csv_path.open(encoding="utf-8") as f:
+        for r in _csv.DictReader(f):
+            if r.get("error"):
+                continue
+            cid = r["config_id"]
+            abl = cid.split("__")[0].replace("ablation", "")
+            spd = float(cid.split("ballspeed")[1].split("__")[0])
+            tcp = float(cid.split("maxtcp")[1].split("__")[0])
+            rows.setdefault((abl, spd, tcp), {})[int(r["seed"])] = (
+                r["hit_type"].strip().lower() == "active")
+    gains: dict[tuple[float, float], dict[str, float]] = {}
+    for spd in (7.0, 9.0):
+        for tcp in (1.0, 1.4, 1.8):
+            base = rows[("none", spd, tcp)]
+            cell: dict[str, float] = {}
+            for t in ("full", "tube_only", "softmin_only"):
+                trow = rows[(t, spd, tcp)]
+                common = sorted(set(base) & set(trow))
+                cell[t] = float(np.mean([trow[s] - base[s] for s in common]) * 100.0)
+            gains[(spd, tcp)] = cell
+    return gains
+
+
 def fig5(stats: dict) -> None:
-    """Fig.5: (a) active-hit vs 球速（E1，Wilson CI）(b) TCP 1.0 vs 1.8（E2）。"""
+    """Fig.5: (a) active-hit vs 球速（E1，Wilson CI）(b) TCP 1.0 vs 1.8（E2）
+    (c) 速度×TCP 网格各档配对增益（exp26，vs 点目标）。"""
     e1 = stats["E1_speed_sweep"]
     speeds = sorted(int(k) for k in e1)
     rates = [e1[str(s)]["rate"] for s in speeds]
     errs = [ci_half(e1[str(s)]) for s in speeds]
 
-    fig, axes = plt.subplots(1, 2, figsize=(7.16, 1.42),
-                            gridspec_kw={"width_ratios": [1.7, 1]})
+    fig, axes = plt.subplots(1, 3, figsize=(7.16, 1.48),
+                             gridspec_kw={"width_ratios": [1.55, 0.9, 1.6]})
     ax = axes[0]
     # 中性深灰：单序列实验条件不占机制配色（绿=full 档，见 figs 6/7）
     # chat12 审稿意见：图例补明曲线对应的配置（默认 sweep 跑的就是 full 档）
@@ -785,6 +816,33 @@ def fig5(stats: dict) -> None:
     ax.set_title("(b) Robot-derived TCP constraint set (7 m/s)", fontsize=9)
     style_ax(ax)
 
+    # (c) 反转区域：exp26 {7,9} m/s × {1.0,1.4,1.8} 网格，每格三档配对增益（vs 点目标）
+    ax = axes[2]
+    gains = _exp26_paired_gains(DATA / "exp26_tcp_grid" / "results.csv")
+    cells = [(spd, tcp) for spd in (7.0, 9.0) for tcp in (1.0, 1.4, 1.8)]
+    tiers = [("full", "full"), ("tube_only", "corridor-only"),
+             ("softmin_only", "candidate-set-only")]
+    for ci, (spd, tcp) in enumerate(cells):
+        x0 = ci * 3
+        for ti, (key, _) in enumerate(tiers):
+            v = gains[(spd, tcp)][key]
+            ax.bar(x0 + ti, v, 0.62, color=C[key], alpha=0.9)
+            ax.text(x0 + ti, v + (0.8 if v >= 0 else -0.8), f"{v:+.0f}",
+                    ha="center", va="bottom" if v >= 0 else "top", fontsize=6.5)
+    ax.axhline(0, color="gray", lw=0.7, ls="--")
+    ax.set_xticks([ci * 3 + 1 for ci in range(len(cells))],
+                  [f"{spd:g}$\\times${tcp:g}" for spd, tcp in cells])
+    ax.set_xlabel("Ball speed (m/s) $\\times$ TCP cap (m/s)")
+    ax.set_ylabel("Gain over point target (pp)")
+    ax.set_ylim(-30, 30)
+    ax.set_title("(c) Reversal region", fontsize=9)
+    from matplotlib.patches import Patch
+    ax.legend(handles=[Patch(facecolor=C[k], label=lab, alpha=0.9)
+                       for k, lab in tiers],
+              loc="lower right", ncol=1, fontsize=6.5, framealpha=0.9,
+              borderpad=0.3, labelspacing=0.25, handlelength=1.2)
+    style_ax(ax)
+
     fig.tight_layout(pad=0.3)
     save(fig, "fig5_hit_rate_vs_speed.pdf")
 
@@ -817,7 +875,7 @@ def fig6(stats: dict) -> None:
     e3, e4, e7 = stats["E3_nominal"], stats["E4_grid"], stats["E7_corners"]
     # chat9 审稿意见：这是核心结果图，应获得更多面积（旧版 2.25 in 四子图明显变扁），
     # 面板标题缩短、方法/速度/单位移入坐标轴与图注
-    fig, axes = plt.subplots(2, 2, figsize=(7.16, 2.48))
+    fig, axes = plt.subplots(2, 2, figsize=(7.16, 2.45))
 
     def asym_err(v: dict) -> tuple[float, float]:
         """配对 bootstrap CI 的上下误差条（以 diff_pp 为基准）。"""

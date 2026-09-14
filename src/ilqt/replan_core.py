@@ -113,10 +113,12 @@ def do_replan(
                 "BALLSTATE 空间扰动 step=%d: 偏移 %.3f m", step, effective_sp,
             )
 
-    # 1. 查找击打点（时序/可达性始终用当前观测：空间偏置只在目标几何上生效）
-    env_plan.set_ball_state(ball_pos, ball_vel)
+    # 1. 查找击打点（时序/可达性：默认用当前观测，空间偏置只在目标几何生效；
+    #    shared_input_full 时改用受扰球态 —— chat12 审稿 C2 端到端统一输入口径）
+    ball_pos_timing = ball_pos_goal if config.shared_input_full else ball_pos
+    env_plan.set_ball_state(ball_pos_timing, ball_vel)
     hit_info_new = find_hitting_point_physics(
-        env_plan, ball_pos, ball_vel, config.shoulder_pos, config.workspace_radius,
+        env_plan, ball_pos_timing, ball_vel, config.shoulder_pos, config.workspace_radius,
         remaining_horizon,
     )
     if hit_info_new is None:
@@ -176,6 +178,59 @@ def do_replan(
     n_des_new = -v_ball_hit_new / (np.linalg.norm(v_ball_hit_new) + 1e-8)
     if config.normal_flip:
         n_des_new = -n_des_new
+
+    # 4.5 select_one 基线（chat12 审稿 C3）：从候选窗口按 IK 可达性硬选单一目标，
+    #     再跑标准 point-target MPC —— 检验"目标选择本身是否足够"
+    #     （vs. 把候选集合嵌入 softmin 终端代价）。注意本基线只对标称
+    #     条件设计：若与时间扰动叠加，此处的 k_hit_new 覆盖会丢弃扰动平移。
+    if (config.ablation_mode == "select_one"
+            and config.tube_cfg is not None
+            and remaining_horizon > 5):
+        _ball_save = env_plan.get_ball_state()
+        hit_window_sel = search_hit_window(
+            env_plan, ball_pos_goal, ball_vel,
+            config.shoulder_pos, config.workspace_radius,
+            remaining_horizon, config.tube_cfg,
+            ball_direction="y",
+            current_step=0,
+            robot_limits=robot_limits,
+            init_q=x_current[:env_plan.NQ].copy(),
+        )
+        if hit_window_sel is None and ball_pos_goal is not ball_pos:
+            hit_window_sel = search_hit_window(
+                env_plan, ball_pos, ball_vel,
+                config.shoulder_pos, config.workspace_radius,
+                remaining_horizon, config.tube_cfg,
+                ball_direction="y",
+                current_step=0,
+                robot_limits=robot_limits,
+                init_q=x_current[:env_plan.NQ].copy(),
+            )
+        env_plan.set_ball_state(*_ball_save)
+        if hit_window_sel is not None and len(hit_window_sel.p_ball_candidates) > 0:
+            # 可达性准则：对每个候选求 IK，取关节限位裕度最大者
+            best_i, best_margin = 0, -np.inf
+            for i, p_c in enumerate(hit_window_sel.p_ball_candidates):
+                q_ik = env_plan.solve_ik(
+                    p_c, q_init=x_current[:env_plan.NQ], max_iter=30, eps=2e-2,
+                )
+                margin_deg = float(np.min(np.minimum(
+                    (q_ik - robot_limits.q_lower) * 180.0 / np.pi,
+                    (robot_limits.q_upper - q_ik) * 180.0 / np.pi,
+                )))
+                if margin_deg > best_margin:
+                    best_margin, best_i = margin_deg, i
+            p_hit_new = hit_window_sel.p_ball_candidates[best_i].copy()
+            v_ball_hit_new = hit_window_sel.v_ball_candidates[best_i].copy()
+            k_hit_new = int(hit_window_sel.k_candidates[best_i])
+            n_des_new = -v_ball_hit_new / (np.linalg.norm(v_ball_hit_new) + 1e-8)
+            if config.normal_flip:
+                n_des_new = -n_des_new
+            logger.debug(
+                "SELECT_ONE step=%d: 候选 %d/%d, k=%d, IK裕度 %.1f°",
+                step, best_i, len(hit_window_sel.p_ball_candidates),
+                k_hit_new, best_margin,
+            )
 
     # v5: 终端目标 = 随挥终点（击球点前方 follow_through_length）
     p_follow_new = p_hit_new + config.follow_through_length * d_hat

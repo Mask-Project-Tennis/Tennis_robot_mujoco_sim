@@ -43,12 +43,14 @@ CSV_FIELDS = [
     "experiment", "config_id", "config_json", "seed", "hit", "hit_type",
     "pos_error", "vel_error", "min_dist", "ball_near_ms", "tube_ready_ms",
     "max_tcp", "max_qdot", "max_face", "hit_time_error_ms", "hit_pos_error",
-    "v_racket_at_hit", "wall_time", "error",
+    "v_racket_at_hit", "wall_time", "first_plan_ms", "ball_out_speed",
+    "ball_out_vy", "error",
 ]
 NUMERIC_FIELDS = {
     "pos_error", "vel_error", "min_dist", "ball_near_ms", "tube_ready_ms",
     "max_tcp", "max_qdot", "max_face", "hit_time_error_ms", "hit_pos_error",
-    "v_racket_at_hit", "wall_time",
+    "v_racket_at_hit", "wall_time", "first_plan_ms", "ball_out_speed",
+    "ball_out_vy",
 }
 
 

@@ -2,7 +2,7 @@
 """统一分析入口 —— 一条命令复现论文正文的全部数字（含记账）。
 
 论文声称「正文每个率、区间、检验统计量与记账总数都由分析脚本从 per-episode
-日志重新生成」。本脚本把这四个子分析串成一个入口，并补上论文 Accounting 句
+日志重新生成」。本脚本把这五个子分析串成一个入口，并补上论文 Accounting 句
 （报告数据集 episode 总数 / no-verdict 率 / 各档排除率极差）：
 
 1. ``paired_stats.py``      E1-E8 主分析（球速扫描 / 限位代价 / 标称四档 /
@@ -10,6 +10,8 @@
 2. ``aux_stats.py``         敏感性 sweep（exp18）+ TCP 超限诊断 + 豁免窗复核
 3. ``extract_chat8_aux.py`` I(t,s) 交互 / both-succeed 子集 / hard-min 配对
 4. ``check_shared_input.py``共享输入（ballstate）交叉验证
+5. ``analyze_chat12_night.py`` 夜跑五实验（exp23-27：不冻结端到端 / 统一共享输入 /
+                            候选选择基线 / 速度×TCP 网格 / 击球质量）
 
 用法::
 
@@ -51,9 +53,15 @@ REPORTED: dict[str, str] = {
     "exp19_hardmin": "hard-min 基线 @9 m/s",
     "exp21_hardmin_tcp10": "hard-min @TCP1.0",
     "exp22_shared_spatial": "共享输入交叉验证",
+    "exp23_nofreeze": "RQ4 不冻结端到端",
+    "exp24_shared_full": "RQ2 端到端共享输入",
+    "exp25_select_one": "RQ1 候选选择基线",
+    "exp26_tcp_grid": "RQ3 速度×TCP 网格",
+    "exp27_ball_quality": "RQ1 击球质量",
 }
 SUBMODULES: tuple[str, ...] = (
     "paired_stats", "aux_stats", "extract_chat8_aux", "check_shared_input",
+    "analyze_chat12_night",
 )
 
 
@@ -99,12 +107,20 @@ def print_accounting() -> None:
 
 
 def run_submodules() -> None:
-    """依次运行四个子分析（各自打印结果并刷新其跟踪产物）。"""
+    """依次运行五个子分析（各自打印结果并刷新其跟踪产物）。
+
+    analyze_chat12_night 为顶层执行脚本（无 main()），用 runpy 以 __main__ 运行。
+    """
     sys.path.insert(0, str(EXTRACT))
     for name in SUBMODULES:
         print("\n" + "═" * 78)
         print(f"【{name}】")
         print("═" * 78)
+        if name == "analyze_chat12_night":
+            import runpy
+            runpy.run_path(str(EXTRACT / "analyze_chat12_night.py"),
+                           run_name="__main__")
+            continue
         mod = importlib.import_module(name)
         main = getattr(mod, "main", None)
         if main is None:

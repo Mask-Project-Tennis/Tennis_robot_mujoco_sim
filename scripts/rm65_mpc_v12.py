@@ -167,8 +167,9 @@ def main() -> None:
     parser.add_argument("--softmin-beta", type=float, default=5.0, help="终端 softmin 锐度 β")
     parser.add_argument("--corridor-radius", type=float, default=0.12,
                         help="走廊半宽 (m)；标称 = 拍半径 0.12 m，敏感性实验可改")
-    parser.add_argument("--ablation", choices=["full", "tube_only", "softmin_only", "none"],
-                        default=None, help="消融模式")
+    parser.add_argument("--ablation",
+                        choices=["full", "tube_only", "softmin_only", "none", "select_one"],
+                        default=None, help="消融模式（select_one = 候选选择基线，chat12 C3）")
     parser.add_argument("--no-softmin", action="store_true", help="[已废弃] 禁用 softmin")
     parser.add_argument("--no-tube", action="store_true", help="[已废弃] 禁用 Tube 走廊")
     parser.add_argument("--no-follow-through", action="store_true", help="禁用球轨迹回溯随挥")
@@ -188,6 +189,10 @@ def main() -> None:
                         help="空间扰动注入口径: hitpoint=只偏移单点目标（历史口径）; "
                              "ballstate=偏移球状态估计（候选集合/走廊轴/初始化同源）")
     parser.add_argument("--perturb-alpha-min", type=float, default=0.0, help="衰减扰动保底值")
+    parser.add_argument("--shared-input-full", action="store_true",
+                        help="统一观测扰动（chat12 C2）: ballstate 口径下时序/可达性也消费受扰球态")
+    parser.add_argument("--no-freeze-first-plan", action="store_true",
+                        help="不冻结时间端到端（chat12 C1）: 首次规划期间球继续飞行，计算延迟计入任务时间")
     parser.add_argument("--random-perturb", action="store_true", help="随机扰动")
     parser.add_argument("--perturb-sign", choices=["random", "positive", "negative"],
                         default="random", help="扰动符号方向")
@@ -254,7 +259,7 @@ def main() -> None:
     logger.info(f"[ablation] mode={ablation_mode}")
 
     _use_tube = ablation_mode in ("full", "tube_only")
-    need_candidates = ablation_mode in ("full", "tube_only", "softmin_only")
+    need_candidates = ablation_mode in ("full", "tube_only", "softmin_only", "select_one")
     time_perturb_s = args.time_perturb_ms / 1000.0
     space_perturb_m = args.space_perturb_m
     perturb_alpha_min = args.perturb_alpha_min
@@ -332,7 +337,10 @@ def main() -> None:
             replan_interval = 20
         if args.near_iters is None:
             near_plan_iters = 5
-        first_plan_iters = max(first_plan_iters, 30)
+        # 仅当用户未显式指定 --first-plan-iters 时，serve-box 才套用 30 次下限；
+        # 显式传入（如 no-freeze 实验的 5 次加速变体）应原样生效
+        if args.first_plan_iters is None:
+            first_plan_iters = max(first_plan_iters, 30)
         total_horizon = max(total_horizon, 250)
         logger.info(f"serve-box auto params: horizon={fixed_horizon}, iter={max_iter_per_plan}, "
                      f"first_plan_iters={first_plan_iters}, total_horizon={total_horizon}, "
@@ -668,6 +676,7 @@ def main() -> None:
         space_perturb_m=space_perturb_m,
         perturb_alpha_min=perturb_alpha_min,
         spatial_perturb_target=args.spatial_perturb_target,
+        shared_input_full=args.shared_input_full,
         use_r_decay=use_r_decay,
         r_decay_ratio=r_decay_ratio,
         fix_joint5_angle=fix_joint5_angle,
@@ -767,7 +776,8 @@ def main() -> None:
                 f"(MPC={total_horizon}, 随挥={follow_through_steps})，击打步数={k_hit_total}")
 
     t_total_start = time.perf_counter()
-    _metrics = runner.run(max_steps=total_steps)
+    _metrics = runner.run(max_steps=total_steps,
+                          first_plan_flight=args.no_freeze_first_plan)
     t_mpc_end = time.perf_counter()
     if step_timer is not None:
         print(step_timer.summary(period_ms=dt * 1000.0))
@@ -895,8 +905,10 @@ def main() -> None:
     print(f"  击球类型: {hit_type}")
     print("========================================\n")
 
-    # 结构化结果行
+    # 结构化结果行（ball_out_* 仅在发生击球时有值，chat12 C6 出球质量）
     hit_type_en = "active" if active_contact else ("passive" if passive_contact else "miss")
+    _ball_out_speed = sim_component.ball_out_speed
+    _ball_out_vy = sim_component.ball_out_vy
     print(f"__RESULT__: pos_error={pos_error:.6f} vel_error={vel_error:.6f} "
           f"min_dist={min_dist:.6f} ball_near_ms={ball_near_ms:.1f} "
           f"tube_ready_ms={tube_ready_ms:.1f} max_tcp={max_tcp:.2f} "
@@ -904,7 +916,10 @@ def main() -> None:
           f"max_face={max_face:.1f} "
           f"hit_type={hit_type_en} "
           f"hit_time_error_ms={hit_time_error:.1f} hit_pos_error={hit_position_error:.6f} "
-          f"v_racket_at_hit={v_racket_at_hit_val:.3f}")
+          f"v_racket_at_hit={v_racket_at_hit_val:.3f} "
+          f"first_plan_ms={_metrics.get('first_plan_ms', 0.0):.1f} "
+          f"ball_out_speed={_ball_out_speed if _ball_out_speed is not None else -1.0:.3f} "
+          f"ball_out_vy={_ball_out_vy if _ball_out_vy is not None else -99.0:.3f}")
 
     # ==========================================================================
     # 16. 保存轨迹

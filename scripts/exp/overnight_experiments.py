@@ -409,6 +409,113 @@ EXPERIMENTS: dict[str, ExperimentSpec] = {
             + _perturb_cells(12, [(0, 0.2)], MODES_MECHANISM, 3000, spatial_target="ballstate")
         ),
     ),
+    "exp23_nofreeze": ExperimentSpec(
+        name="exp23_nofreeze",
+        script=V12,
+        report_ref="chat12 审稿 C1（必须项）: 不冻结时间端到端实验。"
+                   "--no-freeze-first-plan 使首次规划（~928ms）期间球继续飞行，"
+                   "计算延迟计入任务时间 —— 验证真实来球条件下的可执行性。"
+                   "对照组 A = 冻结口径既有标称数据（exp15/17a/17d 同 seeds）；"
+                   "对照组 B = 首规划加速版（--first-plan-iters 5，约 1/6 延迟），"
+                   "给出延迟-成功率权衡曲线。"
+                   "{7,9,12} m/s × 4 档 × 200 seeds + iters5 版 {9,12} × 4 档 × 100"
+                   " = 3200 runs；__RESULT__ 新增 first_plan_ms 与 ball_out_*（C6）。",
+        grid=[
+            {**base, "--seed": seed}
+            for speed in [7, 9, 12]
+            for mode in MODES_MECHANISM
+            for base in [{"--serve-box": None, "--ball-speed": speed,
+                          "--ablation": mode, "--no-plot": None,
+                          "--no-freeze-first-plan": None}]
+            for seed in range(1, SEEDS_P1 + 1)
+        ] + [
+            # 首规划加速变体：30→5 次迭代，首次可执行输出延迟 ~1/6
+            {**base, "--seed": seed}
+            for speed in [9, 12]
+            for mode in MODES_MECHANISM
+            for base in [{"--serve-box": None, "--ball-speed": speed,
+                          "--ablation": mode, "--no-plot": None,
+                          "--no-freeze-first-plan": None,
+                          "--first-plan-iters": 5}]
+            for seed in range(1, SEEDS_P2 + 1)
+        ],
+    ),
+    "exp24_shared_full": ExperimentSpec(
+        name="exp24_shared_full",
+        script=V12,
+        report_ref="chat12 审稿 C2（必须项）: 统一观测扰动 —— 在 ballstate 口径上"
+                   "加 --shared-input-full，使到达时刻预测与可达性门限也消费同一份"
+                   "受扰球态（所有规划模块共用同一观测，端到端预测偏差实验）。"
+                   "对照 = exp22 同 seed 同格子的 ballstate（时序通道无偏）口径。"
+                   "9 m/s × 5 格 × 4 档 × 100 seeds = 2000 runs。",
+        grid=[
+            # _perturb_cells 不支持透传 --shared-input-full，手动展开
+            {**base, "--seed": seed}
+            for (t_ms, s_m) in [(0, 0.1), (0, 0.2), (0, 0.3), (25, 0.2), (50, 0.2)]
+            for mode in MODES_MECHANISM
+            for base in [{
+                "--serve-box": None, "--ball-speed": 9,
+                "--ablation": mode, "--no-plot": None,
+                "--random-perturb": None, "--perturb-sign": "random",
+                "--space-perturb-m": s_m, "--space-perturb-min-m": 0.0,
+                "--spatial-perturb-target": "ballstate",
+                "--shared-input-full": None,
+                **({"--time-perturb-ms": t_ms, "--time-perturb-min-ms": 0}
+                   if t_ms > 0 else {}),
+            }]
+            for seed in range(1, SEEDS_P2 + 1)
+        ],
+    ),
+    "exp25_select_one": ExperimentSpec(
+        name="exp25_select_one",
+        script=V12,
+        report_ref="chat12 审稿 C3（高度建议）: 候选选择基线 —— 从候选窗口按 IK 关节裕度"
+                   "硬选单一目标，再跑标准 point-target MPC（--ablation select_one）。"
+                   "回答「是否必须把候选集合嵌入 softmin，还是目标选择本身就足够」。"
+                   "对照 = exp17a/17d 标称四档（同 seeds）。{7,9,12} × 200 seeds = 600 runs。",
+        grid=[
+            {**base, "--seed": seed}
+            for speed in [7, 9, 12]
+            for base in [{"--serve-box": None, "--ball-speed": speed,
+                          "--ablation": "select_one", "--no-plot": None}]
+            for seed in range(1, SEEDS_P1 + 1)
+        ],
+    ),
+    "exp26_tcp_grid": ExperimentSpec(
+        name="exp26_tcp_grid",
+        script=V12,
+        report_ref="chat12 审稿 C4（高度建议）: 来球速度 × TCP cap 二维扫描，"
+                   "定位候选集合收益的反转区域（而非只比较两个离散设置）。"
+                   "--max-tcp 统一口径（仅改 TCP，其余仿真默认；与 Table I 的"
+                   "real_robot.yaml 全套限位口径不同，文中说明）。"
+                   "{7,9} m/s × {1.0,1.4,1.8} × 4 档 × 100 seeds = 2400 runs。",
+        grid=[
+            {**base, "--seed": seed}
+            for speed in [7, 9]
+            for tcp in [1.0, 1.4, 1.8]
+            for mode in MODES_MECHANISM
+            for base in [{"--serve-box": None, "--ball-speed": speed,
+                          "--ablation": mode, "--no-plot": None,
+                          "--max-tcp": tcp}]
+            for seed in range(1, SEEDS_P2 + 1)
+        ],
+    ),
+    "exp27_ball_quality": ExperimentSpec(
+        name="exp27_ball_quality",
+        script=V12,
+        report_ref="chat12 审稿 C6（高度建议）: 标称条件重跑收集出球质量指标"
+                   "（ball_out_speed / ball_out_vy，弹性反弹模型的出球速度与 Y 分量）。"
+                   "与 Table II nominal 同条件（9/12 m/s × 4 档 × 100 seeds = 800 runs），"
+                   "回答「active contact 是否产生有意义的回击」。",
+        grid=[
+            {**base, "--seed": seed}
+            for speed in [9, 12]
+            for mode in MODES_MECHANISM
+            for base in [{"--serve-box": None, "--ball-speed": speed,
+                          "--ablation": mode, "--no-plot": None}]
+            for seed in range(1, SEEDS_P2 + 1)
+        ],
+    ),
 }
 
 

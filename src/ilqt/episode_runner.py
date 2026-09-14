@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import TYPE_CHECKING, Callable
 
 if TYPE_CHECKING:
@@ -73,11 +74,14 @@ class EpisodeRunner:
         self._on_unsafe_hooks = on_unsafe_hooks or []
         self._on_done_hooks = on_done_hooks or []
 
-    def run(self, max_steps: int = 500) -> dict:
+    def run(self, max_steps: int = 500, first_plan_flight: bool = False) -> dict:
         """运行完整 episode。
 
         Args:
             max_steps: 最大运行步数。
+            first_plan_flight: True 时首次规划期间球物理继续飞行（不冻结仿真时间，
+                chat12 审稿 C1 实验）。规划完成后按首次规划实际墙钟耗时推进球物理，
+                再进入主循环 —— 计算延迟被计入任务时间。
 
         Returns:
             metrics dict，含 total_steps/safe_steps/mpc_done + executor 指标 + hook 追加。
@@ -95,8 +99,18 @@ class EpisodeRunner:
             logger.error("EpisodeRunner: 初始球状态不可用")
             return {"total_steps": 0, "safe_steps": 0, "error": "no_ball"}
 
-        # 2. 启动 MPC（首次同步规划）
+        # 2. 启动 MPC（首次同步规划；计时供不冻结模式折算球飞行步数）
+        t_first_plan = time.perf_counter()
         self._mpc.start(ball[0], ball[1], arm_state)
+        first_plan_s = time.perf_counter() - t_first_plan
+
+        # 2.5 不冻结时间：首次规划墙钟期间球继续飞行（PD 保持臂位形）
+        if first_plan_flight:
+            advance = getattr(self._executor, "advance_ball", None)
+            if advance is not None:
+                advance(first_plan_s)
+            else:
+                logger.warning("executor 未实现 advance_ball，first_plan_flight 不生效")
 
         # 3. 主循环
         safe_steps = 0
@@ -168,6 +182,7 @@ class EpisodeRunner:
             "total_steps": step_count,
             "safe_steps": safe_steps,
             "mpc_done": self._mpc.done,
+            "first_plan_ms": round(first_plan_s * 1000.0, 1),
         }
         if hasattr(self._executor, "get_metrics"):
             metrics.update(self._executor.get_metrics())

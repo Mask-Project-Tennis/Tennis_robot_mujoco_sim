@@ -93,6 +93,10 @@ class SimComponent:
         self.active_contact: bool = False
         self.passive_contact: bool = False
 
+        # 出球质量（chat12 审稿 C6：击球后球的反弹速度）
+        self.ball_out_speed: float | None = None
+        self.ball_out_vy: float | None = None
+
         self._step_count: int = 0
 
     # ── ExecutorComponent Protocol ──────────────────────────────────────
@@ -238,8 +242,47 @@ class SimComponent:
             v_ee = env.get_ee_vel()
             v_ball_rebound = compute_rebound_velocity(ball_vel_before_step, v_ee, n_racket, e=0.8)
             env.set_ball_vel(v_ball_rebound)
+            # 出球质量记录：反弹速度模长 + Y 分量（来球自 -Y 飞来，出球应朝 +Y）
+            self.ball_out_speed = float(np.linalg.norm(v_ball_rebound))
+            self.ball_out_vy = float(v_ball_rebound[1])
 
         self._step_count += 1
+
+    def advance_ball(self, elapsed_s: float) -> int:
+        """不冻结时间实验（chat12 审稿 C1）：首次规划期间推进球物理。
+
+        用与击打后保持段相同的 PD 力矩保持当前臂位形，推进
+        round(elapsed_s/dt) 步 env.step_full —— 球在首次规划墙钟时间内
+        继续飞行，计算延迟被计入任务时间。history 同步记录，
+        主评估段的球/臂轨迹保持完整。
+
+        Args:
+            elapsed_s: 首次规划实际墙钟耗时（秒）。
+
+        Returns:
+            实际推进的物理步数。
+        """
+        env = self._env
+        n_steps = int(round(elapsed_s / self._dt))
+        if n_steps <= 0:
+            return 0
+        x_current = env.get_arm_state()
+        for _ in range(n_steps):
+            q_hold = x_current[: self._nq].copy()
+            if self._is_position_mode:
+                u_hold = q_hold.copy()
+            else:
+                u_hold = 100.0 * (q_hold - x_current[: self._nq]) - 10.0 * x_current[self._nq:]
+                u_hold = np.clip(
+                    u_hold,
+                    env.model.actuator_ctrlrange[: self._nu, 0],
+                    env.model.actuator_ctrlrange[: self._nu, 1],
+                )
+            x_current, ball_pos_adv, _ = env.step_full(u_hold)
+            self.X_history.append(x_current.copy())
+            self.U_history.append(u_hold.copy())
+            self.ball_pos_history.append(ball_pos_adv.copy())
+        return n_steps
 
     # ── 指标汇总 ─────────────────────────────────────────────────────────
 
@@ -265,4 +308,6 @@ class SimComponent:
             "v_ee_at_hit": self.v_ee_at_hit,
             "active_contact": self.active_contact,
             "passive_contact": self.passive_contact,
+            "ball_out_speed": self.ball_out_speed,
+            "ball_out_vy": self.ball_out_vy,
         }
