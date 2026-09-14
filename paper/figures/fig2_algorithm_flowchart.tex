@@ -1,0 +1,44 @@
+% fig2_algorithm_flowchart.tex —— MPC + 走廊 + softmin 框架流程图
+% 遵守 §9 红线：走廊代价仅「垂直偏离 hinge」一项（半宽 = 拍半径 0.12 m），
+% 速度方向/法向量对齐由时间窗 softmin 终端承担，不写入走廊注释。
+% 用法：正文 \input{figures/fig2_algorithm_flowchart.tex}
+% 配色与结果图统一（chat9 审稿意见）：走廊蓝 = 结果图 corridor-only 蓝 (0,114,178)
+% —— 旧版 blue!18 偏紫；softmin 琥珀 = softmin-only 琥珀 (230,159,0)
+\definecolor{corridorblue}{RGB}{0,114,178}
+\definecolor{softminamber}{RGB}{230,159,0}
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}[node distance=0.38cm, >=stealth,
+    block/.style={rectangle, draw, fill=white, rounded corners=1pt,
+                  text width=4.8cm, minimum height=0.62cm, font=\footnotesize,
+                  align=center, inner sep=2pt},
+    corridorcost/.style={rectangle, draw=corridorblue, fill=corridorblue!18,
+                 rounded corners=1pt,
+                 text width=4.8cm, minimum height=0.62cm, font=\footnotesize,
+                 align=center, inner sep=2pt},
+    softmincost/.style={rectangle, draw=softminamber, fill=softminamber!22,
+                 rounded corners=1pt,
+                 text width=4.8cm, minimum height=0.62cm, font=\footnotesize,
+                 align=center, inner sep=2pt}]
+
+% chat9 审稿意见「精简 Fig. 2」：观测与预测合并为一个块，节点间距收窄
+% chat12 审稿意见：两 cost 块的归属词（running / terminal cost）提到行首成为
+% 最醒目信息，参数细节（r_racket、β=5）删除（正文/图注已有）
+\node[block] (obs) {Observe ball state, predict trajectory\\and candidate windows};
+\node[corridorcost, below=of obs] (corr) {Running cost: corridor hinge term};
+\node[softmincost, below=of corr] (soft) {Terminal cost: candidate-window softmin};
+\node[block, below=of soft] (ilqr) {iLQR backward $+$ forward pass (MPC)};
+\node[block, below=of ilqr] (exec) {Execute with safety filter\\(joint/TCP limits, midline plane)};
+
+\draw[->] (obs) -- (corr);
+\draw[->] (corr) -- (soft);
+\draw[->] (soft) -- (ilqr);
+\draw[->] (ilqr) -- (exec);
+\draw[->] (exec.east) -- ++(0.85,0) |- (obs.east)
+    node[pos=0.35, right, font=\footnotesize, align=left] {replan\\interval};
+
+\end{tikzpicture}
+\caption{MPC-iLQR framework. Shaded blocks are the two cost modifications; the
+point-target baseline (\texttt{none}) drops both.}
+\label{fig:algorithm_flowchart}
+\end{figure}

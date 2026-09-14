@@ -1,0 +1,23 @@
+% Shared-input check 紧凑表（chat12 审稿意见：shared-input 证据从单段升级为表）。
+% 数字来源：scripts/extract/check_shared_input.py（exp22_shared_spatial，51,000 runs），
+% 配对同 seed、bootstrap 95% CI、精确配对 McNemar；full 行由同脚本 [4] 节输出。
+% 通栏 table*：单栏放不下「candidate-set-only − point-target」这类长标签 + 区间。
+\begin{table*}[t]
+\centering
+\caption{Shared-input check ($51{,}000$ episodes): paired gains (pp) over the
+point target under the original hitpoint bias and the shared-input ball-state
+bias; bootstrap $95\%$ CI in brackets, $n$ paired ($p<0.001$ except the last
+row: $p{=}0.06$ hitpoint, $p{=}1.0$ ball-state, zero discordant pairs).}
+\label{tab:shared}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}lcc@{}}
+\toprule
+ & hitpoint bias & ball-state bias \\
+\midrule
+corridor-only $-$ point-target, $9$ m/s corner & $+4.4$ [$+2.8,+6.1$], $n{=}2970$ & $+4.3$ [$+2.7,+6.0$], $n{=}2969$ \\
+corridor-only $-$ point-target, $12$ m/s corner & $+6.9$ [$+5.4,+8.4$], $n{=}2986$ & $+7.0$ [$+5.5,+8.5$], $n{=}2987$ \\
+candidate-set-only $-$ point-target, grid & $+8.9$ [$+6.9,+11.0$], $n{=}1960$ & $+10.2$ [$+8.1,+12.2$], $n{=}1960$ \\
+full $-$ candidate-set-only, grid & $-0.3$ [$-0.5,-0.1$], $n{=}1960$ & $0.0$, $n{=}1960$ \\
+\bottomrule
+\end{tabular}
+\end{table*}
