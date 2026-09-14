@@ -42,7 +42,17 @@ def build_model_offscreen() -> tuple[mujoco.MjModel, str]:
     wrapper = (
         "<mujoco>\n"
         f'  <include file="{MODEL_XML.as_posix()}"/>\n'
-        f'  <visual><global offwidth="{PAN_W}" offheight="{PAN_H}"/></visual>\n'
+        # 提亮：头灯（跟随相机）+ 顶部定向光，避免俯视时机器人背面全黑
+        '  <visual>\n'
+        f'    <global offwidth="{PAN_W}" offheight="{PAN_H}"/>\n'
+        '    <headlight ambient="0.35 0.35 0.35" diffuse="0.7 0.7 0.7" '
+        'specular="0.15 0.15 0.15"/>\n'
+        '  </visual>\n'
+        '  <worldbody>\n'
+        '    <light name="key_top" pos="0.3 -1.2 3.2" dir="-0.08 0.32 -1" '
+        'directional="true" diffuse="0.55 0.55 0.55" specular="0.2 0.2 0.2" '
+        'castshadow="false"/>\n'
+        '  </worldbody>\n'
         "</mujoco>\n"
     )
     tmp = Path(tempfile.mkdtemp()) / "wrap.xml"
@@ -90,6 +100,22 @@ def main() -> None:
         / "full_seed040.npz",
         help="轨迹 NPZ（含 q_actual/ball_pos/hit_step/init_q_left）",
     )
+    # 相机参数（改角度只需 CLI，不改代码）
+    parser.add_argument("--azimuth", type=float, default=-115.0,
+                        help="相机方位角（度，相对 +X 轴）")
+    parser.add_argument("--elevation", type=float, default=-12.0,
+                        help="相机仰角（度，相对水平面）")
+    parser.add_argument("--distance", type=float, default=3.2,
+                        help="相机距离（m）")
+    parser.add_argument("--lookat", type=float, nargs=3,
+                        default=[0.18, -0.28, 1.0],
+                        metavar=("X", "Y", "Z"), help="相机注视点（世界系）")
+    # 输出控制：--pan-only 只存上半部分全景单图
+    parser.add_argument("--pan-only", action="store_true",
+                        help="只输出全景单图（不出四帧序列）")
+    parser.add_argument("--out", type=str,
+                        default="paper/figures/fig_robot_scene.png",
+                        help="输出 PNG 路径（相对仓库根）")
     args = parser.parse_args()
 
     rec = np.load(args.episode, allow_pickle=True)
@@ -108,10 +134,11 @@ def main() -> None:
     tcp_hit = rec["tcp_pos"][hit_step]
     print(f"ball@hit={np.round(ball_hit, 3)}  tcp@hit={np.round(tcp_hit, 3)}")
 
-    # 全景相机：框住机器人（立柱+双臂+球拍）与接触点，保留黑色 MuJoCo 背景
+    # 全景相机：位置/角度由 CLI 控制（默认沿用原角度）
     cam = mujoco.MjvCamera()
-    lookat_pan = np.array([0.18, -0.28, 1.0])
-    configure_camera(cam, lookat_pan, distance=3.2, azimuth=-115.0, elevation=-12.0)
+    lookat_pan = np.array(args.lookat, dtype=float)
+    configure_camera(cam, lookat_pan, distance=args.distance,
+                     azimuth=args.azimuth, elevation=args.elevation)
 
     # ── 全景：击球前 60 ms（球在拍前方可见，展示来球与机器人任务配置） ──
     pan_step = int(np.clip(hit_step - 12, 0, len(rec["q_actual"]) - 1))
@@ -119,6 +146,15 @@ def main() -> None:
              rec["ball_pos"][pan_step])
     pan = render_frame(pan_renderer, data, cam)
     print("pan shape:", pan.shape)
+
+    # 只输出上半部分全景单图
+    if args.pan_only:
+        out = REPO_ROOT / args.out
+        out.parent.mkdir(parents=True, exist_ok=True)
+        img = Image.fromarray(pan)
+        img.save(out, dpi=(300, 300))
+        print(f"saved (pan only): {out} ({img.width}x{img.height})")
+        return
 
     # ── 动作序列：更近的相机聚焦拍-球交互区 ──
     cam_seq = mujoco.MjvCamera()

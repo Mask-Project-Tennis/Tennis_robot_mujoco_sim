@@ -15,7 +15,7 @@
 | `exp/` | ~20 | 活跃实验基础设施（exp9-15） | `python scripts/exp/xxx.py --args` |
 | `extract/` | 9 | 结果提取：日志 → CSV | `python scripts/extract/xxx.py` |
 | `plot/` | 14 | 论文图表生成 | `python scripts/plot/xxx.py` |
-| `tools/` | 10 | 独立工具（查看器·扫描·诊断·可视化） | `python scripts/tools/xxx.py` |
+| `tools/` | 14 | 独立工具（查看器·扫描·诊断·可视化·轨迹残影渲染） | `python scripts/tools/xxx.py` |
 | `test/` | 10 | 快速验证脚本 | `python scripts/test/xxx.py` |
 | `archive/` | 59 | 已归档（V6-V10 + tube + 旧实验 + 旧 sim 脚本） | 详见 `archive/README.md` |
 
