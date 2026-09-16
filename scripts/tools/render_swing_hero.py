@@ -60,7 +60,8 @@ BALL_R = 0.033                       # 网球半径（与 rm65_model.xml 一致�
 BALL_RGB = (0.98, 0.95, 0.25)        # 窗口外：黄（与全景图一致的「球」色）
 WIN_RGB = (0.72, 0.27, 0.00)         # 窗口内：橙（#B84500；比 #D55E00 深两档，管内透出仍不发褐）
 CORRIDOR_R = 0.12                    # 走廊半宽 = 拍半径（method.tex 式(2)）
-CORRIDOR_RGBA = (0.0, 0.45, 0.72, 0.16)
+CORRIDOR_RGBA = (0.0, 0.40, 0.64, 0.16)   # 走廊管色 = 论文调色板 #0072B2 加深一档（#0066A3）；
+                                      # 叠在绿色场地上要偏蓝才读得出「管」，故比 Fig.1/4/5 的走廊色深一点
 N_BALL = 320                         # 球残影池槽位（覆盖整条 episode 的 307 步）
 HIDDEN = np.array([0.0, 0.0, -50.0])  # 隐藏槽位位置（地板下方、画面外）
 
@@ -292,8 +293,8 @@ def render_variant(*, args: argparse.Namespace, rec: dict, k_ref: int, win: tupl
         strobe_alpha=args.strobe_alpha, ribbon_alpha=args.ribbon_alpha, win=win,
         win_rgb=tuple(args.win_rgb))
 
-    # 走廊管只切透明度（取向已在建模时烘死，见 build_model 注释）
-    model.geom_rgba[tube_id] = [*CORRIDOR_RGBA[:3],
+    # 走廊管只切颜色/透明度（取向已在建模时烘死，见 build_model 注释）
+    model.geom_rgba[tube_id] = [*args.corridor_rgb,
                                 args.corridor_alpha if with_corridor else 0.0]
 
     # ── 渲染：背景（无机械臂）→ 残影帧（无阴影）→ 主帧（接触位姿，带阴影） ──
@@ -349,6 +350,7 @@ def render_variant(*, args: argparse.Namespace, rec: dict, k_ref: int, win: tupl
         "arm_ghosts": [[int(o), float(a)] for o, a in arm_ghosts],
         "with_corridor": bool(with_corridor), "with_line": bool(with_line),
         "win_rgb": [float(c) for c in args.win_rgb],
+        "corridor_rgb": [float(c) for c in args.corridor_rgb],
         "px": {k: (np.round(v, 2).tolist() if o else None)
                for (k, _), v, o in zip(keys.items(), pxk, okk)},
     }
@@ -391,6 +393,9 @@ def main() -> None:
     ap.add_argument("--ball-scale", type=float, default=1.0)
     ap.add_argument("--corridor-alpha", type=float, default=CORRIDOR_RGBA[3],
                     help="走廊管透明度（印刷下 0.10~0.16 之间）")
+    ap.add_argument("--corridor-rgb", type=float, nargs=3,
+                    default=list(CORRIDOR_RGBA[:3]), metavar=("R", "G", "B"),
+                    help="走廊管色（默认 #0072B2；调深用 0.00 0.40 0.64）")
     ap.add_argument("--win-rgb", type=float, nargs=3, default=list(WIN_RGB),
                     metavar=("R", "G", "B"),
                     help="候选窗口内球色（默认 #B84500 = #D55E00 加深两档；再深一档即发褐）")
