@@ -3,6 +3,9 @@
 \caption{Paired gain ({\upshape pp}) over the point-target baseline at $7$\,{\upshape m/s} ($n{=}394$ seeds); $p$ is the unadjusted McNemar value. The lower block shifts each gain between the two caps.}
 \label{tab:limits}
 \setlength{\tabcolsep}{3.5pt}
+% chat22：行距 1.0 → 0.92（约省 8 pt），把 Fig.5(c) 加高占用的页面空间补回来，
+% 保证第 5 页左栏 §V-E 块不被挤出（否则出现 ~35 pt 空洞）
+\renewcommand{\arraystretch}{0.92}
 \begin{tabular}{lcccr}
 \toprule
 Config. & \multicolumn{2}{c}{Gain over point-target (pp)} & \multicolumn{2}{c}{$p$} \\
@@ -15,7 +18,6 @@ full & $+1.5$ & $-12.7$ & $0.594$ & $<0.001$ \\
 \bottomrule
 \end{tabular}
 
-\vspace{2pt}
 \begin{tabular}{lccc}
 \toprule
 DiD (TCP 1.8 $\to$ TCP 1.0) & DiD (pp) & $95\%$ CI & sign-test $p$ \\

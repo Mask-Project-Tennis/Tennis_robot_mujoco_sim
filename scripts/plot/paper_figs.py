@@ -823,8 +823,14 @@ def fig5(stats: dict) -> None:
     # 改为上排 (a)(b) + 下排 (c) 横跨全宽，柱间距与数值标注获得可用宽度
     # constrained_layout：自动为标题/轴标签/刻度分配边距，避免上排刻度标签
     # 与下排标题相撞（手调边距在下排标题较长时反复冲突）
-    fig = plt.figure(figsize=(7.16, 2.40), constrained_layout=True)
-    gs = fig.add_gridspec(2, 3, height_ratios=[1.0, 1.05],
+    # chat22 审稿意见：面板 (c)（速度×TCP 网格 18 根柱 + 误差棒）上下太窄
+    # （原高 39.5 pt）→ 画布 2.40 → 2.57 in，高度比 1.0/1.05 → 1.0/1.45，
+    # 让 (c) 拿到 ~51 pt；(a)(b) 绝对高度基本不变。页面空间由浮体分隔 1→0 pt、
+    # TABLE I 两子表间距 2→0 pt 与两图白边裁紧回收（见 main.tex / 表文件 /
+    # experiments.tex 的 trim；净增须 ≤ 栏内可伸展 glue，否则 §V-E 块被挤出、
+    # 左栏出现 ~32 pt 空洞——实测 2.60 in 就会触发，故定 2.57）
+    fig = plt.figure(figsize=(7.16, 2.57), constrained_layout=True)
+    gs = fig.add_gridspec(2, 3, height_ratios=[1.0, 1.45],
                           width_ratios=[1.55, 0.62, 0.83],
                           hspace=0.10, wspace=0.06)
     axes = [fig.add_subplot(gs[0, 0]), fig.add_subplot(gs[0, 1:]),
@@ -1260,6 +1266,9 @@ def tables(stats: dict, out_dir: Path | None = None) -> None:
              r"between the two caps.}",
              r"\label{tab:limits}",
              r"\setlength{\tabcolsep}{3.5pt}",
+             # chat22：行距 1.0 → 0.92（约省 8 pt）回补 Fig.5(c) 加高占用的页面空间，
+             # 保证第 5 页左栏 §V-E 块不被挤出（否则出现 ~35 pt 空洞）
+             r"\renewcommand{\arraystretch}{0.92}",
              r"\begin{tabular}{lcccr}", r"\toprule",
              r"Config. & \multicolumn{2}{c}{Gain over point-target (pp)} & "
              r"\multicolumn{2}{c}{$p$} \\",
@@ -1273,7 +1282,6 @@ def tables(stats: dict, out_dir: Path | None = None) -> None:
             f"${p10.get('diff_pp', 0):+.1f}$ & ${fmt_pv(p18.get('p_mcnemar', 1))}$ & "
             f"${fmt_pv(p10.get('p_mcnemar', 1))}$ \\\\")
     lines += [r"\bottomrule", r"\end{tabular}", "",
-              r"\vspace{2pt}",
               r"\begin{tabular}{lccc}", r"\toprule",
               r"DiD (TCP 1.8 $\to$ TCP 1.0) & DiD (pp) & $95\%$ CI & sign-test $p$ \\",
               r"\midrule"]
