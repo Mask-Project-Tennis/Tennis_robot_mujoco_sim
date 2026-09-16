@@ -10,6 +10,12 @@
   LibreOffice 按 OOXML 原生排版（无 run 原点错位），导出后再把被 LO 重编码的位图
   换回源文件原始字节（见 restore_image_bytes）。
 
+底色中和（2026-09-16 chat23）：
+  源 PPTX 的左右两半页各有一个 PowerPoint「彩色填充」矩形当底衬，压白后合成
+  #E9EEF9 淡蓝 / #DFDFDF 淡灰，印在论文里与白纸底不一致。现按形状名把它们自身的填充
+  改成无填充（见 BACKDROP_SHAPES / patch_backdrop_fills），面板边框线与所有内容不动。
+  注意：**原始 PPTX 字节依然不动**，因此在 PowerPoint 里打开仍会看到这两块底色，属预期。
+
 用法（任意目录下执行均可）：
     python paper/tools/pptx2fig1.py                # 默认输入输出见 DEFAULT_* 常量
     python paper/tools/pptx2fig1.py --keep-temp    # 保留中间产物（排查用）
@@ -61,6 +67,14 @@ SVG_ADD_SIZE: dict[str, tuple[int, int]] = {
     "ppt/media/image4.svg": (500, 500),          # 与 viewBox="0 0 500 500" 一致
 }
 
+# 底色中和：源 PPTX 里两个「彩色填充」底衬矩形，各铺一半页面（实测合成色见括号），
+# 印在论文里与白纸底不一致，故把**形状自身的填充**换成 <a:noFill/>；描边（面板边框线）
+# 与形状内的文字 run 一律不动。按形状名精准命中，改名即报 ⚠（见 patch_backdrop_fills）。
+BACKDROP_SHAPES: tuple[tuple[str, str], ...] = (
+    ("矩形 107", "右半页底衬：accent1 #4874CB 提亮 40% = #B6C7EA @30% → 合成 #E9EEF9 淡蓝"),
+    ("矩形 40", "左半页底衬：bg1 白调暗 25% = #BFBFBF @50% → 合成 #DFDFDF 淡灰"),
+)
+
 # 需要打字体补丁的 XML 部件（幻灯片/母版/版式/主题）
 XML_PARTS = ("ppt/slides/", "ppt/slideMasters/", "ppt/slideLayouts/", "ppt/theme/")
 
@@ -101,6 +115,41 @@ def patch_text_runs(xml: str) -> tuple[str, list[str]]:
         if n:
             report.append(f"文字：{old!r}→{new!r} ×{n}（{why}）")
     return new_xml, report
+
+
+def patch_backdrop_fills(xml: str) -> tuple[str, list[str]]:
+    """把 BACKDROP_SHAPES 列出的形状**自身的填充**改成 `<a:noFill/>`（描边保留）。
+
+    定位链：`<p:cNvPr name="…">` → 所属 `<p:sp>` → `<p:spPr>` 内、`<a:ln>`（描边也写作
+    `<a:solidFill>`）**之前**的第一个 `<a:solidFill>`，即该形状自己的填充。因此绝不会
+    误伤面板边框线，也不会碰到形状里文字 run 的颜色。
+
+    Args:
+        xml: 幻灯片 XML 原文。
+
+    Returns:
+        (打补丁后的 XML, 报告列表)；形状改名找不到时报 ⚠ 而不静默跳过。
+    """
+    report: list[str] = []
+    for name, why in BACKDROP_SHAPES:
+        m = re.search(r'<p:cNvPr\b[^>]*\bname="%s"' % re.escape(name), xml)
+        if m is None:
+            report.append(f"⚠ 底色：未找到形状 {name!r}（源 PPTX 改名或结构变动？）——已跳过")
+            continue
+        sp_start = xml.rfind("<p:sp", 0, m.start())
+        sp_end = xml.index("</p:sp>", sp_start) + len("</p:sp>")
+        sp = xml[sp_start:sp_end]
+        a, b = sp.index("<p:spPr>"), sp.index("</p:spPr>")
+        ln = sp.find("<a:ln", a, b)
+        head = sp[a:ln if ln != -1 else b]              # 描边之前 = 形状自身的填充区
+        fm = re.search(r"<a:solidFill>.*?</a:solidFill>", head, flags=re.S)
+        if fm is None:
+            report.append(f"底色：{name} 自身填充区没有 <a:solidFill>（可能已是无填充），跳过")
+            continue
+        patched = head[:fm.start()] + "<a:noFill/>" + head[fm.end():]
+        xml = xml[:sp_start] + sp[:a] + patched + sp[(ln if ln != -1 else b):] + xml[sp_end:]
+        report.append(f"底色：{name} 填充 → <a:noFill/>（{why}）")
+    return xml, report
 
 
 def patch_fonts(xml: str) -> tuple[str, int]:
@@ -173,8 +222,9 @@ def patch_svg_blip(xml: str) -> tuple[str, int]:
 def build_patched_pptx(src: Path, dst: Path) -> list[str]:
     """解包 src，打补丁后重打包为 dst（原始文件绝不改动）。
 
-    补丁分四类：文字（TEXT_PATCHES）、字体（FONT_FACE）、媒体格式（WEBP_TO_PNG）、
-    媒体尺寸（SVG_ADD_SIZE）。rels 与 [Content_Types].xml 随重命名自动同步。
+    补丁分五类：文字（TEXT_PATCHES）、字体（FONT_FACE）、媒体格式（WEBP_TO_PNG）、
+    媒体尺寸（SVG_ADD_SIZE）、底色中和（BACKDROP_SHAPES）。rels 与 [Content_Types].xml
+    随重命名自动同步。
 
     Args:
         src: 原始 PPTX 路径。
@@ -214,6 +264,8 @@ def build_patched_pptx(src: Path, dst: Path) -> list[str]:
                     if name.startswith("ppt/slides/"):
                         text, text_rep = patch_text_runs(text)
                         report.extend(text_rep)
+                        text, bg_rep = patch_backdrop_fills(text)
+                        report.extend(bg_rep)
                         text, n_blip = patch_svg_blip(text)
                         if n_blip:
                             report.append(f"图片：给 {n_blip} 个只有 svgBlip 扩展的 <a:blip> "
