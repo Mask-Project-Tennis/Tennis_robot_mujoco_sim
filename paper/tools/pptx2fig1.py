@@ -48,9 +48,20 @@ DEFAULT_OUT = REPO_ROOT / "paper" / "figures" / "fig1_handdrawn.pdf"
 # 字体：英文论文常用拉丁字体（Arial 度量克隆，本机已装；粗体经 <a:b/> 得到 Bold 字重）
 FONT_FACE = "Liberation Sans"
 
-# 文字补丁：按顺序应用于 <a:t> 元素内部（只改可见文本，不碰 XML 结构）
+# 文字补丁：按顺序应用于 <a:t> 元素内部（只改可见文本，不碰 XML 结构）。
+# 顺序敏感：整串补丁必须排在通用词补丁之前（例如先修 "(within corridor )" 的
+# 多余空格，再让 corridor→tube 的通用规则兜底）。chat29：术语 corridor→tube、
+# 单位补空格（#17「0.2m 全文要统一」；本图内为 0.1m / 50ms 的无空格写法）。
 TEXT_PATCHES: tuple[tuple[str, str, str], ...] = (
     ("canditates", "candidates", "拼写修正（源图/PowerPoint 均标了拼写错误 err=1）"),
+    ("(within corridor )", "(within tube)", "术语改名 + 去掉右括号前的多余空格"),
+    ("terminal+Corridor", "terminal + tube", "术语改名（面板 (b) 标题）"),
+    ("corridor", "tube", "术语改名兜底（正文已全量 corridor→tube，本图内 3 处）"),
+    ("0.1m", "0.1\u00a0m", "数字与单位间补空格（评审 #17）；用不换行空格，"
+                          "否则窄文本框会把 '50 ms' 折成两行"),
+    ("50ms", "50\u00a0ms", "数字与单位间补空格（同上）"),
+    ("≈", "\u00a0≈\u00a0", "约等号两侧补空格（同属 #17 的排版严谨性；源图 run 被拆成三段，"
+                           "只能用不换行空格，靠 run 边界补不出来）"),
     ("（", "(", "全角左括号→ASCII：全角字形 Liberation Sans 缺失，会触发中日韩字体回退"),
     ("）", ")", "全角右括号→ASCII：同上"),
 )
@@ -73,6 +84,15 @@ SVG_ADD_SIZE: dict[str, tuple[int, int]] = {
 BACKDROP_SHAPES: tuple[tuple[str, str], ...] = (
     ("矩形 107", "右半页底衬：accent1 #4874CB 提亮 40% = #B6C7EA @30% → 合成 #E9EEF9 淡蓝"),
     ("矩形 40", "左半页底衬：bg1 白调暗 25% = #BFBFBF @50% → 合成 #DFDFDF 淡灰"),
+)
+
+# 换行豁免：两个 "50 ms" 标签文本框只有 47.5 pt 宽，加上默认左右内边距后
+# "50 ms" 放不下，LibreOffice 会折成 "50 m / s"（实测）。这两处标签是居中单行数字，
+# 把 wrap 从 square 改成 none（不换行、允许溢出）即可；不动其它文本框，避免左对齐
+# 文本因内边距变化而整体位移。
+NO_WRAP_SHAPES: tuple[tuple[str, str], ...] = (
+    ("文本框 130", "面板 (a) 时间误差卡里的 \"50 ms\" 标注"),
+    ("文本框 225", "面板 (b) 时间误差卡里的 \"50 ms\" 标注"),
 )
 
 # 需要打字体补丁的 XML 部件（幻灯片/母版/版式/主题）
@@ -149,6 +169,38 @@ def patch_backdrop_fills(xml: str) -> tuple[str, list[str]]:
         patched = head[:fm.start()] + "<a:noFill/>" + head[fm.end():]
         xml = xml[:sp_start] + sp[:a] + patched + sp[(ln if ln != -1 else b):] + xml[sp_end:]
         report.append(f"底色：{name} 填充 → <a:noFill/>（{why}）")
+    return xml, report
+
+
+def patch_no_wrap(xml: str) -> tuple[str, list[str]]:
+    """把 NO_WRAP_SHAPES 列出的文本框的 `<a:bodyPr wrap="square">` 改成 `wrap="none"`。
+
+    定位方式与 patch_backdrop_fills 相同（按形状名 → 所属 `<p:sp>` → 该形状的
+    `<a:bodyPr>`），只改这一个属性，不动文字内容与几何。
+
+    Args:
+        xml: 幻灯片 XML 原文。
+
+    Returns:
+        (打补丁后的 XML, 报告列表)；形状改名找不到时报 ⚠ 而不静默跳过。
+    """
+    report: list[str] = []
+    for name, why in NO_WRAP_SHAPES:
+        m = re.search(r'<p:cNvPr\b[^>]*\bname="%s"' % re.escape(name), xml)
+        if m is None:
+            report.append(f"⚠ 不换行：未找到形状 {name!r}（源 PPTX 改名或结构变动？）——已跳过")
+            continue
+        sp_start = xml.rfind("<p:sp", 0, m.start())
+        sp_end = xml.index("</p:sp>", sp_start) + len("</p:sp>")
+        sp = xml[sp_start:sp_end]
+        bp = re.search(r'<a:bodyPr\b[^>]*?>', sp)
+        if bp is None or 'wrap="square"' not in bp.group(0):
+            report.append(f"不换行：{name} 的 <a:bodyPr> 不是 wrap=\"square\"，跳过")
+            continue
+        new_bp = bp.group(0).replace('wrap="square"', 'wrap="none"')
+        sp_new = sp[:bp.start()] + new_bp + sp[bp.end():]
+        xml = xml[:sp_start] + sp_new + xml[sp_end:]
+        report.append(f"不换行：{name} wrap → none（{why}）")
     return xml, report
 
 
@@ -266,6 +318,8 @@ def build_patched_pptx(src: Path, dst: Path) -> list[str]:
                         report.extend(text_rep)
                         text, bg_rep = patch_backdrop_fills(text)
                         report.extend(bg_rep)
+                        text, nw_rep = patch_no_wrap(text)
+                        report.extend(nw_rep)
                         text, n_blip = patch_svg_blip(text)
                         if n_blip:
                             report.append(f"图片：给 {n_blip} 个只有 svgBlip 扩展的 <a:blip> "

@@ -8,7 +8,8 @@
 2. **投稿合规**：pdf.fonttype/ps.fonttype = 42（TrueType 嵌入），消除 Type 3 字体；
 3. **统计口径**：所有统计量直接读 paper/planning/06-stats-active.json
    （active-hit 主指标 + 配对 McNemar/bootstrap），保证图与正文数字同源；
-4. **术语**：tube-only → corridor-only（标题已去 "Tube MPC"）；
+4. **术语**：全图标签用 tube / tube-only（chat29 随正文 corridor→tube 改名；代码内键名
+   `C["corridor"]`、`_corridor_band`、`corridor(ax)` 保留历史写法，不随渲染文字变化）；
 5. fig3 出两个版本：3D 修正版（正文用）+ 2D 双面板备选；
    fig4 改画相对初始位形的关节偏差 + 命中区放大；fig6 色条对称 ±16 并标显著格点；
    fig7 去除三点 log 图改为紧凑数值表；fig8 删除不可读的 3D 排，距离曲线事件对齐。
@@ -72,14 +73,14 @@ plt.rcParams.update({
 
 C = {
     "full": "#009E73",        # 绿
-    "tube_only": "#0072B2",   # 蓝（档位键名保留 tube_only，标签写 corridor-only）
+    "tube_only": "#0072B2",   # 蓝（档位键名 tube_only，标签同写 tube-only）
     "softmin_only": "#E69F00",  # 琥珀
     "none": "#D55E00",        # 橙红
     "ball": "#D55E00",
     "racket": "#4D4D4D",      # 球拍中性深灰：不与走廊蓝/softmin 琥珀的机制语义冲突
-    "corridor": "#0072B2",    # 走廊固定蓝色，与 tube_only (corridor-only) 一致
+    "corridor": "#0072B2",    # tube 固定蓝色，与 tube_only (tube-only) 一致（键名保留历史写法）
 }
-MODE_LABELS = {"full": "full", "tube_only": "corridor-only",
+MODE_LABELS = {"full": "full", "tube_only": "tube-only",
                "softmin_only": "candidate-set-only", "none": "point-target"}
 MODE_ORDER = ["full", "tube_only", "softmin_only", "none"]
 
@@ -170,7 +171,7 @@ def fig1_hero(npz_path: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz") ->
     - 球拍画成椭圆拍面 + 短柄，不用空心圆；横向半轴 ≈ 有效碰撞半径 0.12 m，
       具体数值只写在图注里；
     - 走廊 = 沿轨迹逐点 ±0.12 m 的浅蓝半透明带 + 蓝色虚线边界（与结果图同色）；
-    - 图内只留三个标签（single target / candidate ball states / spatial corridor），
+    - 图内只留三个标签（single target / candidate ball states / spatial tube），
       面板编号 (a)/(b) 置于左上角；不显示刻度与坐标框。
 
     坐标约定：npz 的 ball_pos 列为 (X, Y, Z)，本图顶视绘制 (x=Y, y=X)；
@@ -199,7 +200,7 @@ def fig1_hero(npz_path: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz") ->
     # ---- 内容包围盒 → 画布几何（内容填满面板，两面板一致）----
     # chat12 审稿意见：裁掉图内空白——边距较原 0.14 收紧；上边界取 0.13
     # （> 走廊半宽 0.12，保证走廊带完整不被面板顶裁角——0.11 时实测裁掉约
-    # 6 mm），下边界 0.115（"spatial corridor" 标签所需空间较小）。
+    # 6 mm），下边界 0.115（"spatial tube" 标签所需空间较小）。
     half_x = 0.17                                       # 拍面沿轨迹半长
     half_y = 0.15                                       # 拍面横向半轴 + 余量
     x_lo = float(b[:, 1].min()) - 0.02
@@ -303,11 +304,11 @@ def fig1_hero(npz_path: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz") ->
                 arrowprops=dict(arrowstyle="-", lw=0.6, color=C["ball"],
                                 shrinkA=0, shrinkB=3))
     mid = cw[len(cw) // 2] - 1.35 * r_half * nrm[len(cw) // 2]
-    ax.annotate("spatial corridor", (mid[0], mid[1]),
+    ax.annotate("spatial tube", (mid[0], mid[1]),
                 textcoords="offset points", xytext=(0, -2), fontsize=12.9,
                 ha="center", va="top", color=C["corridor"], zorder=7)
-    # 标题字号放大后需缩短文案（原 "…terminal + corridor" 会超出画布右界）
-    ax.text(0.005, 0.995, "(b) Candidate window + corridor",
+    # 标题字号放大后需缩短文案（原 "…terminal + tube" 会超出画布右界）
+    ax.text(0.005, 0.995, "(b) Candidate window + tube",
             transform=ax.transAxes, fontsize=12.6, ha="left", va="top")
 
     save(fig, "fig1_hero.pdf")
@@ -347,7 +348,7 @@ def fig3_3d(npz_path: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz") -> N
     Zs = np.array([p[2] + r_half * (np.cos(a) * v[2] + np.sin(a) * w[2])
                    for p in seg for a in th]).reshape(len(seg), len(th))
     ax.plot_surface(Xs, Ys, Zs, color=C["corridor"], alpha=0.16, linewidth=0,
-                    shade=False, label="Corridor (half-width 0.12 m)")
+                    shade=False, label="Tube (half-width 0.12 m)")
     # 击球点横截面圆环：标出走廊半径，避免整条管道难以判读尺度
     p_hit = ball[hit]
     ring = p_hit + r_half * (np.outer(np.cos(th), v) + np.outer(np.sin(th), w))
@@ -470,7 +471,7 @@ def fig3_alt_2d(npz_path: Path = DATA / "exp18_fig_assets/raw/d_hit_noise_kf.npz
                 ha="right", va="top", color="k", zorder=9,
                 arrowprops=dict(arrowstyle="-", lw=0.6, color="k",
                                 shrinkA=0, shrinkB=4))
-    ax.annotate("corridor axis", (seg[len(seg) // 2, 1], seg[len(seg) // 2, 2]),
+    ax.annotate("tube axis", (seg[len(seg) // 2, 1], seg[len(seg) // 2, 2]),
                 textcoords="offset points", xytext=(-2, -20), fontsize=7,
                 ha="right", va="top", color=C["corridor"])
     ax.set_ylabel("Z (m)")
@@ -897,7 +898,7 @@ def fig5(stats: dict) -> None:
     # chat25：18 柱横排在 3.39 in 下不可读（0.15 in/柱）→ chat27 改为配对点图，
     # 槽宽回到 0.317 in；面板加高到 1.30 in 让两枚标记拉开（9~21 pp ≈ 10~22 pt）。
     gains = _exp26_gains_ci(DATA / "exp26_tcp_grid" / "results.csv")
-    tiers = [("full", "full"), ("tube_only", "corridor-only"),
+    tiers = [("full", "full"), ("tube_only", "tube-only"),
              ("softmin_only", "candidate-set-only")]
     tcps = (1.0, 1.4, 1.8)
     from matplotlib.lines import Line2D
@@ -1001,7 +1002,7 @@ def fig5_interaction(stats: dict) -> None:
     style_ax(ax)
 
     gains = _exp26_gains_ci(DATA / "exp26_tcp_grid" / "results.csv")
-    tiers = [("full", "full"), ("tube_only", "corridor-only"),
+    tiers = [("full", "full"), ("tube_only", "tube-only"),
              ("softmin_only", "candidate-set-only")]
     from matplotlib.patches import Patch
     for spi, spd in enumerate((7.0, 9.0)):
@@ -1086,7 +1087,7 @@ def fig6(stats: dict) -> None:
     width = 0.32
     for mi, (key, lab, col) in enumerate([
             ("softmin_only_vs_none", "candidate-set-only", C["softmin_only"]),
-            ("tube_only_vs_none", "corridor-only", C["tube_only"])]):
+            ("tube_only_vs_none", "tube-only", C["tube_only"])]):
         vals, errs = [], [[], []]
         for sp in speeds:
             p = e3["paired"].get(f"{sp}|{key}", {})
@@ -1110,7 +1111,7 @@ def fig6(stats: dict) -> None:
     ss = [0.0, 0.05, 0.1, 0.2]
     heat_specs = [
         (axes[1], "softmin_only_vs_none", "(b) Candidate-set gain"),
-        (axes[2], "full_vs_softmin_only", "(c) Added corridor gain"),
+        (axes[2], "full_vs_softmin_only", "(c) Added tube gain"),
     ]
     for ax, cmp, title in heat_specs:
         keys = [f"t{t}|s{s}" for t in ts for s in ss]
@@ -1157,8 +1158,8 @@ def fig6(stats: dict) -> None:
     # chat9 审稿意见：(d) 横轴只保留实际采样位置（去掉无用的 0.25/0.35 刻度）
     ax.set_xticks([0.2, 0.3, 0.4])
     ax.set_xlabel("Spatial max $s$ (m), 9 m/s, $t{=}0$")
-    ax.set_ylabel("Corridor gain (pp)")
-    ax.set_title("(d) Corridor under spatial offsets", fontsize=9)
+    ax.set_ylabel("Tube gain (pp)")
+    ax.set_title("(d) Tube under spatial offsets", fontsize=9)
     style_ax(ax)
 
     fig.tight_layout(pad=0.3, h_pad=0.9)
@@ -1271,7 +1272,7 @@ def fig_diagnostic() -> None:
             ("sm_hit_t50", "candidate-set-only (hit)", C["softmin_only"], "--", True)]),
         ("(b) 0.2 m spatial perturbation", [
             ("pt_miss_s20_s77", "point-target (miss)", C_PT, "-", False),
-            ("co_hit_s20_s77", "corridor-only (hit)", C["tube_only"], "--", True)]),
+            ("co_hit_s20_s77", "tube-only (hit)", C["tube_only"], "--", True)]),
     ]
     fig, axes = plt.subplots(1, 2, figsize=(7.16, 1.50), sharex=True, sharey=True)
     stats_txt: list[str] = []
@@ -1374,7 +1375,7 @@ def tables(stats: dict, out_dir: Path | None = None) -> None:
              r"$20$ cells). Exact intervals are in the artifact.}",
              r"\label{tab:ablation}",
              r"\begin{tabular}{lccccrc}", r"\toprule",
-             r"Condition & full & corridor-only & candidate-set-only & point-target & $n$ & Design \\",
+             r"Condition & full & tube-only & candidate-set-only & point-target & $n$ & Design \\",
              r"\midrule"]
     kind_label = {"E3": "nominal four-tier", "E4": "perturbation grid",
                   "E7": "high-power corners"}
@@ -1389,14 +1390,15 @@ def tables(stats: dict, out_dir: Path | None = None) -> None:
     # Table II：TCP 限速层内配对 p + 跨层配对 DiD
     # （chat15：DiD 三行通栏文本改对齐子表、caption 压短——表格更密）
     lines = [r"\begin{table}[t]", r"\centering",
-             r"\caption{Paired gain ({\upshape pp}) over the point-target "
-             r"baseline at $7$\,{\upshape m/s} ($n{=}394$ seeds); $p$ is the "
-             r"unadjusted McNemar value. The lower block shifts each gain "
-             r"between the two caps.}",
+             r"\caption{Paired gain ({\upshape pp}) over point-target at "
+             r"$7$\,{\upshape m/s} ($n{=}394$ seeds); $p$: unadjusted "
+             r"McNemar. Lower block: between-cap shifts.}",
              r"\label{tab:limits}",
              r"\setlength{\tabcolsep}{3.5pt}",
-             # chat22：行距 1.0 → 0.92（约省 8 pt）回补 Fig.5(c) 加高占用的页面空间，
-             # 保证第 5 页左栏 §V-E 块不被挤出（否则出现 ~35 pt 空洞）
+             # 下面两行是写进 TeX 的注释（chat22 手改版），必须留在输出里，
+             # 否则重跑 tables() 会把磁盘上的说明删掉
+             r"% chat22：行距 1.0 → 0.92（约省 8 pt），把 Fig.5(c) 加高占用的页面空间补回来，",
+             r"% 保证第 5 页左栏 §V-E 块不被挤出（否则出现 ~35 pt 空洞）",
              r"\renewcommand{\arraystretch}{0.92}",
              r"\begin{tabular}{lcccr}", r"\toprule",
              r"Config. & \multicolumn{2}{c}{Gain over point-target (pp)} & "
@@ -1482,7 +1484,7 @@ def fig3_hero(render_png: Path | None = None, meta_json: Path | None = None) -> 
 
     # 走廊管与候选窗口的引线标注：位置按画幅比例给（渲染分辨率可换而不必改代码；
     # 实测教训：写死像素锚点在换渲染尺寸后会把右端标签挤出画布被裁）
-    ax.annotate("corridor ($\\pm0.12$ m)", xy=(0.606 * W, 0.535 * H),
+    ax.annotate("tube ($\\pm0.12$ m)", xy=(0.606 * W, 0.535 * H),
                 xytext=(0.624 * W, 0.631 * H), fontsize=7.0, ha="center",
                 va="center", zorder=6,
                 path_effects=[pe.withStroke(linewidth=2.2, foreground="white")],
@@ -1504,7 +1506,7 @@ def fig3_hero(render_png: Path | None = None, meta_json: Path | None = None) -> 
         Line2D([], [], marker="o", ls="", ms=4.2, mfc="#B84500", mec="0.35",
                mew=0.4, label="ball, in the $\\pm50$ ms window"),
         Patch(facecolor="#0066A3", alpha=0.35, edgecolor="0.4", lw=0.4,
-              label="corridor ($\\pm0.12$ m)"),
+              label="tube ($\\pm0.12$ m)"),
     ]
     leg = ax.legend(handles=handles, loc="lower right", bbox_to_anchor=(0.995, 0.012),
                     fontsize=6.5, framealpha=0.85, borderpad=0.35, labelspacing=0.28,
@@ -1514,6 +1516,7 @@ def fig3_hero(render_png: Path | None = None, meta_json: Path | None = None) -> 
 
     save(fig, "fig3_swing_hero.pdf", dpi=600)
     print(f"已保存 {OUT / 'fig3_swing_hero.pdf'} （实景 hero 版，{W}x{H} px 渲染，600 dpi 嵌入）")
+
 
 
 def main() -> None:

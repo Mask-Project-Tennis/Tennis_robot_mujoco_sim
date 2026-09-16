@@ -255,6 +255,9 @@ def render_variant(*, args: argparse.Namespace, rec: dict, k_ref: int, win: tupl
 
     model = build_model(args.ball_scale, args.fovy or preset.get("fovy", 40.0),
                         args.width, args.height, chord)
+    for _line in rbt.apply_palette(model, None if args.palette in ("original", "none")
+                                   else args.palette):
+        print("      " + _line)
     data = mujoco.MjData(model)
     renderer = mujoco.Renderer(model, args.height, args.width)
     names = [mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, g) for g in range(model.ngeom)]
@@ -391,6 +394,10 @@ def main() -> None:
     ap.add_argument("--strobe-alpha", type=float, default=0.65)
     ap.add_argument("--ribbon-alpha", type=float, default=0.12)
     ap.add_argument("--ball-scale", type=float, default=1.0)
+    ap.add_argument("--palette", type=str, default="industrial",
+                    choices=["industrial", "original", "none"],
+                    help="运行期配色（industrial = 与 Fig.1 实景同一套工业灰；"
+                         "original/none = 模型原色，见 render_ball_trail.PALETTES）")
     ap.add_argument("--corridor-alpha", type=float, default=CORRIDOR_RGBA[3],
                     help="走廊管透明度（印刷下 0.10~0.16 之间）")
     ap.add_argument("--corridor-rgb", type=float, nargs=3,

@@ -116,6 +116,64 @@ def configure_camera(cam: mujoco.MjvCamera, lookat: np.ndarray,
     cam.elevation = elevation
 
 
+# ---------------------------------------------------------------------------
+# 运行期调色板（chat29 图轮）
+# ---------------------------------------------------------------------------
+# 背景：论文 Fig.1/Fig.3 的实景里，右臂是亮蓝色（rm65_model.xml 的视觉 rgba）、拍面是
+# 半透明亮绿、立柱近黑，评审认为"机器人配色很奇怪"且立柱占版面过重。这里在**渲染时**
+# 覆盖 geom rgba——不改 src/robot/rm65_model.xml，避免波及全部仿真视频与回放。
+# 键的写法：`geom:<geom 名前缀>` 或 `body:<body 名前缀>`，按字典顺序首次命中即生效。
+PALETTES: dict[str, dict[str, tuple[float, float, float, float]]] = {
+    "industrial": {
+        "geom:r_racket_face": (0.17, 0.18, 0.20, 0.90),    # 拍面：近黑（原亮绿；浅底/深底都可辨）
+        "geom:r_racket_handle": (0.24, 0.24, 0.26, 1.0),    # 拍柄：深灰（原棕）
+        "body:body_base_link": (0.70, 0.71, 0.74, 1.0),     # 立柱：中灰（原近黑）
+        "body:platform_base_link": (0.62, 0.63, 0.66, 1.0),  # 平台：中灰
+        "body:head_link": (0.66, 0.67, 0.70, 1.0),          # 头部：中灰
+        "body:r_flange": (0.35, 0.36, 0.39, 1.0),           # 右法兰：深灰
+        "body:r_base_link": (0.38, 0.39, 0.42, 1.0),        # 右臂根：深灰（原银白）
+        "body:r_link": (0.53, 0.54, 0.57, 1.0),             # 右臂连杆：工业浅灰（原亮蓝）
+        "body:l_base_link": (0.38, 0.39, 0.42, 1.0),
+        "body:l_link": (0.53, 0.54, 0.57, 1.0),             # 左臂与右臂同色（不参与任务）
+        "body:base_link": (0.45, 0.46, 0.49, 1.0),          # 底盘：深灰
+    },
+}
+
+
+def apply_palette(model: mujoco.MjModel, name: str | None) -> list[str]:
+    """按 PALETTES[name] 运行期覆盖 geom rgba（不改 XML），返回逐条命中报告。
+
+    Args:
+        model: 已加载的 MuJoCo 模型（其 geom_rgba 会被就地修改）。
+        name: 调色板名；None 或未知名字 = 保持模型原色。
+
+    Returns:
+        每条命中的 "规则 → geom/body" 描述；未命中的规则也会列出（便于发现改名）。
+    """
+    rules = PALETTES.get(name or "", {})
+    if not rules:
+        return [f"调色板 {name!r} 未定义，保持模型原色"]
+    hit: set[str] = set()
+    report: list[str] = []
+    for gid in range(model.ngeom):
+        gname = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, gid) or ""
+        bname = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_BODY,
+                                 int(model.geom_bodyid[gid])) or ""
+        for key, rgba in rules.items():
+            kind, _, pat = key.partition(":")
+            target = gname if kind == "geom" else bname
+            if target.startswith(pat):
+                model.geom_rgba[gid] = rgba
+                hit.add(key)
+                report.append(f"调色板：{key} → geom#{gid} {gname or '(未命名)'}"
+                              f" @ {bname or '(未命名 body)'}")
+                break
+    for key in rules:
+        if key not in hit:
+            report.append(f"⚠ 调色板：规则 {key} 未命中任何 geom（模型改名？）")
+    return report
+
+
 class Projector:
     """解析投影：世界点 → 像素坐标（用渲染场景相机的 pos/forward/up + fovy）。"""
 
