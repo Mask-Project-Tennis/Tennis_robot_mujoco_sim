@@ -558,3 +558,47 @@ l_corr(x_k) = 0.5 · s_k · Q_p_tube · [max(0, ‖P_perp · (p_ee,k - p_ball,k)
     压缩后的句子对照上一轮审稿风格规则复查——本轮先把题注压成电报体
     （"Holm over five cells raises the two smallest to 0.059, > 0.05"），
     直接违反同文件注释里记着的 chat21"去电报体"规则，被用户复查打回。
+
+---
+
+## V22 审稿教训（chat31 / round-4，已全部落地）
+
+> 来源：`paper/notes/chat31-v23-revision.md` + `paper/reviews/round-4/`。
+> 审稿人定位："完成度较高、需要最后核对的投稿稿"；核心教训：**参数说明必须与实验实际
+> 配置一致**，**因果措辞与证据等级匹配**。
+
+### 参数与实验配置核对（本轮最高优先级项）
+1. **从代码恢复论文参数时，核对"产生数字的实验跑了哪条代码路径"，不是找库默认值**：
+   论文写 q_tube=5×10⁴，旧版写 0.01·q_p=5×10²，实际实验全部走 v12 脚本硬编码
+   `Q_p_tube=500.0`（无 CLI/yaml/monkey-patch 覆盖，git 历史从未改值）；
+   5×10⁴ 只是 dataclass 默认值，仅真机路径在用。上一轮"恢复权重"引了默认值 → 跨版本
+   100 倍差异被审稿人当场对出。审计链 = 脚本硬编码 → batch_runner 调用链 → 实验产物无
+   覆盖字段 → git log -L 值历史，四层闭合后才允许落笔。
+2. **同一数值两处代码口径不一致时要留档而非顺手统一**：dataclass 默认 50000（真机）vs
+   脚本 500（仿真），改默认值会改变真机行为；论文只陈述实验口径（500），代码不动。
+
+### 因果措辞与证据等级匹配
+3. **"so the mechanism is…" → "supporting the interpretation that…"**：98 个共享种子
+   一致是"实验支持的解释"，不是机制证明；method 与 results 两处同类断言一起降级。
+4. **"stays neutral" → "no significant degradation is detected"**："未检测到显著劣化"≠
+   "证明无影响"；结论必须与正文（"the window never falls significantly below the point
+   target"）同证据强度。
+5. **显著性后置、观察先行**："The tube retains independent value…"（先下结论）→
+   "The tube shows positive point estimates in all three spatial-only cells…"
+   （先陈述点估计），区间与 Holm 校正放后句。
+
+### 图注与表注口径
+6. **图内 "width ≈" 与正文 "half-width =" 不一致时，图注直写定义**
+   （"tube half-width r_racket = 0.12 m"），别让读者自己推断 width 语义；
+   "accept both errors" 类措辞 + 图内 HIT/MISS 组合会被读作"区域内必命中"，
+   补一句 "The hit/miss labels schematically illustrate the intended tolerance,
+   not guaranteed collision outcomes." 替代笼统免责括注。
+7. **表注统计说明与正文分工**：正文承载数值细节（Holm 校正 0.059），表注只保留两个
+   必需信息（表内为原始 p 值 / 校正后不显著）——审稿人后一轮明确授权缩短，
+   头注释记录依据防审稿轮来回改。
+
+### 版面回收（本轮 9→8 页三轮）
+8. **微小净增也会因行中断重排放大溢出**：本轮净增 ~8 tokens 却溢出 2 条参考文献；
+   定位手段升级为 **PyMuPDF y 坐标对比**（段落首行 y、REFERENCES y、双栏底部），
+   pdftotext 行数在含表格页失真。flushend 两栏的硬阈值：col1 正文每多 ~1 行 ≈
+   参考文献少放 1 条，故溢出量 = 正文增长行数 × 每条参考文献行数。
