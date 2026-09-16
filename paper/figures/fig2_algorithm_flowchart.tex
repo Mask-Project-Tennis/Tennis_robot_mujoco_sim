@@ -25,7 +25,7 @@
 % chat12 审稿意见：两 cost 块的归属词（running / terminal cost）提到行首成为
 % 最醒目信息，参数细节（r_racket、β=5）删除（正文/图注已有）
 \node[block] (obs) {Observe ball state, predict trajectory\\and candidate windows};
-\node[corridorcost, below=of obs] (corr) {Running cost: corridor hinge term};
+\node[corridorcost, below=of obs] (corr) {Running cost: tube hinge term};
 \node[softmincost, below=of corr] (soft) {Terminal cost: candidate-window softmin};
 \node[block, below=of soft] (ilqr) {iLQR backward $+$ forward pass (MPC)};
 \node[block, below=of ilqr] (exec) {Execute with safety filter\\(joint/TCP limits, midline plane)};
@@ -38,7 +38,7 @@
     node[pos=0.35, right, font=\footnotesize, align=left] {replan\\interval};
 
 \end{tikzpicture}
-\caption{MPC-iLQR framework. Shaded blocks are the two cost modifications; the
+\caption{MPC-iLQR framework. Shaded blocks are the two cost relaxations; the
 point-target baseline (\texttt{none}) drops both.}
 \label{fig:algorithm_flowchart}
 \end{figure}
