@@ -44,6 +44,11 @@
  ],
  "with_corridor": true,
  "with_line": true,
+ "win_rgb": [
+  0.78,
+  0.31,
+  0.0
+ ],
  "px": {
   "reference_ball": [
    916.7,

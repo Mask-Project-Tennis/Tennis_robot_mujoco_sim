@@ -58,7 +58,7 @@ MODEL_XML = REPO_ROOT / "src" / "robot" / "rm65_model.xml"
 
 BALL_R = 0.033                       # 网球半径（与 rm65_model.xml 一致）
 BALL_RGB = (0.98, 0.95, 0.25)        # 窗口外：黄（与全景图一致的「球」色）
-WIN_RGB = (0.84, 0.37, 0.00)         # 窗口内：橙（= paper 配色 C["ball"] #D55E00）
+WIN_RGB = (0.78, 0.31, 0.00)         # 窗口内：橙（#D55E00 加深一档；管内透出的对比度更足）
 CORRIDOR_R = 0.12                    # 走廊半宽 = 拍半径（method.tex 式(2)）
 CORRIDOR_RGBA = (0.0, 0.45, 0.72, 0.16)
 N_BALL = 320                         # 球残影池槽位（覆盖整条 episode 的 307 步）
@@ -129,7 +129,8 @@ def moving_body_geoms(model: mujoco.MjModel) -> list[int]:
 def fill_ball_pool(model: mujoco.MjModel, ids: list[int], ball: np.ndarray,
                    steps: np.ndarray, hit_step: int, *, strobe_steps: int,
                    strobe_alpha: float, ribbon_alpha: float,
-                   win: tuple[int, int]) -> tuple[int, int]:
+                   win: tuple[int, int],
+                   win_rgb: tuple[float, float, float]) -> tuple[int, int]:
     """把画面内的球位写进残影池（跳过主帧的实心球位）；窗口内橙、窗口外黄。"""
     slot, n_strobe = 0, 0
     for i in steps:
@@ -143,7 +144,7 @@ def fill_ball_pool(model: mujoco.MjModel, ids: list[int], ball: np.ndarray,
             alpha = ribbon_alpha
         if alpha <= 0:
             continue
-        rgb = WIN_RGB if win[0] <= i <= win[1] else BALL_RGB
+        rgb = win_rgb if win[0] <= i <= win[1] else BALL_RGB
         if win[0] <= i <= win[1]:
             alpha = max(alpha, 0.55)     # 窗内球提亮：走廊管会压掉一部分对比度
         model.geom_pos[ids[slot]] = ball[i]
@@ -288,7 +289,8 @@ def render_variant(*, args: argparse.Namespace, rec: dict, k_ref: int, win: tupl
     strobe_steps = max(1, round(args.strobe_ms / (dt * 1000.0)))
     slot, n_strobe = fill_ball_pool(
         model, ball_ids, trail, steps, hit_step, strobe_steps=strobe_steps,
-        strobe_alpha=args.strobe_alpha, ribbon_alpha=args.ribbon_alpha, win=win)
+        strobe_alpha=args.strobe_alpha, ribbon_alpha=args.ribbon_alpha, win=win,
+        win_rgb=tuple(args.win_rgb))
 
     # 走廊管只切透明度（取向已在建模时烘死，见 build_model 注释）
     model.geom_rgba[tube_id] = [*CORRIDOR_RGBA[:3],
@@ -346,6 +348,7 @@ def render_variant(*, args: argparse.Namespace, rec: dict, k_ref: int, win: tupl
         "n_ghost_slots": slot, "n_strobe": n_strobe,
         "arm_ghosts": [[int(o), float(a)] for o, a in arm_ghosts],
         "with_corridor": bool(with_corridor), "with_line": bool(with_line),
+        "win_rgb": [float(c) for c in args.win_rgb],
         "px": {k: (np.round(v, 2).tolist() if o else None)
                for (k, _), v, o in zip(keys.items(), pxk, okk)},
     }
@@ -388,6 +391,9 @@ def main() -> None:
     ap.add_argument("--ball-scale", type=float, default=1.0)
     ap.add_argument("--corridor-alpha", type=float, default=CORRIDOR_RGBA[3],
                     help="走廊管透明度（印刷下 0.10~0.16 之间）")
+    ap.add_argument("--win-rgb", type=float, nargs=3, default=list(WIN_RGB),
+                    metavar=("R", "G", "B"),
+                    help="候选窗口内球色（默认 #C74F00 = #D55E00 加深一档）")
     ap.add_argument("--arm-ghosts", type=str, default="-200,-120,-60,-30,-10",
                     help="整臂残影帧（相对击球步的步数，逗号分隔，按时间先后）；"
                          "默认 = 定稿值（接触前 1.0/0.6/0.3/0.15/0.05 s，"
