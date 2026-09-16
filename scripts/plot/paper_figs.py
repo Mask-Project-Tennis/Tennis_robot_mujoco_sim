@@ -1451,6 +1451,8 @@ def fig3_hero(render_png: Path | None = None, meta_json: Path | None = None) -> 
     img = plt.imread(render_png)
     W, H = int(meta["width"]), int(meta["height"])
     px = {k: v for k, v in meta["px"].items() if v is not None}
+    from matplotlib.lines import Line2D
+    from matplotlib.patches import Patch
 
     fig = plt.figure(figsize=(3.387, 3.00))
     ax = fig.add_axes([0.0, 0.0, 1.0, 1.0])
@@ -1492,6 +1494,23 @@ def fig3_hero(render_png: Path | None = None, meta_json: Path | None = None) -> 
                 path_effects=[pe.withStroke(linewidth=2.2, foreground="white")],
                 arrowprops=dict(arrowstyle="-", lw=0.7, color="white",
                                 shrinkA=2, shrinkB=3, alpha=0.9))
+
+    # 颜色图例（右下角空场地）：球轨迹的窗口内外配色 + 走廊管色。
+    # chat27 跟进（用户意见）：窗口/走廊的语义原来只写在题注里，图内自解释性不足。
+    # 参考点/接触已有图内标签，不进图例（保持图例小）；题注因此可精简。
+    handles = [
+        Line2D([], [], marker="o", ls="", ms=4.2, mfc="#F9F240", mec="0.35",
+               mew=0.4, label="ball, outside the window"),
+        Line2D([], [], marker="o", ls="", ms=4.2, mfc="#D55E00", mec="0.35",
+               mew=0.4, label="ball, in the $\\pm50$ ms window"),
+        Patch(facecolor="#0072B2", alpha=0.35, edgecolor="0.4", lw=0.4,
+              label="corridor ($\\pm0.12$ m)"),
+    ]
+    leg = ax.legend(handles=handles, loc="lower right", bbox_to_anchor=(0.995, 0.012),
+                    fontsize=6.5, framealpha=0.85, borderpad=0.35, labelspacing=0.28,
+                    handlelength=1.0, handletextpad=0.45, edgecolor="0.6")
+    leg.set_zorder(7)
+    leg.get_frame().set_linewidth(0.4)
 
     save(fig, "fig3_swing_hero.pdf", dpi=600)
     print(f"已保存 {OUT / 'fig3_swing_hero.pdf'} （实景 hero 版，{W}x{H} px 渲染，600 dpi 嵌入）")

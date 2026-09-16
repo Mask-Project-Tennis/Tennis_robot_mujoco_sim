@@ -22,9 +22,11 @@
    绘制，题注据此改写。
 
 用法（mujoco_tennis 环境，离屏渲染需 MUJOCO_GL=egl）:
-    # 单张定稿尺寸（3.387×2.2 in 面板 @ ~900 dpi）
+    # 单张定稿（论文 Fig.3：3.387×3.0 in @600 dpi；默认机位/残影即为定稿值）
     MUJOCO_GL=egl python scripts/tools/render_swing_hero.py \
-        --view x+ --width 3048 --height 1980 --out results/scene_angles/chat27/hero.png
+        --width 2032 --height 1800 --azimuth -42 --elevation -24 --distance 1.60 \
+        --lookat -0.68 -0.40 0.98 --fovy 45 --corridor-alpha 0.14 \
+        --out paper/figures/fig3_swing_hero_render.png
 
     # 机位调研：五机位 × (完整/素图) contact sheet
     MUJOCO_GL=egl python scripts/tools/render_swing_hero.py --sheet
@@ -295,13 +297,20 @@ def render_variant(*, args: argparse.Namespace, rec: dict, k_ref: int, win: tupl
     # ── 渲染：背景（无机械臂）→ 残影帧（无阴影）→ 主帧（接触位姿，带阴影） ──
     bg = base_frame(renderer, data, cam, opt, model, hide_ids,
                     q[hit_step], q_left, ball[hit_step])
+    # 接触帧的机械臂轮廓：残影一律不得覆盖它。否则主帧手臂被逐帧 alpha 反复稀释、
+    # 看起来半透明（3 帧时已可见，加到 5 帧更明显）。grow=2 把边缘描边也一起盖住。
+    main_ns = render_frame(renderer, data, cam, opt, q[hit_step], q_left,
+                           ball[hit_step], shadows=False)
+    silhouette = mask_from_diff(main_ns, bg, thresh=args.mask_thresh,
+                                feather=args.mask_feather, grow=2)
     ghost_frames = []
     for off, alpha in arm_ghosts:
         s = int(np.clip(hit_step + off, 0, n - 1))
         # 残影帧的球位固定为主帧球位：真球不参与掩膜，否则会被当成残影糊上
         f = render_frame(renderer, data, cam, opt, q[s], q_left, ball[hit_step], shadows=False)
-        ghost_frames.append((f, mask_from_diff(f, bg, thresh=args.mask_thresh,
-                                               feather=args.mask_feather), alpha))
+        m = mask_from_diff(f, bg, thresh=args.mask_thresh,
+                           feather=args.mask_feather) * (1.0 - silhouette)
+        ghost_frames.append((f, m, alpha))
     img = render_frame(renderer, data, cam, opt, q[hit_step], q_left, ball[hit_step],
                        shadows=not args.no_shadows)
     img = composite_ghosts(img, ghost_frames)
@@ -379,9 +388,12 @@ def main() -> None:
     ap.add_argument("--ball-scale", type=float, default=1.0)
     ap.add_argument("--corridor-alpha", type=float, default=CORRIDOR_RGBA[3],
                     help="走廊管透明度（印刷下 0.10~0.16 之间）")
-    ap.add_argument("--arm-ghosts", type=str, default="-45,-30,-15",
-                    help="整臂残影帧（相对击球步的步数，逗号分隔，按时间先后）")
-    ap.add_argument("--arm-ghost-alpha", type=str, default="0.22,0.34,0.48")
+    ap.add_argument("--arm-ghosts", type=str, default="-200,-120,-60,-30,-10",
+                    help="整臂残影帧（相对击球步的步数，逗号分隔，按时间先后）；"
+                         "默认 = 定稿值（接触前 1.0/0.6/0.3/0.15/0.05 s，"
+                         "按运动取帧而非等时间：该 episode 拍心在 −120..−30 步几乎停在底部）")
+    ap.add_argument("--arm-ghost-alpha", type=str, default="0.22,0.30,0.38,0.48,0.58",
+                    help="各帧 alpha（越晚越实，与不透明的接触帧衔接）")
     ap.add_argument("--mask-thresh", type=int, default=10)
     ap.add_argument("--mask-feather", type=float, default=1.2)
     ap.add_argument("--path-line", action="store_true", default=True)
