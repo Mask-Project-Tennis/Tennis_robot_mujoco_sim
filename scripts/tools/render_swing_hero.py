@@ -58,7 +58,7 @@ MODEL_XML = REPO_ROOT / "src" / "robot" / "rm65_model.xml"
 
 BALL_R = 0.033                       # 网球半径（与 rm65_model.xml 一致）
 BALL_RGB = (0.98, 0.95, 0.25)        # 窗口外：黄（与全景图一致的「球」色）
-WIN_RGB = (0.78, 0.31, 0.00)         # 窗口内：橙（#D55E00 加深一档；管内透出的对比度更足）
+WIN_RGB = (0.72, 0.27, 0.00)         # 窗口内：橙（#B84500；比 #D55E00 深两档，管内透出仍不发褐）
 CORRIDOR_R = 0.12                    # 走廊半宽 = 拍半径（method.tex 式(2)）
 CORRIDOR_RGBA = (0.0, 0.45, 0.72, 0.16)
 N_BALL = 320                         # 球残影池槽位（覆盖整条 episode 的 307 步）
@@ -393,7 +393,7 @@ def main() -> None:
                     help="走廊管透明度（印刷下 0.10~0.16 之间）")
     ap.add_argument("--win-rgb", type=float, nargs=3, default=list(WIN_RGB),
                     metavar=("R", "G", "B"),
-                    help="候选窗口内球色（默认 #C74F00 = #D55E00 加深一档）")
+                    help="候选窗口内球色（默认 #B84500 = #D55E00 加深两档；再深一档即发褐）")
     ap.add_argument("--arm-ghosts", type=str, default="-200,-120,-60,-30,-10",
                     help="整臂残影帧（相对击球步的步数，逗号分隔，按时间先后）；"
                          "默认 = 定稿值（接触前 1.0/0.6/0.3/0.15/0.05 s，"

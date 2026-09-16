@@ -1501,7 +1501,7 @@ def fig3_hero(render_png: Path | None = None, meta_json: Path | None = None) -> 
     handles = [
         Line2D([], [], marker="o", ls="", ms=4.2, mfc="#F9F240", mec="0.35",
                mew=0.4, label="ball, outside the window"),
-        Line2D([], [], marker="o", ls="", ms=4.2, mfc="#C74F00", mec="0.35",
+        Line2D([], [], marker="o", ls="", ms=4.2, mfc="#B84500", mec="0.35",
                mew=0.4, label="ball, in the $\\pm50$ ms window"),
         Patch(facecolor="#0072B2", alpha=0.35, edgecolor="0.4", lw=0.4,
               label="corridor ($\\pm0.12$ m)"),
