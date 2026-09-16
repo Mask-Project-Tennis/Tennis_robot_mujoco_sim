@@ -115,6 +115,10 @@ python paper/tools/pptx2fig1.py  # 再重出 fig1_handdrawn.pdf
 代表"没打中、球越过拍面"）；直径取该深度处的投影球径，因此链子天然由小到大。
 换机位后重跑本脚本即可，其余标注（红虚线/管带/圆点/箭头/文字）仍由 PowerPoint 手工维护。
 
+⚠️ **当前 `ICRA.pptx` 里的球位已被用户在 PowerPoint 里手工微调过**（2026-09-16 晚，最大 ~7 pt），
+红虚线/管带/引线也是他手绘的新形状。**再跑 `--apply` 会把这些手工调整覆盖掉**——
+只有重新渲染背景（换机位）时才值得重跑，跑完请提醒用户在 PowerPoint 里复核。
+
 ### Fig.1 独立生成链（PPTX 源头）
 
 Fig.1 不走 `paper_figs.py`：源文件是本仓库内的 `figures/ICRA.pptx`，与 conda/MuJoCo 无关：
