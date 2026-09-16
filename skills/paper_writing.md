@@ -517,3 +517,44 @@ l_corr(x_k) = 0.5 · s_k · Q_p_tube · [max(0, ‖P_perp · (p_ee,k - p_ball,k)
 - "空间走廊" → "spatial corridor"
 - "球拍甜区" → "racket sweet spot"
 - "命中率" → "hit rate" 或 "hitting success rate"
+
+---
+
+## V21 审稿教训（chat30 / round-3，已全部落地）
+
+> 来源：`paper/notes/chat30-v21-revision.md` + `paper/reviews/round-3/`。
+> 审稿人原话："仍有几处'正文已经改谨慎，图注或结论却保留旧说法'的不一致"。
+> 本轮教训的核心：**正文改口径时，图注/表注/结论/摘要必须同步对表**。
+
+### 统计标注自洽（每条都可直接自查）
+1. **p 值三处口径一致**：表格列头写 `p_raw`，题注就必须说列内是 raw p 并另写 Holm 校正值
+   （如 "Holm adjustment over the five cells raises the two smallest p-values to 0.059,
+   above 0.05"）；正文不要再用 "marginal" 粉饰未达阈值（0.059 > 0.05 直接写 not significant）。
+2. **正文的概括区间要能覆盖表格每一行**：逐格复算表行差（candidate-set-only − point-target
+   每格），再对照正文 "0.0 to −1.0 pp elsewhere" 这类断言——漏掉 +6.1 pp 的一格就是硬伤。
+3. **排序断言先查点估计实际排列**："tier ordering intact" 只在逐档核对过 {full, tube, cand,
+   point} 排列后才允许写；非冻结下 81.6/82.7/86.7/69.4 明显变了序，只能写
+   "candidate window retains its advantage over the point target"。
+
+### 措辞边界（审稿人反复批过的句式）
+4. **速度阈值类声明按定义写**："excludes grazes" 过强（0.3 m/s 只能排除低速被动接触，
+   不能排除快速切向擦碰）→ "excludes passive contact at low racket speed"。
+5. **方法描述按实现写**：实现是混合式（闭式质量矩阵/逆动力学项 + 中心差分偏置力导数 +
+   与全有限差分对照验证）就写混合式，不写 "analytical derivatives supply the solver"；
+   "instantiated below" 类指针要么就地给值（q_tube=5×10⁴、s_k=w̄_k），要么删。
+6. **排他声明**："no prior work" → "existing studies rarely isolate and quantitatively
+   compare …"（不声称绝对空白，只陈述较少隔离比较）。
+7. **"relaxation" 术语限定**：候选终端是真放宽，tube 是新增非负正则项——统称时注明
+   "target-tolerance design, not a formal relaxation of the original problem"。
+8. **摘要结论带测试条件**："窗口变有害" 必须带 "at the tested 7 m/s serve"（9 m/s 下不是
+   同样结果，正文/结论/摘要三处口径要一致）。
+9. **实时性结果带 CPU 型号**（Intel i9-12900K 曾被"去工程味"误删——审查风格项时先查
+   该信息是否承担可复现功能）。
+
+### 合规与版面
+10. **ICRA 2027 FAQ**：允许显示 URL，但**不应嵌入 PDF 链接**——`hyperref` 用 draft 模式
+    （/Link 注解归零、URL 文本保留）。
+11. **版面压缩顺序**：先删冗余语义（重复括注/复读句/推论从句），再考虑形态压缩；
+    压缩后的句子对照上一轮审稿风格规则复查——本轮先把题注压成电报体
+    （"Holm over five cells raises the two smallest to 0.059, > 0.05"），
+    直接违反同文件注释里记着的 chat21"去电报体"规则，被用户复查打回。

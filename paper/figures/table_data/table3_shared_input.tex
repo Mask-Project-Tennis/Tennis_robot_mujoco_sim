@@ -4,19 +4,22 @@
 % 走廊增益显著集中在空间通道 (t=0)；full ≡ candidate-set-only 全部 5 格 0 不一致对。
 % chat15 审稿意见：通栏 table* 太稀疏 → 改单栏 table 并补走廊-vs-点目标配对 p 列
 % （5 格 p 值来自 analyze_chat12_night.py exp24 分节；Holm 校正 p=0.059 与正文一致）
+% round-3 审稿意见：列内值是 raw p 而题注曾写 "Holm-adjusted" 自相矛盾 →
+% 列头改 $p_{\mathrm{raw}}$，题注明示 Holm 校正后的值（0.059 > 0.05）
 \begin{table}[t]
 \centering
 % chat21 审稿意见：题注自然化 + 压短（行首栏头已标 $(t,s)$ cell，题注不再重复
 % "over five (t,s) cells"；"last column:" 电报体改 "the last column is"）
 \caption{Shared-input end-to-end check: active-hit rate (\%) of the four
 tiers at $9$\,{\upshape m/s} ($n{=}98$ paired episodes per tier); the last
-column is paired McNemar $p$ for tube-only vs.\ point-target,
-Holm-adjusted over the five cells ($0.059$).}
+column is the raw paired McNemar $p$ for tube-only vs.\ point-target
+(Holm adjustment over the five cells raises the two smallest p-values to
+$0.059$, above $0.05$).}
 \label{tab:shared}
 \setlength{\tabcolsep}{2.5pt}
 \begin{tabular}{@{}lccccc@{}}
 \toprule
-$(t,s)$ cell & full & \shortstack{tube-\\only} & \shortstack{candidate-\\set-only} & \shortstack{point-\\target} & $p$ \\
+$(t,s)$ cell & full & \shortstack{tube-\\only} & \shortstack{candidate-\\set-only} & \shortstack{point-\\target} & $p_{\mathrm{raw}}$ \\
 \midrule
 $(0,0.1)$ & $59.2$ & $65.3$ & $59.2$ & $54.1$ & $0.013$ \\
 $(0,0.2)$ & $32.7$ & $37.8$ & $32.7$ & $32.7$ & $0.180$ \\
