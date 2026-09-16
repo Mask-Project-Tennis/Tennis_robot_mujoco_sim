@@ -34,6 +34,7 @@ from pathlib import Path
 
 import matplotlib
 matplotlib.use("Agg")
+import matplotlib.patheffects as pe
 import matplotlib.pyplot as plt
 from matplotlib.ticker import FormatStrFormatter
 import numpy as np
@@ -127,10 +128,15 @@ def fmt_pv(p: float) -> str:
     return "<0.001" if p < 0.001 else f"{p:.3f}"
 
 
-def save(fig, name: str) -> None:
-    """保存图到输出目录（原生尺寸，无 tight bbox 以保持字号恒定）。"""
+def save(fig, name: str, dpi: int = 300) -> None:
+    """保存图到输出目录（原生尺寸，无 tight bbox 以保持字号恒定）。
+
+    dpi 只影响位图类面板的嵌入分辨率（矢量文字/线条不受影响）：默认 300；
+    实景 hero 这类「源渲染就是高分辨率」的图用 600，避免 matplotlib 把渲染图
+    降采样到 300 dpi（渲染素材与画布同比例，1:1 嵌入不重采样）。
+    """
     OUT.mkdir(parents=True, exist_ok=True)
-    fig.savefig(OUT / name, dpi=300)
+    fig.savefig(OUT / name, dpi=dpi)
     plt.close(fig)
     print(f"已保存 {OUT / name}")
 
@@ -815,123 +821,126 @@ def _exp26_gains_ci(csv_path: Path, n_boot: int = 20000) -> dict:
 
 
 def fig5(stats: dict) -> None:
-    """Fig.5（能力与 TCP 限速代价）: (a) active-hit vs 球速（E1，Wilson CI）
-    (b) TCP 1.0 vs 1.8（E2）(c)(d) 速度×TCP 网格各档配对增益（exp26，vs 点目标）。
+    """Fig.5（能力与 TCP 限速代价）: (a) active-hit vs 球速（E1，Wilson CI）+ 限速档单点
+    (b) 速度 × TCP 网格各档配对增益（exp26，vs 点目标）。
 
     chat25 审稿意见：第 5 页 Fig.4+Fig.5 两个通栏横条组合「过于细长」→ 单栏化。
     原 (c) 18 根柱横跨 7.16 in，3.39 in 下每柱仅 ~0.15 in 不可读 → 按球速拆成
-    (c) 7 m/s / (d) 9 m/s 两个 9 柱面板（每柱 ~0.22 in，与旧版 ~0.24 in 基本一致）；
-    (a)(b) 原宽 ≈3.7/3.4 in，单栏整宽竖排后尺寸几乎不变，(b) 恢复独立 y 轴标签。
-    画布 7.16×2.57 → 3.39×6.31 in（手动 add_axes 定位；数据/统计/配色零改动）。"""
+    (c) 7 m/s / (d) 9 m/s 两个 9 柱面板；(a)(b) 单栏整宽竖排。
+    画布 7.16×2.57 → 3.39×6.31 in（手动 add_axes 定位；数据/统计/配色零改动）。
+
+    chat27 审稿意见（图太多太密、缺实景故事图）→ 本图瘦身 2.44 in 给新 Fig.3 实景图：
+    旧的 4 面板 6.24 in → 2 面板 3.80 in——(b) 两根柱折进 (a)（同 x 上下两点 +
+    配对差箭头），(c)(d) 合并为 9 槽配对点图（同一槽内 7 / 9 m/s 两枚标记相连）。
+    18 个增益值、84.4/35.9/−48.7 等数字一个不少，配色与统计量（配对 bootstrap CI）不变。"""
     e1 = stats["E1_speed_sweep"]
     speeds = sorted(int(k) for k in e1)
     rates = [e1[str(s)]["rate"] for s in speeds]
     errs = [ci_half(e1[str(s)]) for s in speeds]
 
-    # chat25：完全手动 axes 定位（gridspec hspace 列表在本机 matplotlib 不支持；
-    # constrained_layout 覆盖 gridspec top；tight_layout 与本图轴不兼容——均渲染
-    # 检测实证，手动坐标最确定）。画布 4.7→6.42 in：自下而上 (d) 0.98、(c) 0.98、
-    # (b) 0.75、(a) 0.80 in；行间隙 0.67/0.67 in 为实测值——(a)/(c) 轴底装饰
-    # （刻度+轴标签）实测伸到轴下 29.6 pt，下一行标题伸到轴顶上方 ~15.5 pt；
-    # 底部 0.45 in 防 (d) 的 xlabel 被画布裁掉（原 0.26 in 裁 11 pt）；顶部 0.52 in
-    # 留给「图例+(a) 标题」。
-    # chat25 跟进（二次校平）：面板净空实测 (a)→(b) 3.4 / (b)→(c) 12.2 / (c)→(d)
-    # 3.4 pt——(b) 无 x 轴标签（只有单行刻度），故 (b)→(c) 多出的 ~9 pt 是全图唯一
-    # 空带（审稿指出「b 与 c 之间偏疏」）。只收紧这一处：(a)(b) 的 y0 上移 0.107 in
-    # 且画布同幅缩短，(c)(d)/顶部图例带/底部边距全部不动 → 净空 12.2→4.3 pt，与
-    # 另两处齐平。另把 (a)/(b) 面板略收（0.80→0.76 / 0.75→0.72 in，约 −4.7 pt）：
-    # 两面板留白本就富余，收后画布 6.42→6.24 in，为 Fig.4 加高腾出末页预算。
-    FW, FH = 3.39, 6.24
+    # chat27 审稿意见：数据图密度过高、缺少一张「有故事」的实景图 → 本图腾出空间
+    # 给新的 Fig.3 实景 hero（省 ~176 pt）。两处改动：
+    #   1) 旧的 (b)「84.4% vs 35.9%」两根柱折进 (a)：限速代价直接标在能力曲线同一
+    #      坐标里（同 7 m/s 的上下两点 + 配对差箭头），既省一个面板又更直观；
+    #   2) 旧的 (c)/(d)（7 m/s、9 m/s 各 9 柱）合并为一个 9 槽配对点图：同一槽内
+    #      7 m/s（圆）与 9 m/s（三角）两枚标记用细线相连 → 18 个数值一个不少，
+    #      而每槽宽 0.317 in 是旧版 18 柱横排（0.15 in/柱）的两倍。
+    FW, FH = 3.39, 3.80
     fig = plt.figure(figsize=(FW, FH))
 
     def _box(y0_in: float, h_in: float) -> list[float]:
         """(x0, y0, w, h)：列向统一 0.44–3.29 in，纵向按英寸给。"""
         return [0.44 / FW, y0_in / FH, 2.85 / FW, h_in / FH]
 
-    axes = [fig.add_axes(_box(4.96, 0.76)),   # (a)
-            fig.add_axes(_box(3.57, 0.72)),   # (b)
-            fig.add_axes(_box(2.10, 0.98)),   # (c)
-            fig.add_axes(_box(0.45, 0.98))]   # (d)
-    ax = axes[0]
+    # 自下而上：底边距 0.45（放合并面板的 xlabel+刻度）→ 合并面板 1.30 →
+    # 行间隙 0.67（实测：下方面板轴底装饰 29.6 pt + 上方标题 15.5 pt ≈ 45 pt）
+    # → (a) 0.86 → 顶部 0.52（共享图例 + (a) 标题）
+    ax_a = fig.add_axes(_box(2.42, 0.86))
+    ax_b = fig.add_axes(_box(0.45, 1.30))
+
+    # ── (a) 能力曲线 + 限速档单点（原 (b) 面板折入此处） ──
+    ax = ax_a
     # 中性深灰：单序列实验条件不占机制配色（绿=full 档，见 figs 6/7）
     # chat12 审稿意见：图例补明曲线对应的配置（默认 sweep 跑的就是 full 档）
     # chat14：图例缩短——原 "Full configuration, default limits (TCP 1.8 m/s)"
     # 在 2.4 in 宽面板里越界压到 (b)（审稿意见 P7），配置全称移到图注
     ax.errorbar(speeds, rates, yerr=errs, color="#4D4D4D", marker="o", capsize=2.5,
                 lw=1.0, label="full config., default limits")
+    e2 = stats["E2_limit_cost"]
+    v18, v10 = e2["TCP1.8"]["rate"], e2["TCP1.0"]["rate"]
+    lo10, hi10 = e2["TCP1.0"]["ci95"]
+    ax.errorbar([7], [v10], yerr=[[v10 - lo10], [hi10 - v10]], fmt="s", ms=4.0,
+                mfc="none", mec="#6B6B6B", ecolor="#6B6B6B", capsize=2.5, lw=0.9,
+                label="TCP 1.0 m/s cap")
+    # 两个速率数值直接标在点旁（原 (b) 面板的柱顶百分比，去掉柱后仍需可读）
+    ax.text(6.88, v18, f"{v18:.1f}", ha="right", va="center", fontsize=6.5,
+            color="0.25")
+    ax.text(6.88, v10, f"{v10:.1f}", ha="right", va="center", fontsize=6.5,
+            color="0.25")
+    paired = e2.get("paired_TCP10_vs_TCP18", {})
+    d_pp = paired.get("diff_pp", v10 - v18)
+    # 同 x 两点的配对差：竖直双箭头 + 数值（读者不必读正文即可取用这一结论）
+    ax.annotate("", xy=(7.28, v10), xytext=(7.28, v18),
+                arrowprops=dict(arrowstyle="<->", lw=0.8, color="0.35",
+                                shrinkA=1, shrinkB=1))
+    ax.text(7.45, 0.5 * (v10 + v18), f"${d_pp:+.1f}$ pp", fontsize=7,
+            va="center", ha="left", color="0.2")
     ax.set_xlabel("Ball speed (m/s)")
     ax.set_ylabel("Hit rate (%)")
-    ax.set_ylim(0, 105)
+    ax.set_ylim(0, 108)
     ax.set_title("(a) Hit rate vs. ball speed", fontsize=9)
-    ax.legend(loc="lower left", framealpha=0.9)
+    ax.legend(loc="lower right", framealpha=0.9, fontsize=7.5)
     style_ax(ax)
 
-    ax = axes[1]
-    e2 = stats["E2_limit_cost"]
-    keys = ["TCP1.8", "TCP1.0"]
-    vals = [e2[k]["rate"] for k in keys]
-    errs = [ci_half(e2[k]) for k in keys]
-    ns = [e2[k]["n_valid"] for k in keys]
-    # 中性灰阶：限速档不是方法档，不复用四档配色语义
-    ax.bar(np.arange(2), vals, yerr=errs, capsize=3, width=0.5,
-           color=["#6B6B6B", "#BFBFBF"], alpha=0.95)
-    # 柱顶数值 + 配对差值（judge 意见：面板须自含结论，读者不看正文也能读）
-    # chat9 审稿意见：柱顶百分比与顶部配对差值的间距需要拉开，故抬高 y 上限
-    for i in range(2):
-        ax.text(i, vals[i] + errs[i] + 2.5, f"{vals[i]:.1f}%", ha="center",
-                fontsize=8)
-    # n 并入类别刻度（保持柱顶只放数值）
-    ax.set_xticks(np.arange(2),
-                  [f"TCP 1.8 ($n$={ns[0]})", f"TCP 1.0 ($n$={ns[1]})"])
-    # 配对差值（TCP1.0 − TCP1.8，与正文 −48.7 pp 同源）；缺失时退化为边际差
-    paired = e2.get("paired_TCP10_vs_TCP18", {})
-    d_pp = paired.get("diff_pp")
-    if d_pp is None:
-        d_pp = vals[1] - vals[0]
-    ax.text(0.5, 0.90, f"paired diff ${d_pp:+.1f}$ pp", ha="center", va="top",
-            transform=ax.transAxes, fontsize=7.5)
-    # chat25：竖排后 (a)(b) 不再中缝相邻，(b) 恢复独立 y 轴标签（面板自含）
-    ax.set_ylabel("Hit rate (%)")
-    ax.set_ylim(0, 116)
-    ax.set_title("(b) Robot-derived TCP constraint set (7 m/s)", fontsize=9)
-    style_ax(ax)
-
-    # (c)(d) 反转区域：exp26 {7,9} m/s × {1.0,1.4,1.8} 网格，每格三档配对增益
-    # （vs 点目标）。chat25：18 柱横排在 3.39 in 下不可读 → 按球速拆成两个
-    # 9 柱面板（柱宽 0.62、三柱一组、组距 3 的几何与旧版逐柱一致）；横轴组标签
-    # 只写 TCP 上限（球速已入面板标题），共享 y 限 −34..44 保证两面板可直比。
+    # ── (b) 速度 × cap 网格的配对增益（7 / 9 m/s 同一槽内相连） ──
+    # chat14 P6：每格每档补配对 bootstrap 95% CI 误差棒（原只有点估计）
+    # chat25：18 柱横排在 3.39 in 下不可读（0.15 in/柱）→ chat27 改为配对点图，
+    # 槽宽回到 0.317 in；面板加高到 1.30 in 让两枚标记拉开（9~21 pp ≈ 10~22 pt）。
     gains = _exp26_gains_ci(DATA / "exp26_tcp_grid" / "results.csv")
     tiers = [("full", "full"), ("tube_only", "corridor-only"),
              ("softmin_only", "candidate-set-only")]
     tcps = (1.0, 1.4, 1.8)
+    from matplotlib.lines import Line2D
     from matplotlib.patches import Patch
-    for spi, spd in enumerate((7.0, 9.0)):
-        ax = axes[2 + spi]
-        for ci, tcp in enumerate(tcps):
-            x0 = ci * 3
-            for ti, (key, _) in enumerate(tiers):
-                v, lo, hi = gains[(spd, tcp)][key]
-                # chat14 P6：每格每档补配对 bootstrap 95% CI 误差棒（原只有点估计）
-                ax.bar(x0 + ti, v, 0.62, color=C[key], alpha=0.9,
-                       yerr=[[v - lo], [hi - v]], capsize=1.3,
-                       error_kw=dict(lw=0.7, ecolor="0.25"))
-                ax.text(x0 + ti, hi + 0.8 if v >= 0 else lo - 0.8, f"{v:+.0f}",
-                        ha="center", va="bottom" if v >= 0 else "top", fontsize=7)
-        ax.axhline(0, color="gray", lw=0.7, ls="--")
-        ax.set_xticks([ci * 3 + 1 for ci in range(3)],
-                      [f"{tcp:.1f}" for tcp in tcps])
-        ax.set_xlabel("TCP cap (m/s)")
-        ax.set_ylabel("Gain (pp)")
-        # chat25：ylim 下沿由 −34 放到 −48——负增益柱的数值标注标在 CI 下端下方
-        # （lo−0.8），7×1.0 的 CI 下沿约 −41，原下沿会把它挤出轴外压住刻度标签
-        # （渲染检测实证；旧通栏版同样外露但面板高、未相撞）。两面板同窗保证可直比。
-        ax.set_ylim(-48, 44)
-        # chat14 P6：面板名去「反转区域」的因果暗示，只陈述已测设置下的增益
-        ax.set_title(f"({('c', 'd')[spi]}) Gain at {spd:g} m/s", fontsize=9)
-        style_ax(ax)
-    # chat25：拆分后 (c) 右端 1.8 组为负增益、(d) 左下 1.0 组有小负值，面板内任何
-    # 角落位图例都会与数值标注相撞（渲染检测实证）→ 三档图例提升为图顶共享，
-    # 锚在顶部预留带内（0.993），避免压 (a) 标题或越出画布被裁。
+    ax = ax_b
+    for ci, tcp in enumerate(tcps):
+        for ti, (key, _lab) in enumerate(tiers):
+            xc = ci * 3 + ti
+            v7, lo7, hi7 = gains[(7.0, tcp)][key]
+            v9, lo9, hi9 = gains[(9.0, tcp)][key]
+            ax.plot([xc - 0.17, xc + 0.17], [v7, v9], color="0.55", lw=0.8, zorder=2)
+            ax.errorbar([xc - 0.17], [v7], yerr=[[v7 - lo7], [hi7 - v7]], fmt="o",
+                        ms=3.4, color=C[key], capsize=1.2, elinewidth=0.7,
+                        ecolor="0.25", zorder=3)
+            ax.errorbar([xc + 0.17], [v9], yerr=[[v9 - lo9], [hi9 - v9]], fmt="^",
+                        ms=3.8, color=C[key], capsize=1.2, elinewidth=0.7,
+                        ecolor="0.25", zorder=3)
+            # 数值标注：7 m/s 标在 CI 下端下方、9 m/s 标在上端上方 → 天然错开不相撞
+            ax.text(xc - 0.17, lo7 - 1.1, f"{v7:+.0f}", ha="center", va="top",
+                    fontsize=6.5)
+            ax.text(xc + 0.17, hi9 + 1.1, f"{v9:+.0f}", ha="center", va="bottom",
+                    fontsize=6.5)
+    ax.axhline(0, color="gray", lw=0.7, ls="--")
+    ax.set_xticks([ci * 3 + 1 for ci in range(3)],
+                  [f"{tcp:.1f}" for tcp in tcps])
+    ax.set_xlim(-0.75, 8.75)
+    ax.set_xlabel("TCP cap (m/s)")
+    ax.set_ylabel("Gain (pp)")
+    # chat25：ylim 下沿 −48——负增益的数值标注写在 CI 下端下方，7×1.0 的 CI 下沿
+    # 约 −33，标注到 −34 仍在轴内（渲染检测实证）。
+    ax.set_ylim(-46, 40)
+    # chat14 P6：面板名去「反转区域」的因果暗示，只陈述已测设置下的增益
+    ax.set_title("(b) Gain vs. TCP cap", fontsize=9)
+    ax.legend(handles=[Line2D([], [], marker="o", ls="", ms=3.4, color="0.3",
+                              label="7 m/s"),
+                       Line2D([], [], marker="^", ls="", ms=3.8, color="0.3",
+                              label="9 m/s")],
+              # 左上角会压住 1.0 组 9 m/s 的数值标注（"+15" 被图例框盖住，渲染实证），
+              # 右下角在 1.8 组下方是空区（该组最低标注 −3 的 CI 下端 ≈ −14）
+              loc="lower right", ncol=2, fontsize=7, framealpha=0.9, borderpad=0.25,
+              handlelength=0.8, handletextpad=0.3, columnspacing=0.9)
+    style_ax(ax)
+    # chat25：三档图例提升为图顶共享，锚在顶部预留带内（0.993），避免压 (a) 标题
     fig.legend(handles=[Patch(facecolor=C[k], label=lab, alpha=0.9)
                         for k, lab in tiers],
                loc="upper center", bbox_to_anchor=(0.5, 0.99), ncol=3,
@@ -1420,8 +1429,75 @@ def tables(stats: dict, out_dir: Path | None = None) -> None:
 # 入口
 # =============================================================================
 
+def fig3_hero(render_png: Path | None = None, meta_json: Path | None = None) -> None:
+    """Fig.3: 一次挥拍的实景分解 —— 3D 实景 + 球轨迹残影 + 整臂多帧残影 + 走廊/窗口。
+
+    chat27 审稿意见：数据图密度过高、缺少「球在空中走 → 手臂怎么移动 → 恰好击打」
+    的那张图。本图顶替旧的 2D 走廊示意（`fig3_alt_2d.pdf`），并把旧图的定量信息
+    一并带上：走廊 = 半径 0.12 m 的**三维容差管**（代价罚的是三维垂直距离
+    ‖P⊥(p_ee − p_ref)‖，几何上是绕球线的圆柱而非平面带），管内候选窗口（±50 ms）
+    用橙色球段标出，参考点（预测最优候选步的球位置）与真实接触分别用圆/星标出。
+
+    实景图由 `scripts/tools/render_swing_hero.py` 渲染（输出 PNG + 关键点像素 JSON），
+    本函数只做矢量标注与版面合成，图内文字因此与全文其余图同字体（STIX/Times）。
+    """
+    render_png = render_png or OUT / "fig3_swing_hero_render.png"
+    meta_json = meta_json or OUT / "fig3_swing_hero_render.json"
+    if not render_png.exists() or not meta_json.exists():
+        print(f"跳过 Fig.3 hero：缺少渲染素材 {render_png.name} / {meta_json.name}"
+              "（先跑 scripts/tools/render_swing_hero.py）")
+        return
+    meta = json.loads(meta_json.read_text(encoding="utf-8"))
+    img = plt.imread(render_png)
+    W, H = int(meta["width"]), int(meta["height"])
+    px = {k: v for k, v in meta["px"].items() if v is not None}
+
+    fig = plt.figure(figsize=(3.387, 3.00))
+    ax = fig.add_axes([0.0, 0.0, 1.0, 1.0])
+    ax.imshow(img, extent=(0, W, H, 0), interpolation="bilinear", zorder=0)
+    ax.set_xlim(0, W)
+    ax.set_ylim(H, 0)
+    ax.set_axis_off()
+
+    def halo(txt: str, xy: tuple[float, float], *, color: str = "k",
+             size: float = 7.0, ha: str = "left", va: str = "center",
+             weight: str = "normal") -> None:
+        """带白色描边的图内文字（压在渲染图上仍可读）。"""
+        ax.text(*xy, txt, fontsize=size, ha=ha, va=va, color=color, zorder=6,
+                weight=weight, path_effects=[
+                    pe.withStroke(linewidth=2.0, foreground="white")])
+
+    # 参考点（预测最优候选步的球位置 = 走廊轴过点）与真实接触
+    ax.scatter(*px["reference_ball"], s=34, marker="o", facecolors="none",
+               edgecolors="white", linewidths=1.5, zorder=5)
+    ax.scatter(*px["reference_ball"], s=34, marker="o", facecolors="none",
+               edgecolors="black", linewidths=0.7, zorder=5.1)
+    ax.scatter(*px["contact_ball"], s=70, marker="*", facecolors="black",
+               edgecolors="white", linewidths=0.7, zorder=6)
+    halo("contact", (px["contact_ball"][0] + 18, px["contact_ball"][1] - 6))
+    halo("reference", (px["reference_ball"][0] - 12, px["reference_ball"][1] + 34),
+         ha="right")
+
+    # 走廊管与候选窗口的引线标注：位置按画幅比例给（渲染分辨率可换而不必改代码；
+    # 实测教训：写死像素锚点在换渲染尺寸后会把右端标签挤出画布被裁）
+    ax.annotate("corridor ($\\pm0.12$ m)", xy=(0.606 * W, 0.535 * H),
+                xytext=(0.624 * W, 0.631 * H), fontsize=7.0, ha="center",
+                va="center", zorder=6,
+                path_effects=[pe.withStroke(linewidth=2.2, foreground="white")],
+                arrowprops=dict(arrowstyle="-", lw=0.7, color="white",
+                                shrinkA=2, shrinkB=3, alpha=0.9))
+    ax.annotate("candidate window ($\\pm50$ ms)",
+                xy=(0.695 * W, 0.503 * H), xytext=(0.981 * W, 0.556 * H),
+                fontsize=7.0, ha="right", va="center", zorder=6,
+                path_effects=[pe.withStroke(linewidth=2.2, foreground="white")],
+                arrowprops=dict(arrowstyle="-", lw=0.7, color="white",
+                                shrinkA=2, shrinkB=3, alpha=0.9))
+
+    save(fig, "fig3_swing_hero.pdf", dpi=600)
+    print(f"已保存 {OUT / 'fig3_swing_hero.pdf'} （实景 hero 版，{W}x{H} px 渲染，600 dpi 嵌入）")
+
+
 def main() -> None:
-    """按 --fig 参数生成图表。"""
     global OUT
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--fig", nargs="*", default=["3", "3alt", "4", "5", "6", "7", "8", "table"])
@@ -1440,6 +1516,8 @@ def main() -> None:
         fig3_3d()
     if "3alt" in want:
         fig3_alt_2d()
+    if "3hero" in want:
+        fig3_hero()
     if "4" in want:
         fig4()
     if "5" in want:

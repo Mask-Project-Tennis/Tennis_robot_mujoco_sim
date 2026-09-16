@@ -1,0 +1,65 @@
+{
+ "view": "x+",
+ "azimuth": -42.0,
+ "elevation": -24.0,
+ "distance": 1.6,
+ "fovy": 45.0,
+ "lookat": [
+  -0.68,
+  -0.4,
+  0.98
+ ],
+ "width": 2032,
+ "height": 1800,
+ "k_ref": 180,
+ "hit_step": 177,
+ "window": [
+  170,
+  190
+ ],
+ "ball_speed": 9.0,
+ "n_ghost_slots": 49,
+ "n_strobe": 5,
+ "arm_ghosts": [
+  [
+   -120,
+   0.3
+  ],
+  [
+   -60,
+   0.45
+  ],
+  [
+   -20,
+   0.6
+  ]
+ ],
+ "with_corridor": true,
+ "with_line": true,
+ "px": {
+  "reference_ball": [
+   916.7,
+   1086.04
+  ],
+  "contact_ball": [
+   1063.13,
+   1007.98
+  ],
+  "contact_tcp": [
+   990.08,
+   985.49
+  ],
+  "window_start": [
+   1364.41,
+   857.0
+  ],
+  "window_end": [
+   335.98,
+   1418.84
+  ],
+  "shoulder": [
+   418.96,
+   376.87
+  ]
+ }
+}
