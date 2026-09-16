@@ -822,7 +822,7 @@ def fig5(stats: dict) -> None:
     原 (c) 18 根柱横跨 7.16 in，3.39 in 下每柱仅 ~0.15 in 不可读 → 按球速拆成
     (c) 7 m/s / (d) 9 m/s 两个 9 柱面板（每柱 ~0.22 in，与旧版 ~0.24 in 基本一致）；
     (a)(b) 原宽 ≈3.7/3.4 in，单栏整宽竖排后尺寸几乎不变，(b) 恢复独立 y 轴标签。
-    画布 7.16×2.57 → 3.39×4.7 in（constrained_layout；数据/统计/配色零改动）。"""
+    画布 7.16×2.57 → 3.39×6.31 in（手动 add_axes 定位；数据/统计/配色零改动）。"""
     e1 = stats["E1_speed_sweep"]
     speeds = sorted(int(k) for k in e1)
     rates = [e1[str(s)]["rate"] for s in speeds]
@@ -831,19 +831,25 @@ def fig5(stats: dict) -> None:
     # chat25：完全手动 axes 定位（gridspec hspace 列表在本机 matplotlib 不支持；
     # constrained_layout 覆盖 gridspec top；tight_layout 与本图轴不兼容——均渲染
     # 检测实证，手动坐标最确定）。画布 4.7→6.42 in：自下而上 (d) 0.98、(c) 0.98、
-    # (b) 0.75、(a) 0.80 in；行间隙 0.67/0.60/0.67 in 为实测值——(a)/(c) 轴底装饰
-    # （刻度+轴标签）实测伸到轴下 29.6 pt，下一行标题伸到轴顶上方 ~15.5 pt，
-    # 原 0.48 in 间隙实测重叠 10.6/5.5 pt（渲染检测）；底部 0.45 in 防 (d) 的
-    # xlabel 被画布裁掉（原 0.26 in 裁 11 pt）；顶部 0.52 in 留给「图例+(a) 标题」。
-    FW, FH = 3.39, 6.42
+    # (b) 0.75、(a) 0.80 in；行间隙 0.67/0.67 in 为实测值——(a)/(c) 轴底装饰
+    # （刻度+轴标签）实测伸到轴下 29.6 pt，下一行标题伸到轴顶上方 ~15.5 pt；
+    # 底部 0.45 in 防 (d) 的 xlabel 被画布裁掉（原 0.26 in 裁 11 pt）；顶部 0.52 in
+    # 留给「图例+(a) 标题」。
+    # chat25 跟进（二次校平）：面板净空实测 (a)→(b) 3.4 / (b)→(c) 12.2 / (c)→(d)
+    # 3.4 pt——(b) 无 x 轴标签（只有单行刻度），故 (b)→(c) 多出的 ~9 pt 是全图唯一
+    # 空带（审稿指出「b 与 c 之间偏疏」）。只收紧这一处：(a)(b) 的 y0 上移 0.107 in
+    # 且画布同幅缩短，(c)(d)/顶部图例带/底部边距全部不动 → 净空 12.2→4.3 pt，与
+    # 另两处齐平。另把 (a)/(b) 面板略收（0.80→0.76 / 0.75→0.72 in，约 −4.7 pt）：
+    # 两面板留白本就富余，收后画布 6.42→6.24 in，为 Fig.4 加高腾出末页预算。
+    FW, FH = 3.39, 6.24
     fig = plt.figure(figsize=(FW, FH))
 
     def _box(y0_in: float, h_in: float) -> list[float]:
         """(x0, y0, w, h)：列向统一 0.44–3.29 in，纵向按英寸给。"""
         return [0.44 / FW, y0_in / FH, 2.85 / FW, h_in / FH]
 
-    axes = [fig.add_axes(_box(5.10, 0.80)),   # (a)
-            fig.add_axes(_box(3.68, 0.75)),   # (b)
+    axes = [fig.add_axes(_box(4.96, 0.76)),   # (a)
+            fig.add_axes(_box(3.57, 0.72)),   # (b)
             fig.add_axes(_box(2.10, 0.98)),   # (c)
             fig.add_axes(_box(0.45, 0.98))]   # (d)
     ax = axes[0]
@@ -1048,11 +1054,17 @@ def fig6(stats: dict) -> None:
     原 2×2 每个面板宽 ≈3.4 in（本已 ≈ 单栏 \columnwidth 3.39 in），改为 4×1 竖排后
     各面板尺寸、热图格子与字号（9/7.5 pt）与旧版一致；画布 7.16×2.45 → 3.39×4.5 in。
     数据/统计/配色零改动（数字守恒）。
+
+    chat25 跟进（第 5 页版式二次校平）：4.5 in 下四面板轴高实测仅 ≈35 pt，两张 5 行
+    热图光栅 33.6 pt → 每行 6.7 pt 而格内标注 7.5 pt（字比行高、数字贴满格）= 审稿
+    所指「过度压缩」。画布加高到 3.39×5.15 in（+0.65 in；空间由题注精简 + Fig.5
+    收紧 + 末页余量腾出），tight_layout 按比例把新增空间分给四个轴 → 轴高 ≈46.7 pt、
+    热图行高 6.7→8.9 pt。数据/统计/配色仍零改动。
     """
     e3, e4, e7 = stats["E3_nominal"], stats["E4_grid"], stats["E7_corners"]
     # chat9 审稿意见：这是核心结果图，应获得更多面积（旧版 2.25 in 四子图明显变扁），
     # 面板标题缩短、方法/速度/单位移入坐标轴与图注
-    fig, axes = plt.subplots(4, 1, figsize=(3.39, 4.5))
+    fig, axes = plt.subplots(4, 1, figsize=(3.39, 5.30))
 
     def asym_err(v: dict) -> tuple[float, float]:
         """配对 bootstrap CI 的上下误差条（以 diff_pp 为基准）。"""
