@@ -1039,7 +1039,9 @@ def fig_realtime(stats: dict, timing_path: Path = DATA / "exp18_fig_assets/timin
     t = json.loads(Path(timing_path).read_text(encoding="utf-8"))
     sync, async_ = t["sync"], t["async"]
 
-    fig, axes = plt.subplots(1, 2, figsize=(7.16, 1.15),
+    # chat21 审稿意见：面板 (a) 的 6 行数值表上下压缩过度（行距 5.09 pt / 字号
+    # 7.5 pt，相邻行墨迹相接）→ 画布高度 1.15 → 1.45 in，行距同步放开。
+    fig, axes = plt.subplots(1, 2, figsize=(7.16, 1.45),
                             gridspec_kw={"width_ratios": [1.3, 1.7]})
 
     # (a) 数值表：只有 3 个点，表格比 log 坐标轴更紧凑也不误导
@@ -1059,15 +1061,16 @@ def fig_realtime(stats: dict, timing_path: Path = DATA / "exp18_fig_assets/timin
     # 标题已含 (a) 与单位，不再另起一行 "Replanning time (ms)"（与标题重复）；
     # 表头横线下移到标题降部以下（judge 意见：原 0.96 横线穿过标题括号/降部）
     ax.set_title("(a) Replanning time (ms)", fontsize=9)
-    ax.plot([0.07, 0.95], [0.90, 0.90], transform=ax.transAxes, lw=0.7,
+    ax.plot([0.07, 0.95], [0.93, 0.93], transform=ax.transAxes, lw=0.7,
             color="k")
-    # 面板压扁（1.34→1.15 in）后首行贴到表头横线：起点下移、行距略收
+    # 行位随画布加高重排：首行离表头横线 0.10 轴高、行距 0.152 轴高
+    # （实测 1.45 in 画布下行距 ≈ 8.8 pt，首行墨迹离横线 ≈ 2 pt）
     for i, (name, val) in enumerate(rows):
-        y = 0.80 - i * 0.140
+        y = 0.83 - i * 0.152
         ax.text(0.07, y, name, fontsize=7.5, va="center", transform=ax.transAxes)
         ax.text(0.93, y, f"{val:.1f}", fontsize=7.5, va="center", ha="right",
                 transform=ax.transAxes, color=C["none"] if val > 100 else "k")
-    ax.text(0.07, -0.02, "synchronous mode, 30 episodes; budget 150 ms/replan",
+    ax.text(0.07, -0.12, "synchronous mode, 30 episodes; budget 150 ms/replan",
             fontsize=6.8, va="top", transform=ax.transAxes, color="dimgray")
 
     # (b) 延迟超越概率 P(L > t)，对数纵轴（chat9 审稿意见：普通 CDF 把尾部压在
@@ -1227,28 +1230,13 @@ def tables(stats: dict, out_dir: Path | None = None) -> None:
                     *[f"12|s0.2|t0|{m}" for m in MODE_ORDER])]
     rows_all = rows12 + rows_grid + rows_corner
 
-    def ci_half_pp(kind: str, key: str) -> float:
-        """Wilson 95% CI 半宽（pp）。"""
-        src = {"E3": e3["cells"], "E4": e4["merged_20cell"],
-               "E7": e7["cells"]}[kind]
-        lo, hi = src[key]["ci95"]
-        return (hi - lo) / 2.0
-
-    # caption 的数字全部由 stats JSON 计算（与正文数字同源，避免手改失同步）
-    nom_hw = [ci_half_pp(k, key) for _, k, *keys in rows12 for key in keys]
-    gc_hw = [ci_half_pp(k, key)
-             for _, k, *keys in rows_grid + rows_corner for key in keys]
-    nom_n = [n_of(k, key) for _, k, *keys in rows12 for key in keys]
-
+    # chat21 审稿意见：题注压缩（自然句、去堆叠括号）。原先题注里那串由 stats
+    # JSON 算出的 Wilson 区间半宽已不再写进题注，相应计算一并删除
     lines = [r"\begin{table*}[t]", r"\centering",
-             r"\caption{Active-hit rate (\%) of the four configurations across conditions;",
-             r"$n$ = valid runs per configuration, given as the range across the four "
-             r"configurations (the perturbation-grid row pools its $20$ cells). Wilson 95\% "
-             r"intervals are "
-             f"$\\pm{min(nom_hw):.1f}$--${max(nom_hw):.1f}$ pp for the nominal rows "
-             f"($n{{=}}{min(nom_n)}$--${max(nom_n)}$) and "
-             f"$\\pm{min(gc_hw):.1f}$--${max(gc_hw):.1f}$ pp for the grid and corner rows; exact intervals are in the "
-             r"artifact.}",
+             r"\caption{Active-hit rate (\%) of the four configurations by "
+             r"condition; $n$ counts valid runs per configuration and is given "
+             r"as a range over the four (the perturbation-grid row pools its "
+             r"$20$ cells). Exact intervals are in the artifact.}",
              r"\label{tab:ablation}",
              r"\begin{tabular}{lccccrc}", r"\toprule",
              r"Condition & full & corridor-only & candidate-set-only & point-target & $n$ & Design \\",
@@ -1266,10 +1254,10 @@ def tables(stats: dict, out_dir: Path | None = None) -> None:
     # Table II：TCP 限速层内配对 p + 跨层配对 DiD
     # （chat15：DiD 三行通栏文本改对齐子表、caption 压短——表格更密）
     lines = [r"\begin{table}[t]", r"\centering",
-             r"\caption{Gain ({\upshape pp}) over the point-target baseline under "
-             r"the two TCP caps ($7$\,{\upshape m/s}, $n{=}394$ paired seeds; paired McNemar "
-             r"$p$, unadjusted). DiD: paired per-seed gain shift from TCP 1.8 to "
-             r"TCP 1.0 (bootstrap $95\%$ CI, sign-test $p$).}",
+             r"\caption{Paired gain ({\upshape pp}) over the point-target "
+             r"baseline at $7$\,{\upshape m/s} ($n{=}394$ seeds); $p$ is the "
+             r"unadjusted McNemar value. The lower block shifts each gain "
+             r"between the two caps.}",
              r"\label{tab:limits}",
              r"\setlength{\tabcolsep}{3.5pt}",
              r"\begin{tabular}{lcccr}", r"\toprule",
