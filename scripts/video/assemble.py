@@ -11,7 +11,7 @@
   * 慢放段右上标注倍速（0.25× / 0.5× / 0.10× playback）。
   * S5 实拍顶部条件条：变体名 + 12 m/s serve · same seed。
   * 字幕全段烧录（subtitles.srt，白字黑描边，位于动画黑条带上方）。
-  * S1 开头叠论文标题；S9 结尾匿名标题卡 + "Details in the submitted paper"。
+  * S1 开头叠论文标题；S9 结尾匿名标题卡（论文指引 + 匿名代码链接 + 复现欢迎语）。
 - 编码：H.264 yuv420p，CRF+VBV（默认 crf18 / maxrate 950k / bufsize 1900k），
   音频 AAC 64k，`-map_metadata -1` + faststart（双盲合规）。
 
@@ -52,6 +52,7 @@ FONT_R = str(FONT_DIR / "DejaVuSans.ttf")
 
 TITLE = ("Relaxing the Point Target: A Cost-Relaxation Framework "
          "for Robust Robotic Ball Hitting")
+ANON_URL = "https://anonymous.4open.science/r/Tennis_robot_789741"  # 与论文脚注同口径
 INK = (13, 15, 19)
 GREY_T = (222, 224, 229)
 
@@ -200,13 +201,14 @@ def title_layer() -> Image.Image:
 
 
 def card_frame(alpha: float) -> np.ndarray:
-    """S9 结尾匿名标题卡（alpha 0→1 渐入）。"""
+    """S9 结尾匿名标题卡（alpha 0→1 渐入）：标题 + 论文/匿名代码链接 + 复现欢迎语。"""
     img = Image.new("RGB", (W, H), (26, 27, 31))
     d = ImageDraw.Draw(img)
     a = int(255 * alpha)
     f1 = ImageFont.truetype(FONT_B, 34)
     f2 = ImageFont.truetype(FONT_R, 24)
-    f3 = ImageFont.truetype(FONT_R, 18)
+    f3 = ImageFont.truetype(FONT_R, 20)
+    f4 = ImageFont.truetype(FONT_R, 18)
     lines = ("Relaxing the Point Target:",
              "A Cost-Relaxation Framework for Robotic Ball Hitting")
     for i, ln in enumerate(lines):
@@ -214,7 +216,9 @@ def card_frame(alpha: float) -> np.ndarray:
         d.text(((W - (bb[2] - bb[0])) // 2, 250 + i * 52), ln, font=f1,
                fill=(255, 255, 255, a))
     for txt, f, y in (("Details in the submitted paper", f2, 420),
-                      ("Simulated in MuJoCo", f3, 640)):
+                      (f"Code & data: {ANON_URL}", f3, 460),
+                      ("Easy setup — reproduction welcome", f3, 496),
+                      ("Simulated in MuJoCo", f4, 640)):
         bb = d.textbbox((0, 0), txt, font=f)
         d.text(((W - (bb[2] - bb[0])) // 2, y), txt, font=f,
                fill=(*GREY_T, a))
