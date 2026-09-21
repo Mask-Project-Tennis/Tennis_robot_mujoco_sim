@@ -1,0 +1,222 @@
+{
+  "voice": "en-US-ChristopherNeural",
+  "rate": "-10%",
+  "head_gap_s": 0.3,
+  "segments": [
+    {
+      "sid": "S1",
+      "t0": 0.0,
+      "t1": 12.0,
+      "words": 15,
+      "dur": 7.42,
+      "mp3": "narration/S1.mp3",
+      "cues": [
+        [
+          0.0,
+          7.37,
+          "A dual-arm robot swings to return a fast serve, planned entirely by model predictive control."
+        ]
+      ]
+    },
+    {
+      "sid": "S2",
+      "t0": 12.0,
+      "t1": 26.0,
+      "words": 21,
+      "dur": 12.91,
+      "mp3": "narration/S2.mp3",
+      "cues": [
+        [
+          0.0,
+          7.942,
+          "Inside, iLQR solves a rolling optimization: a terminal hitting cost plus running costs."
+        ],
+        [
+          7.992,
+          12.86,
+          "We modify exactly two terms, each independently switchable."
+        ]
+      ]
+    },
+    {
+      "sid": "S3",
+      "t0": 26.0,
+      "t1": 46.0,
+      "words": 22,
+      "dur": 12.65,
+      "mp3": "narration/S3.mp3",
+      "cues": [
+        [
+          0.0,
+          2.25,
+          "First, the terminal cost."
+        ],
+        [
+          2.3,
+          5.7,
+          "Instead of one predicted contact point,"
+        ],
+        [
+          5.75,
+          12.6,
+          "it targets a plus-or-minus fifty-millisecond window of candidates, aggregated by a softmin."
+        ]
+      ]
+    },
+    {
+      "sid": "S4",
+      "t0": 46.0,
+      "t1": 59.0,
+      "words": 21,
+      "dur": 10.87,
+      "mp3": "narration/S4.mp3",
+      "cues": [
+        [
+          0.0,
+          6.161,
+          "Second, a tube around the predicted trajectory: free inside a twelve-centimeter half-width,"
+        ],
+        [
+          6.211,
+          10.82,
+          "a hinge penalty outside, and along-track slack is free."
+        ]
+      ]
+    },
+    {
+      "sid": "S5",
+      "t0": 59.0,
+      "t1": 87.0,
+      "words": 53,
+      "dur": 24.31,
+      "mp3": "narration/S5.mp3",
+      "cues": [
+        [
+          0.0,
+          6.83,
+          "Here is the same twelve-meter-per-second serve, same seed: point-target misses; the full method returns it."
+        ],
+        [
+          6.88,
+          12.334,
+          "Across ninety-eight seeds, the candidate window alone lifts the active-hit rate from"
+        ],
+        [
+          12.384,
+          16.004,
+          "fifty-three point one to eighty-five point seven percent,"
+        ],
+        [
+          16.054,
+          20.132,
+          "a paired gain of plus thirty-two point seven points;"
+        ],
+        [
+          20.182,
+          24.26,
+          "plus seventeen point four at nine meters per second."
+        ]
+      ]
+    },
+    {
+      "sid": "S6",
+      "t0": 87.0,
+      "t1": 102.0,
+      "words": 25,
+      "dur": 12.29,
+      "mp3": "narration/S6.mp3",
+      "cues": [
+        [
+          0.0,
+          6.832,
+          "Under a shared prediction bias, a twenty-cell perturbation grid at nine meters per second,"
+        ],
+        [
+          6.882,
+          12.24,
+          "the gap narrows: eighty-two point eight, versus seventy-three point nine percent."
+        ]
+      ]
+    },
+    {
+      "sid": "S7",
+      "t0": 102.0,
+      "t1": 129.0,
+      "words": 57,
+      "dur": 25.1,
+      "mp3": "narration/S7.mp3",
+      "cues": [
+        [
+          0.0,
+          5.675,
+          "But tighten the end-effector speed cap to one meter per second, seven-meter serves,"
+        ],
+        [
+          5.725,
+          9.638,
+          "three hundred ninety-four seeds, and the window turns harmful:"
+        ],
+        [
+          9.688,
+          13.601,
+          "minus eleven point nine points for the window alone,"
+        ],
+        [
+          13.651,
+          17.124,
+          "minus twelve point seven for the full stack."
+        ],
+        [
+          17.174,
+          21.087,
+          "The tube alone still gains plus five point eight."
+        ],
+        [
+          21.137,
+          25.05,
+          "Under this budget, widening the target does not help."
+        ]
+      ]
+    },
+    {
+      "sid": "S8",
+      "t0": 129.0,
+      "t1": 150.0,
+      "words": 34,
+      "dur": 20.4,
+      "mp3": "narration/S8.mp3",
+      "cues": [
+        [
+          0.0,
+          7.75,
+          "Main results freeze simulated time for the first plan: nine hundred twenty-eight milliseconds."
+        ],
+        [
+          7.8,
+          14.35,
+          "Steady-state replanning runs at a four-millisecond median, within the one-hundred-fifty-millisecond budget."
+        ],
+        [
+          14.4,
+          20.35,
+          "Without freezing, a nine-hundred-ninety-nine-millisecond plan leaves no time to swing."
+        ]
+      ]
+    },
+    {
+      "sid": "S9",
+      "t0": 150.0,
+      "t1": 165.0,
+      "words": 16,
+      "dur": 7.97,
+      "mp3": "narration/S9.mp3",
+      "cues": [
+        [
+          0.0,
+          7.92,
+          "Which relaxation helps depends on the available execution speed: cost design should follow the speed budget."
+        ]
+      ]
+    }
+  ]
+}
