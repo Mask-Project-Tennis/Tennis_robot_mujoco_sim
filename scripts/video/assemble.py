@@ -217,7 +217,7 @@ def card_frame(alpha: float) -> np.ndarray:
                fill=(255, 255, 255, a))
     for txt, f, y in (("Details in the submitted paper", f2, 420),
                       (f"Code & data: {ANON_URL}", f3, 460),
-                      ("Easy setup — reproduction welcome", f3, 496),
+                      ("One-command setup — reproduction welcome", f3, 496),
                       ("Simulated in MuJoCo", f4, 640)):
         bb = d.textbbox((0, 0), txt, font=f)
         d.text(((W - (bb[2] - bb[0])) // 2, y), txt, font=f,

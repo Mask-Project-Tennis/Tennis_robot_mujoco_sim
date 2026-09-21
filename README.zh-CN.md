@@ -14,6 +14,9 @@ RM-65 双臂机器人网球击打项目。使用 **MPC（模型预测控制）**
 
 ## 环境安装
 
+**一键安装：** `bash install.sh` —— 自动创建 conda 环境、安装依赖、编译可选 C++
+扩展，并跑一个单集冒烟测试（预期 `hit_type=active`）。幂等可重复运行；手动步骤如下。
+
 ```bash
 # 创建 conda 环境
 conda create -n mujoco_tennis python=3.11

@@ -21,6 +21,10 @@ communication, `rm_movej_follow`) with a three-layer safety architecture
 
 ## Environment Setup
 
+**One-command setup:** `bash install.sh` — creates the conda environment, installs
+the dependencies, builds the optional C++ extension, and runs a one-episode smoke
+test (`hit_type=active` expected). Idempotent; manual steps below.
+
 ```bash
 # Create the conda environment
 conda create -n mujoco_tennis python=3.11

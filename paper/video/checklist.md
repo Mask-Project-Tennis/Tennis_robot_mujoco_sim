@@ -70,6 +70,11 @@
     + "Easy setup — reproduction welcome"；成片 **165.0 s / 6.62 MB** 不变。措辞用
     Easy setup 而非 one-command（仓库暂无 install.sh，B 纪律诚实呈现；后续若加一键安装
     脚本可升级措辞）。
+  - **一键安装脚本 + 措辞升级（2026-09-22，用户拍板「做一个一键安装脚本」）**：
+    主仓新增 `install.sh`（conda 环境 → requirements → 可选 C++ 扩展（失败回退 NumPy）→
+    单集冒烟测试期 `hit_type=active`，幂等，本机实测通过）；README 中英双语 Environment
+    Setup 顶部加一键入口；结尾卡措辞 "Easy setup" → **"One-command setup — reproduction
+    welcome"**（此时措辞为真）。成片 **165.0 s / 6.64 MB**。
 - [ ] **粗剪全片用户审看**（唯一人工门）→ 精修意见回收
 
 ### Phase 5　合规与定稿（预计 1 h）
