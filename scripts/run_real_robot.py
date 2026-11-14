@@ -31,7 +31,6 @@ from src.real.adaptive_timer import AdaptiveTimer
 from src.real.ball_perceiver import BallPerceiver
 from src.real.ball_sensor import SimulatedBallSensor
 from src.real.config import RealRobotConfig
-from src.real.fake_robot import FakeRobot
 from src.real.real_runner import RealRunner
 from src.real.runner_factory import (
     INIT_Q,
@@ -41,6 +40,8 @@ from src.real.runner_factory import (
     build_solver,
 )
 from src.real.safety_monitor import SafetyMonitor
+from src.real.runner_factory import build_robot_arm
+from src.robot.robot_profile import RobotProfile, load_robot_profile
 
 logger = logging.getLogger(__name__)
 
@@ -51,11 +52,40 @@ _BALL_VEL_DIR /= float(np.linalg.norm(_BALL_VEL_DIR))
 _DEFAULT_CONFIG_PATH = Path(__file__).resolve().parent.parent / "configs" / "real_robot.yaml"
 
 
+def _resolve_profile(profile: RobotProfile | None) -> RobotProfile:
+    """解析并校验机器人描述（加载模型 + 名称绑定 + 运行能力校验）。
+
+    纯模型加载，不启动线程、不接触硬件；在任何驱动构造或
+    传感器启动之前调用，使配置错误尽早暴露。
+
+    Args:
+        profile: 显式描述；None 时加载默认 configs/robots/rm65.yaml。
+
+    Returns:
+        通过运行能力校验的 RobotProfile。
+
+    Raises:
+        ValueError: 描述非法或不受当前入口支持（仅 RM65）。
+    """
+    from src.real.runner_factory import validate_rm65_runtime
+    from src.robot.model_binding import bind_robot_model
+    from src.robot.robot_profile import default_rm65_profile_path
+    from src.utils.mujoco_loader import load_mujoco_model
+
+    if profile is None:
+        profile = load_robot_profile(default_rm65_profile_path())
+    model = load_mujoco_model(profile.model_path)
+    binding = bind_robot_model(profile, model)
+    validate_rm65_runtime(profile, binding)
+    return profile
+
+
 def create_runner(
     config: RealRobotConfig,
     mock: bool = True,
     ball_pos: np.ndarray | None = None,
     ball_vel: np.ndarray | None = None,
+    profile: RobotProfile | None = None,
 ) -> RealRunner:
     """组装 RealRunner 的全部依赖组件并返回。
 
@@ -66,10 +96,14 @@ def create_runner(
         mock: True 使用 FakeRobot；False 使用 RobotInterface（真机 SDK）。
         ball_pos: 初始球位置，默认 [0, -1.5, 1.8]（可达候选点）。
         ball_vel: 初始球速度，默认 ball_speed=3.0 m/s 沿 [0,2,1] 方向。
+        profile: 机器人描述；None 时加载默认 RM65 描述（行为与旧入口一致）。
 
     Returns:
         已组装但尚未 start 的 RealRunner 实例。
     """
+    # 0. 解析并校验机器人描述（在任何驱动构造/传感器启动之前）
+    profile = _resolve_profile(profile)
+
     if ball_pos is None:
         ball_pos = _DEFAULT_BALL_POS.copy()
     if ball_vel is None:
@@ -77,21 +111,17 @@ def create_runner(
     ball_pos = np.asarray(ball_pos, dtype=np.float64)
     ball_vel = np.asarray(ball_vel, dtype=np.float64)
 
-    # 1. 规划环境（位置模式）— dt/kp/kd 从 config 读取
-    env = PlanningEnv(dt=config.dt)
+    # 1. 规划环境（位置模式）— 模型路径来自已校验 profile；dt/kp/kd 从 config 读取
+    env = PlanningEnv(profile.model_path, dt=config.dt)
     env.init_q_left = INIT_Q_LEFT.copy()
     env.configure_actuator_mode("position", kp=config.kp, kd=config.kd)
     env.configure_feedforward(True)
     env.reset(INIT_Q)
     env.data.qpos[env.NQ : env.NQ + env.LEFT_ARM_NQ] = env.init_q_left
 
-    # 2. 机器人接口
-    if mock:
-        robot = FakeRobot(init_q=INIT_Q, dt=config.dt)
-    else:
-        from src.real.robot_interface import RobotInterface
-
-        robot = RobotInterface(config)
+    # 2. 机器人接口（工厂构造，不连接硬件）
+    robot = build_robot_arm(config, profile=profile, mock=mock, init_q=INIT_Q.copy())
+    if not mock:
         logger.info("create_runner: 使用真机接口 RobotInterface (mock=False)")
 
     # 3. 球传感器 + 启动
@@ -132,11 +162,11 @@ def create_runner(
         is_first_plan=True,
     )
 
-    # 9. 异步重规划器（静态注入 config/robot_limits/solver）
-    model_path = Path(__file__).resolve().parent.parent / "src" / "robot" / "rm65_model.xml"
+    # 9. 异步重规划器（静态注入 config/robot_limits/solver；
+    #    与环境引用同一已校验 profile.model_path）
     replanner = AsyncReplanner(
         env, do_replan, mpc_config, robot_limits, solver,
-        state=replan_state, model_path=model_path,
+        state=replan_state, model_path=profile.model_path,
     )
 
     # 10. 自适应定时器（100Hz 目标频率，匹配 SDK 实测吞吐上限）
@@ -156,8 +186,8 @@ def create_runner(
     )
 
 
-def _parse_args() -> argparse.Namespace:
-    """解析命令行参数。"""
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """解析命令行参数（argv 供测试注入）。"""
     parser = argparse.ArgumentParser(
         description="RM-65B 真机部署入口 — MPC+iLQR+Tube 网球击打主循环",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -167,6 +197,12 @@ def _parse_args() -> argparse.Namespace:
         type=str,
         default=str(_DEFAULT_CONFIG_PATH),
         help="真机配置 YAML 路径",
+    )
+    parser.add_argument(
+        "--robot-config",
+        type=str,
+        default=None,
+        help="机器人描述 YAML 路径（默认 configs/robots/rm65.yaml）",
     )
     parser.add_argument(
         "--mock",
@@ -190,11 +226,11 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="禁用可视化（兼容 V11 参数，真机入口暂不渲染）",
     )
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 def main() -> None:
-    """入口主函数：配置日志 → 构建 runner → 主循环 → 输出指标。"""
+    """入口主函数：配置日志 → 校验机器人描述 → 构建 runner → 主循环 → 输出指标。"""
     args = _parse_args()
 
     # 日志配置（单进程，force=True 覆盖可能存在的基本配置）
@@ -209,6 +245,15 @@ def main() -> None:
         args.mock, args.max_steps, args.ball_speed,
     )
 
+    # 机器人描述：显式 --robot-config 或默认 RM65。
+    # 在任何驱动构造/传感器/后台线程之前完成校验（重复一次纯模型加载，可接受）。
+    profile_arg: RobotProfile | None = None
+    if args.robot_config is not None:
+        profile_arg = load_robot_profile(Path(args.robot_config))
+    profile = _resolve_profile(profile_arg)
+    logger.info("机器人描述已校验: robot_id=%s model=%s",
+                profile.robot_id, profile.model_path)
+
     # 加载配置
     config = RealRobotConfig.from_yaml(args.config)
     logger.info("配置已加载: %s (dt=%.3f tcp=%.1f hit=%.1f)",
@@ -222,6 +267,7 @@ def main() -> None:
         config=config,
         mock=args.mock,
         ball_vel=ball_vel,
+        profile=profile,
     )
 
     # 主循环（max_steps 独立于规划时长 total_horizon，仅控制 episode 实际运行步数）
