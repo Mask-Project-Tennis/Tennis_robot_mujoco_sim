@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -33,6 +34,9 @@ from src.robot.constants import (
 if TYPE_CHECKING:
     # 仅类型检查期导入 MPCConfig，运行期用延迟导入打破与 mpc_controller 的循环依赖
     from src.ilqt.mpc_controller import MPCConfig
+    from src.real.robot_arm_protocol import RobotArmInterface
+    from src.robot.model_binding import ModelBinding
+    from src.robot.robot_profile import RobotProfile
 
 # 公开 API（显式声明 re-export，供 `from src.real.runner_factory import build_solver` 零改动）
 __all__ = [
@@ -46,7 +50,130 @@ __all__ = [
     "build_robot_limits",
     "build_solver",
     "build_real_robot_mpc_config",
+    "validate_rm65_runtime",
+    "build_robot_arm",
 ]
+
+# ── RM65 运行能力常量（与 src/robot/rm65_model.xml、configs/robots/rm65.yaml 对齐）──
+# 描述能力与运行能力分开：robot_profile 接受任何合法描述，
+# 本层校验当前入口实际可运行的机器人范围（阶段 1 仅 RM65）。
+_RM65_ROBOT_ID = "rm65"
+_RM65_ACTIVE_JOINTS = tuple(f"r_joint{i}" for i in range(1, 7))
+_RM65_ACTUATORS = tuple(f"torque_r_joint{i}" for i in range(1, 7))
+_RM65_HELD_JOINTS = tuple(f"l_joint{i}" for i in range(1, 7))
+_RM65_TCP_SITE = "racket_center"
+_RM65_MODEL_PATH = (
+    Path(__file__).resolve().parent.parent / "robot" / "rm65_model.xml"
+).resolve()
+
+
+def validate_rm65_runtime(
+    profile: "RobotProfile", binding: "ModelBinding"
+) -> None:
+    """校验描述与绑定满足当前入口的 RM65 运行能力。
+
+    Args:
+        profile: 机器人描述。
+        binding: 模型名称绑定结果。
+
+    Raises:
+        ValueError: 身份不是 rm65、名称与 RM65 期望不符、模型路径被替换、
+            或绑定布局不是既有 RM65 原布局（主动 0..5、保持 6..11、执行器 0..5）。
+    """
+    if profile.robot_id != _RM65_ROBOT_ID:
+        raise ValueError(
+            f"运行入口当前仅支持 RM65，不支持 robot_id={profile.robot_id!r}"
+        )
+    expected_names = (
+        (profile.active_joint_names, _RM65_ACTIVE_JOINTS, "active_joint_names"),
+        (profile.actuator_names, _RM65_ACTUATORS, "actuator_names"),
+        (profile.held_joint_names, _RM65_HELD_JOINTS, "held_joint_names"),
+    )
+    for actual, expected, field in expected_names:
+        if actual != expected:
+            raise ValueError(
+                f"字段 {field} 与 RM65 期望不符: {actual}（期望 {expected}）"
+            )
+    if profile.tcp_site_name != _RM65_TCP_SITE:
+        raise ValueError(
+            f"tcp_site_name 与 RM65 期望不符: {profile.tcp_site_name!r}"
+        )
+    if profile.model_path != _RM65_MODEL_PATH:
+        raise ValueError(
+            f"模型路径与 RM65 现有模型不符: {profile.model_path}"
+            f"（期望 {_RM65_MODEL_PATH}）"
+        )
+    # 布局校验：主动/执行器 0..5，保持 6..11
+    if (
+        binding.joint_ids != tuple(range(6))
+        or binding.qpos_indices != tuple(range(6))
+        or binding.qvel_indices != tuple(range(6))
+        or binding.actuator_ids != tuple(range(6))
+        or binding.held_qpos_indices != tuple(range(6, 12))
+        or binding.held_qvel_indices != tuple(range(6, 12))
+        or binding.tcp_site_id < 0
+    ):
+        raise ValueError(
+            f"绑定布局非 RM65 原布局（主动/执行器应 0..5、保持 6..11，"
+            f"实际 qpos={binding.qpos_indices}, 执行器={binding.actuator_ids}, "
+            f"保持={binding.held_qpos_indices}）"
+        )
+
+
+def build_robot_arm(
+    config: RealRobotConfig,
+    *,
+    profile: "RobotProfile",
+    mock: bool,
+    init_q: np.ndarray,
+) -> "RobotArmInterface":
+    """按描述构造机械臂驱动（RM65 真机或 FakeRobot Mock）。
+
+    只构造对象，不调用 connect（连接仍归原生命周期管理）。
+    真机路径会加载并绑定模型做完整运行校验（纯模型加载，
+    不启动线程、不接触硬件）。
+
+    Args:
+        config: 真机配置。
+        profile: 机器人描述。
+        mock: True 返回 FakeRobot；False 返回 RobotInterface。
+        init_q: 初始关节角度 (ndof,)，弧度。
+
+    Returns:
+        实现 RobotArmInterface 的驱动实例（未连接）。
+
+    Raises:
+        ValueError: init_q 长度与 profile.ndof 不符、含非有限值，
+            或 robot_id 不是当前支持的 rm65。
+    """
+    init_q = np.asarray(init_q, dtype=float)
+    if init_q.ndim != 1 or init_q.shape[0] != profile.ndof:
+        raise ValueError(
+            f"init_q 形状 {init_q.shape} 与自由度 {profile.ndof} 不符"
+        )
+    if not bool(np.all(np.isfinite(init_q))):
+        raise ValueError("init_q 含非有限值（NaN/Inf）")
+    # 身份前置检查：在加载模型/构造驱动之前拒绝不支持的机器人
+    if profile.robot_id != _RM65_ROBOT_ID:
+        raise ValueError(
+            f"运行入口当前仅支持 RM65 驱动，不支持 robot_id={profile.robot_id!r}"
+        )
+
+    if mock:
+        from src.real.fake_robot import FakeRobot
+
+        return FakeRobot(init_q=init_q.copy(), dt=config.dt)
+
+    from src.robot.model_binding import bind_robot_model
+    from src.utils.mujoco_loader import load_mujoco_model
+
+    model = load_mujoco_model(profile.model_path)
+    binding = bind_robot_model(profile, model)
+    validate_rm65_runtime(profile, binding)
+
+    from src.real.robot_interface import RobotInterface
+
+    return RobotInterface(config)
 
 
 def build_robot_limits(env: PlanningEnv, config: RealRobotConfig) -> RobotLimits:

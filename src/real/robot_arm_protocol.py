@@ -28,7 +28,8 @@ class RobotArmInterface(Protocol):
         """读取关节状态。
 
         Returns:
-            (12,) [q(6), qdot(6)]，弧度。与 RM65Env/RobotInterface 一致。
+            (2n,) [q(n), qdot(n)]，位置 rad、速度 rad/s。
+            当前实现 n=6（RM65 右臂），与 RM65Env/RobotInterface 一致。
         """
         ...
 
@@ -36,7 +37,7 @@ class RobotArmInterface(Protocol):
         """发送关节位置指令。
 
         Args:
-            q_desired: (6,) 目标关节角度，弧度。
+            q_desired: (n,) 目标关节角度，rad。当前实现 n=6（RM65 右臂）。
 
         Returns:
             状态码（0=成功）。
