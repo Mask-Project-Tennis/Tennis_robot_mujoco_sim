@@ -10,12 +10,11 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+# 沿用 tests/test_create_runner.py 的导入方式（scripts/ 加入 sys.path）
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+
 import numpy as np
 import pytest
-
-REPO_ROOT = Path(__file__).resolve().parent.parent
-# 沿用 tests/test_create_runner.py 的导入方式（scripts/ 加入 sys.path）
-sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 import run_real_robot
 from run_real_robot import create_runner
@@ -26,6 +25,8 @@ from src.robot.robot_profile import (
     default_rm65_profile_path,
     load_robot_profile,
 )
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 def _rm65_like_profile(robot_id: str) -> RobotProfile:

@@ -93,6 +93,8 @@ mujoco_sim/
 │   ├── robot/                         # 机器人模型定义
 │   │   ├── __init__.py
 │   │   ├── constants.py               # 共享常量（DT/INIT_Q/SHOULDER_POS/WORKSPACE_RADIUS/KP/KD，单一事实来源）
+│   │   ├── robot_profile.py           # RobotProfile 机器人描述加载器（configs/robots/*.yaml，纯配置层，不含数值参数）
+│   │   ├── model_binding.py           # ModelBinding 模型名称绑定器（名称→qpos/qvel/执行器地址，只接受标量关节）
 │   │   ├── rm65_model.xml             # MuJoCo XML 模型（双臂12DOF + 球拍 + 球）
 │   │   ├── model.xml                  # 旧版单臂模型（左臂装在右侧桩柱）
 │   │   ├── tennis_rbt.xml             # 自制网球机器人模型
@@ -186,6 +188,7 @@ mujoco_sim/
 │       └── noise.py                   # 噪声注入（观测/力矩/初始关节随机化，支持 per-axis std + Z clamp）
 ├── configs/
 │   ├── default.yaml                   # 默认超参数（时间步长、iLQR 参数、关节约束）
+│   ├── robots/rm65.yaml               # RM65 机器人描述（身份+模型路径+关节语义名称，无数值参数；阶段 1）
 │   ├── mpc.yaml                       # MPC 专用参数
 │   ├── v4_follow_through.yaml         # V4 随挥策略配置
 │   ├── v5_active_hit.yaml             # V5 主动击球配置
@@ -232,6 +235,10 @@ mujoco_sim/
 │   ├── test_task2_replan_config_elimination.py # ReplanConfig 消除验证（5 tests）
 │   ├── test_real_runner.py                 # RealRunner Mock 闭环测试
 │   ├── test_robot_interface.py             # RobotInterface SDK Mock 测试
+│   ├── test_robot_profile.py               # RobotProfile 描述加载器测试（19 tests，阶段 1）
+│   ├── test_model_binding.py               # ModelBinding 名称绑定器测试（11 tests，阶段 1）
+│   ├── test_robot_factory.py               # 驱动工厂/运行能力校验测试（10 tests，阶段 1）
+│   ├── test_robot_profile_entrypoint.py    # run_real_robot --robot-config 入口测试（4 tests，阶段 1）
 │   ├── test_safety_monitor.py              # SafetyMonitor 测试
 │   ├── test_fake_robot.py                  # FakeRobot Mock 测试
 │   ├── test_torque_to_position.py          # 力矩→位置积分器测试
@@ -410,6 +417,7 @@ mujoco_sim/
 - 位置模式仿真: `python scripts/rm65_mpc_v12.py --serve-box --ball-speed 7 --position-mode`
 - 离线测试: `python scripts/rm65_mpc_v12.py --serve-box --ball-speed 9`
 - 真机限位部署: 追加 `--limits-config configs/real_robot.yaml`（TCP 1.0 m/s；默认仿真用 TCP 1.8）
+- 真机入口机器人描述: 追加 `--robot-config configs/robots/rm65.yaml`（默认即此文件，显式与缺省行为一致；阶段 1 仅支持 RM65）
 - TCP 软惩罚实验: 追加 `--Q-tcp-soft 5000`（默认 0 禁用）
 - 关节安全扫描: `python scripts/scan_joint_safety.py`
 - 运行测试: `pytest tests/`
