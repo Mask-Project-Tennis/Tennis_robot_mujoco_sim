@@ -30,13 +30,14 @@ from src.robot.constants import (
     SHOULDER_POS,
     WORKSPACE_RADIUS,
 )
+from src.robot.model_binding import ModelBinding, bind_robot_model
+from src.robot.robot_profile import RobotProfile
+from src.utils.mujoco_loader import load_mujoco_model
 
 if TYPE_CHECKING:
     # 仅类型检查期导入 MPCConfig，运行期用延迟导入打破与 mpc_controller 的循环依赖
     from src.ilqt.mpc_controller import MPCConfig
     from src.real.robot_arm_protocol import RobotArmInterface
-    from src.robot.model_binding import ModelBinding
-    from src.robot.robot_profile import RobotProfile
 
 # 公开 API（显式声明 re-export，供 `from src.real.runner_factory import build_solver` 零改动）
 __all__ = [
@@ -50,7 +51,9 @@ __all__ = [
     "build_robot_limits",
     "build_solver",
     "build_real_robot_mpc_config",
+    "validate_rm65_profile",
     "validate_rm65_runtime",
+    "load_validated_rm65_binding",
     "build_robot_arm",
 ]
 
@@ -67,18 +70,18 @@ _RM65_MODEL_PATH = (
 ).resolve()
 
 
-def validate_rm65_runtime(
-    profile: "RobotProfile", binding: "ModelBinding"
-) -> None:
-    """校验描述与绑定满足当前入口的 RM65 运行能力。
+def validate_rm65_profile(profile: RobotProfile) -> None:
+    """校验描述自身满足当前入口的 RM65 运行能力（纯比较，不加载模型）。
+
+    供入口预检查与 mock 路径复用：身份/名称/TCP/模型路径与 RM65 期望
+    完全一致。绑定布局校验见 validate_rm65_runtime。
 
     Args:
         profile: 机器人描述。
-        binding: 模型名称绑定结果。
 
     Raises:
-        ValueError: 身份不是 rm65、名称与 RM65 期望不符、模型路径被替换、
-            或绑定布局不是既有 RM65 原布局（主动 0..5、保持 6..11、执行器 0..5）。
+        ValueError: 身份不是 rm65、名称与 RM65 期望不符、TCP 名称不符、
+            或模型路径被替换。
     """
     if profile.robot_id != _RM65_ROBOT_ID:
         raise ValueError(
@@ -103,7 +106,22 @@ def validate_rm65_runtime(
             f"模型路径与 RM65 现有模型不符: {profile.model_path}"
             f"（期望 {_RM65_MODEL_PATH}）"
         )
-    # 布局校验：主动/执行器 0..5，保持 6..11
+
+
+def validate_rm65_runtime(profile: RobotProfile, binding: ModelBinding) -> None:
+    """校验描述与绑定满足当前入口的 RM65 运行能力。
+
+    Args:
+        profile: 机器人描述。
+        binding: 模型名称绑定结果。
+
+    Raises:
+        ValueError: 描述不符合 RM65 期望（见 validate_rm65_profile），
+            或绑定布局不是既有 RM65 原布局（主动 0..5、保持 6..11、执行器 0..5）。
+    """
+    validate_rm65_profile(profile)
+    # 布局校验：主动/执行器 0..5，保持 6..11。
+    # tcp 有效性由 bind_robot_model 保证（查不到名称即抛错），无需重复检查。
     if (
         binding.joint_ids != tuple(range(6))
         or binding.qpos_indices != tuple(range(6))
@@ -111,7 +129,6 @@ def validate_rm65_runtime(
         or binding.actuator_ids != tuple(range(6))
         or binding.held_qpos_indices != tuple(range(6, 12))
         or binding.held_qvel_indices != tuple(range(6, 12))
-        or binding.tcp_site_id < 0
     ):
         raise ValueError(
             f"绑定布局非 RM65 原布局（主动/执行器应 0..5、保持 6..11，"
@@ -120,31 +137,55 @@ def validate_rm65_runtime(
         )
 
 
+def load_validated_rm65_binding(profile: RobotProfile) -> ModelBinding:
+    """加载并绑定 profile 的模型，完成 RM65 运行能力校验。
+
+    入口预检查与驱动工厂真机路径的共同实现（消除两处重复的
+    load→bind→validate 序列）。纯模型加载，不启动线程、不接触硬件。
+
+    Args:
+        profile: 已通过 validate_rm65_profile 预检查的描述。
+
+    Returns:
+        通过运行能力校验的 ModelBinding（可复用给 build_robot_arm）。
+
+    Raises:
+        ValueError: 绑定失败或运行能力校验不通过。
+    """
+    model = load_mujoco_model(profile.model_path)
+    binding = bind_robot_model(profile, model)
+    validate_rm65_runtime(profile, binding)
+    return binding
+
+
 def build_robot_arm(
     config: RealRobotConfig,
     *,
-    profile: "RobotProfile",
+    profile: RobotProfile,
     mock: bool,
     init_q: np.ndarray,
+    binding: ModelBinding | None = None,
 ) -> "RobotArmInterface":
     """按描述构造机械臂驱动（RM65 真机或 FakeRobot Mock）。
 
     只构造对象，不调用 connect（连接仍归原生命周期管理）。
-    真机路径会加载并绑定模型做完整运行校验（纯模型加载，
-    不启动线程、不接触硬件）。
+    两条路径都先做纯描述校验（validate_rm65_profile，含名称/TCP/路径，
+    不加载模型）；真机路径另做绑定布局校验。
 
     Args:
         config: 真机配置。
         profile: 机器人描述。
         mock: True 返回 FakeRobot；False 返回 RobotInterface。
         init_q: 初始关节角度 (ndof,)，弧度。
+        binding: 调用方（如 create_runner）已取得的校验绑定；
+            传入则复用、免重复加载模型，None 时自行加载并校验。
 
     Returns:
         实现 RobotArmInterface 的驱动实例（未连接）。
 
     Raises:
         ValueError: init_q 长度与 profile.ndof 不符、含非有限值，
-            或 robot_id 不是当前支持的 rm65。
+            或描述不符合当前支持的 rm65（名称/布局任一不符）。
     """
     init_q = np.asarray(init_q, dtype=float)
     if init_q.ndim != 1 or init_q.shape[0] != profile.ndof:
@@ -153,23 +194,19 @@ def build_robot_arm(
         )
     if not bool(np.all(np.isfinite(init_q))):
         raise ValueError("init_q 含非有限值（NaN/Inf）")
-    # 身份前置检查：在加载模型/构造驱动之前拒绝不支持的机器人
-    if profile.robot_id != _RM65_ROBOT_ID:
-        raise ValueError(
-            f"运行入口当前仅支持 RM65 驱动，不支持 robot_id={profile.robot_id!r}"
-        )
+    # 描述前置校验：在加载模型/构造驱动之前拒绝不支持的机器人
+    # （mock 路径同样过名称校验——FakeRobot 是 RM65 专属 6 维 mock）
+    validate_rm65_profile(profile)
 
     if mock:
         from src.real.fake_robot import FakeRobot
 
         return FakeRobot(init_q=init_q.copy(), dt=config.dt)
 
-    from src.robot.model_binding import bind_robot_model
-    from src.utils.mujoco_loader import load_mujoco_model
-
-    model = load_mujoco_model(profile.model_path)
-    binding = bind_robot_model(profile, model)
-    validate_rm65_runtime(profile, binding)
+    if binding is None:
+        binding = load_validated_rm65_binding(profile)
+    else:
+        validate_rm65_runtime(profile, binding)
 
     from src.real.robot_interface import RobotInterface
 

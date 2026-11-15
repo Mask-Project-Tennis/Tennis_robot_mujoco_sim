@@ -44,6 +44,10 @@ class ModelBinding:
 def bind_robot_model(profile: RobotProfile, model: mujoco.MjModel) -> ModelBinding:
     """把机器人描述绑定到 MuJoCo 模型，解析全部名称地址。
 
+    输入校验独立于 YAML 加载器：直接构造的 RobotProfile 同样要求
+    执行器与主动关节一一对应、三组名称组内不重复、主动与保持不重叠，
+    否则错误维度会静默传播到控制数组。
+
     Args:
         profile: 机器人描述（语义名称）。
         model: 已加载的 MuJoCo 模型（只读，不修改）。
@@ -52,9 +56,11 @@ def bind_robot_model(profile: RobotProfile, model: mujoco.MjModel) -> ModelBindi
         不可变的 ModelBinding 实例。
 
     Raises:
-        ValueError: 任一名称在模型中不存在、执行器传动目标与期望关节不符、
+        ValueError: 描述维度不一致或名称重复、任一名称在模型中不存在、
+            执行器传动目标与期望关节不符、
             或主动/保持关节为非标量（free/ball）类型。
     """
+    _validate_profile_shape(profile)
     joint_ids, qpos_indices, qvel_indices = _resolve_joints(
         profile, model, profile.active_joint_names
     )
@@ -73,6 +79,42 @@ def bind_robot_model(profile: RobotProfile, model: mujoco.MjModel) -> ModelBindi
         held_qvel_indices=held_qvel,
         tcp_site_id=tcp_site_id,
     )
+
+
+def _validate_profile_shape(profile: RobotProfile) -> None:
+    """校验描述自身的维度一致性与名称唯一性（不依赖模型）。
+
+    RobotProfile 是公开 frozen dataclass，允许不经 load_robot_profile
+    直接构造；本函数在此公共入口挡住维度/重名错误，与 YAML 加载器
+    的同名校验保持一致（错误消息风格对齐）。
+
+    Raises:
+        ValueError: 执行器数与主动关节数不符、任一名称组存在重复、
+            或主动与保持关节重叠。
+    """
+    if len(profile.actuator_names) != len(profile.active_joint_names):
+        raise ValueError(
+            f"字段 actuator_names 长度 {len(profile.actuator_names)} 与 "
+            f"active_joint_names 长度 {len(profile.active_joint_names)} 不匹配"
+            f"（robot_id: {profile.robot_id}）"
+        )
+    for field, names in (
+        ("active_joint_names", profile.active_joint_names),
+        ("actuator_names", profile.actuator_names),
+        ("held_joint_names", profile.held_joint_names),
+    ):
+        duplicates = sorted({n for n in names if names.count(n) > 1})
+        if duplicates:
+            raise ValueError(
+                f"字段 {field} 存在重复名称: {duplicates}"
+                f"（robot_id: {profile.robot_id}）"
+            )
+    overlap = sorted(set(profile.active_joint_names) & set(profile.held_joint_names))
+    if overlap:
+        raise ValueError(
+            f"字段 held_joint_names 与 active_joint_names 重叠: {overlap}"
+            f"（robot_id: {profile.robot_id}）"
+        )
 
 
 def _lookup(

@@ -13,7 +13,13 @@ import numpy as np
 import pytest
 
 from src.real.config import RealRobotConfig
-from src.real.runner_factory import build_robot_arm, validate_rm65_runtime
+from src.real import runner_factory
+from src.real.runner_factory import (
+    build_robot_arm,
+    load_validated_rm65_binding,
+    validate_rm65_profile,
+    validate_rm65_runtime,
+)
 from src.robot.constants import INIT_Q_REAL
 from src.robot.model_binding import bind_robot_model
 from src.robot.robot_profile import RobotProfile, default_rm65_profile_path, load_robot_profile
@@ -27,16 +33,21 @@ def _rm65_profile() -> RobotProfile:
     return load_robot_profile(default_rm65_profile_path())
 
 
-def _rm65_like_profile(model_path: Path) -> RobotProfile:
-    """RM65 身份与名称、但 model_path 可变的描述（供错配测试）。"""
+def _rm65_like_profile(model_path: Path, joints: str = "r", tcp: str = "racket_center") -> RobotProfile:
+    """RM65 身份、model_path/关节侧/TCP 可变的描述（供错配测试）。
+
+    joints="r"（默认）为标准右臂描述；joints="l" 换成左臂全套名称
+    （模型中均存在，能通过绑定，用于触发运行校验的名称拒绝分支）。
+    """
+    other = "l" if joints == "r" else "r"
     return RobotProfile(
         schema_version=1,
         robot_id="rm65",
         model_path=model_path,
-        active_joint_names=tuple(f"r_joint{i}" for i in range(1, 7)),
-        actuator_names=tuple(f"torque_r_joint{i}" for i in range(1, 7)),
-        held_joint_names=tuple(f"l_joint{i}" for i in range(1, 7)),
-        tcp_site_name="racket_center",
+        active_joint_names=tuple(f"{joints}_joint{i}" for i in range(1, 7)),
+        actuator_names=tuple(f"torque_{joints}_joint{i}" for i in range(1, 7)),
+        held_joint_names=tuple(f"{other}_joint{i}" for i in range(1, 7)),
+        tcp_site_name=tcp,
     )
 
 
@@ -99,13 +110,30 @@ class TestValidateRm65Runtime:
         binding = bind_robot_model(profile, model)
         validate_rm65_runtime(profile, binding)  # 不抛异常即通过
 
-    def test_rejects_non_rm65_identity_and_seven_joint_layout(self) -> None:
-        """七关节合成描述（自定义身份+乱序布局）显式拒绝。"""
-        profile = _seven_joint_profile()
-        model = mujoco.MjModel.from_xml_string(_LOOKALIKE_XML)
-        # j1..j7 在替身模型中不存在 → 绑定器报缺关节，同样属于运行前拒绝
-        with pytest.raises(ValueError, match="j1"):
-            bind_robot_model(profile, model)
+    def test_rejects_wrong_joint_names(self) -> None:
+        """RM65 身份但主动/执行器/保持名称换成左臂 → 名称分支拒绝。
+
+        名称在真实模型中均存在（绑定成功），校验必须因名称与期望不符失败。
+        """
+        profile = _rm65_like_profile(
+            (REPO_ROOT / "src" / "robot" / "rm65_model.xml").resolve(),
+            joints="l",
+        )
+        model = load_mujoco_model(REPO_ROOT / "src" / "robot" / "rm65_model.xml")
+        binding = bind_robot_model(profile, model)  # 绑定成功
+        with pytest.raises(ValueError, match="active_joint_names"):
+            validate_rm65_runtime(profile, binding)
+
+    def test_rejects_wrong_tcp_site(self) -> None:
+        """RM65 身份但 tcp_site_name 换成模型中另一 site（hit_target）→ 拒绝。"""
+        profile = _rm65_like_profile(
+            (REPO_ROOT / "src" / "robot" / "rm65_model.xml").resolve(),
+            tcp="hit_target",
+        )
+        model = load_mujoco_model(REPO_ROOT / "src" / "robot" / "rm65_model.xml")
+        binding = bind_robot_model(profile, model)  # 绑定成功
+        with pytest.raises(ValueError, match="tcp_site_name"):
+            validate_rm65_runtime(profile, binding)
 
     def test_rejects_replaced_model(self) -> None:
         """RM65 身份但模型路径被替换 → 拒绝。"""
@@ -126,6 +154,45 @@ class TestValidateRm65Runtime:
         assert binding.qpos_indices != tuple(range(6))
         with pytest.raises(ValueError, match="布局"):
             validate_rm65_runtime(profile, binding)
+
+
+class TestProfileOnlyValidation:
+    """纯描述校验 validate_rm65_profile：不加载模型即可拒绝。"""
+
+    def test_rejects_unsupported_identity_without_model_load(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """非 rm65 身份在 load_mujoco_model 之前拒绝（无模型诊断噪音）。"""
+        calls = {"loads": 0}
+
+        def _spy_load(*args: object, **kwargs: object) -> object:
+            calls["loads"] += 1
+            raise AssertionError("身份预检不应加载模型")
+
+        monkeypatch.setattr(runner_factory, "load_mujoco_model", _spy_load)
+        with pytest.raises(ValueError, match="synthetic7"):
+            validate_rm65_profile(_seven_joint_profile())
+        assert calls["loads"] == 0
+
+
+class TestBinderRejection:
+    """描述能力层的绑定拒绝（与运行能力校验无关）。"""
+
+    def test_seven_joint_names_missing_in_lookalike_model_rejected_by_binder(
+        self,
+    ) -> None:
+        """七关节合成描述在 RM65 替身模型上因缺关节被绑定器拒绝。"""
+        profile = _seven_joint_profile()
+        model = mujoco.MjModel.from_xml_string(_LOOKALIKE_XML)
+        # j1..j7 在替身模型中不存在 → 绑定器报缺关节
+        with pytest.raises(ValueError, match="j1"):
+            bind_robot_model(profile, model)
+
+    def test_load_validated_rm65_binding_returns_checked_binding(self) -> None:
+        """公共 helper load→bind→validate：合法描述返回通过校验的绑定。"""
+        binding = load_validated_rm65_binding(_rm65_profile())
+        assert binding.qpos_indices == tuple(range(6))
+        assert binding.held_qpos_indices == tuple(range(6, 12))
 
 
 class _SpyFakeRobot:
@@ -252,4 +319,74 @@ class TestBuildRobotArm:
                 profile=_seven_joint_profile(),
                 mock=True,
                 init_q=np.zeros(7),
+            )
+
+    def test_mock_true_rejects_wrong_rm65_names(
+        self, spy_fake_robot: type[_SpyFakeRobot]
+    ) -> None:
+        """mock 路径同样拒绝名称不符的 rm65 描述（不只查身份）。"""
+        profile = _rm65_like_profile(
+            (REPO_ROOT / "src" / "robot" / "rm65_model.xml").resolve(),
+            joints="l",
+        )
+        with pytest.raises(ValueError, match="active_joint_names"):
+            build_robot_arm(
+                RealRobotConfig(robot_ip="fake-ip"),
+                profile=profile,
+                mock=True,
+                init_q=INIT_Q_REAL.copy(),
+            )
+        assert spy_fake_robot.constructed_count == 0
+
+    def test_real_path_reuses_supplied_binding_without_reload(
+        self,
+        spy_robot_interface: type[_SpyRobotInterface],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """传入已校验 binding 时真机路径不再加载模型，但仍校验布局。"""
+        calls = {"loads": 0}
+        real_load = runner_factory.load_validated_rm65_binding
+
+        def _spy_load(profile: RobotProfile) -> object:
+            calls["loads"] += 1
+            return real_load(profile)
+
+        monkeypatch.setattr(runner_factory, "load_validated_rm65_binding", _spy_load)
+
+        profile = _rm65_like_profile(
+            (REPO_ROOT / "src" / "robot" / "rm65_model.xml").resolve()
+        )
+        model = load_mujoco_model(REPO_ROOT / "src" / "robot" / "rm65_model.xml")
+        binding = bind_robot_model(profile, model)
+
+        # binding=None → 自行加载一次
+        build_robot_arm(
+            RealRobotConfig(robot_ip="fake-ip"),
+            profile=profile,
+            mock=False,
+            init_q=INIT_Q_REAL.copy(),
+        )
+        assert calls["loads"] == 1
+
+        # binding 传入 → 复用，不再加载
+        build_robot_arm(
+            RealRobotConfig(robot_ip="fake-ip"),
+            profile=profile,
+            mock=False,
+            init_q=INIT_Q_REAL.copy(),
+            binding=binding,
+        )
+        assert calls["loads"] == 1
+        assert spy_robot_interface.connect_count == 0
+
+        # binding 来自乱序模型 → 传入也因布局校验拒绝
+        lookalike = mujoco.MjModel.from_xml_string(_LOOKALIKE_XML)
+        shuffled = bind_robot_model(profile, lookalike)
+        with pytest.raises(ValueError, match="布局"):
+            build_robot_arm(
+                RealRobotConfig(robot_ip="fake-ip"),
+                profile=profile,
+                mock=False,
+                init_q=INIT_Q_REAL.copy(),
+                binding=shuffled,
             )

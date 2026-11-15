@@ -35,13 +35,20 @@ from src.real.real_runner import RealRunner
 from src.real.runner_factory import (
     INIT_Q,
     INIT_Q_LEFT,
+    ModelBinding,
     build_real_robot_mpc_config,
+    build_robot_arm,
     build_robot_limits,
     build_solver,
+    load_validated_rm65_binding,
+    validate_rm65_profile,
 )
 from src.real.safety_monitor import SafetyMonitor
-from src.real.runner_factory import build_robot_arm
-from src.robot.robot_profile import RobotProfile, load_robot_profile
+from src.robot.robot_profile import (
+    RobotProfile,
+    default_rm65_profile_path,
+    load_robot_profile,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -52,32 +59,30 @@ _BALL_VEL_DIR /= float(np.linalg.norm(_BALL_VEL_DIR))
 _DEFAULT_CONFIG_PATH = Path(__file__).resolve().parent.parent / "configs" / "real_robot.yaml"
 
 
-def _resolve_profile(profile: RobotProfile | None) -> RobotProfile:
-    """解析并校验机器人描述（加载模型 + 名称绑定 + 运行能力校验）。
+def _resolve_profile(profile: RobotProfile | None) -> tuple[RobotProfile, ModelBinding]:
+    """解析并校验机器人描述（身份/名称预检 + 加载绑定 + 运行能力校验）。
 
     纯模型加载，不启动线程、不接触硬件；在任何驱动构造或
-    传感器启动之前调用，使配置错误尽早暴露。
+    传感器启动之前调用，使配置错误尽早暴露。先做廉价的纯描述
+    预检（validate_rm65_profile）：不受支持的机器人（如阶段 2 的 D2）
+    在加载模型之前即得到"仅支持 RM65"的明确错误，而不是 loader
+    的模型缺失诊断。
 
     Args:
         profile: 显式描述；None 时加载默认 configs/robots/rm65.yaml。
 
     Returns:
-        通过运行能力校验的 RobotProfile。
+        (通过运行能力校验的描述, 对应的校验绑定)。
+        绑定复用给 build_robot_arm，避免真机路径重复加载模型。
 
     Raises:
         ValueError: 描述非法或不受当前入口支持（仅 RM65）。
     """
-    from src.real.runner_factory import validate_rm65_runtime
-    from src.robot.model_binding import bind_robot_model
-    from src.robot.robot_profile import default_rm65_profile_path
-    from src.utils.mujoco_loader import load_mujoco_model
-
     if profile is None:
         profile = load_robot_profile(default_rm65_profile_path())
-    model = load_mujoco_model(profile.model_path)
-    binding = bind_robot_model(profile, model)
-    validate_rm65_runtime(profile, binding)
-    return profile
+    validate_rm65_profile(profile)
+    binding = load_validated_rm65_binding(profile)
+    return profile, binding
 
 
 def create_runner(
@@ -101,8 +106,9 @@ def create_runner(
     Returns:
         已组装但尚未 start 的 RealRunner 实例。
     """
-    # 0. 解析并校验机器人描述（在任何驱动构造/传感器启动之前）
-    profile = _resolve_profile(profile)
+    # 0. 解析并校验机器人描述（在任何驱动构造/传感器启动之前）；
+    #    校验绑定复用给驱动工厂，真机路径不再重复加载模型
+    profile, binding = _resolve_profile(profile)
 
     if ball_pos is None:
         ball_pos = _DEFAULT_BALL_POS.copy()
@@ -119,8 +125,10 @@ def create_runner(
     env.reset(INIT_Q)
     env.data.qpos[env.NQ : env.NQ + env.LEFT_ARM_NQ] = env.init_q_left
 
-    # 2. 机器人接口（工厂构造，不连接硬件）
-    robot = build_robot_arm(config, profile=profile, mock=mock, init_q=INIT_Q.copy())
+    # 2. 机器人接口（工厂构造，不连接硬件；复用第 0 步的校验绑定）
+    robot = build_robot_arm(
+        config, profile=profile, mock=mock, init_q=INIT_Q.copy(), binding=binding
+    )
     if not mock:
         logger.info("create_runner: 使用真机接口 RobotInterface (mock=False)")
 
@@ -247,10 +255,16 @@ def main() -> None:
 
     # 机器人描述：显式 --robot-config 或默认 RM65。
     # 在任何驱动构造/传感器/后台线程之前完成校验（重复一次纯模型加载，可接受）。
-    profile_arg: RobotProfile | None = None
-    if args.robot_config is not None:
-        profile_arg = load_robot_profile(Path(args.robot_config))
-    profile = _resolve_profile(profile_arg)
+    # 配置类错误（文件缺失/字段非法/不受支持）以明确日志 + 退出码 2 呈现，
+    # 不向操作员抛 traceback。
+    try:
+        profile_arg: RobotProfile | None = None
+        if args.robot_config is not None:
+            profile_arg = load_robot_profile(Path(args.robot_config))
+        profile, _ = _resolve_profile(profile_arg)
+    except (FileNotFoundError, ValueError) as exc:
+        logger.error("机器人描述加载/校验失败: %s", exc)
+        sys.exit(2)
     logger.info("机器人描述已校验: robot_id=%s model=%s",
                 profile.robot_id, profile.model_path)
 

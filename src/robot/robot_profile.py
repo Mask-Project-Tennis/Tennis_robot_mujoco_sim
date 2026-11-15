@@ -69,20 +69,22 @@ def load_robot_profile(path: Path) -> RobotProfile:
         不可变的 RobotProfile 实例。
 
     Raises:
-        FileNotFoundError: 描述文件不存在。
+        FileNotFoundError: 描述文件不存在，或 model_path 指向的
+            模型文件不存在/不是常规文件（消息含两个路径）。
         ValueError: 字段缺失/为空/重复、版本不支持或存在未知字段，
             错误消息包含字段名与文件路径。
     """
     path = Path(path)
-    if not path.exists():
-        raise FileNotFoundError(f"机器人描述文件不存在: {path}")
+    if not path.is_file():
+        raise FileNotFoundError(f"机器人描述文件不存在或不是常规文件: {path}")
 
     raw: Any = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(raw, dict):
         raise ValueError(f"描述文件必须是映射结构（文件: {path}）")
 
-    # 未知字段检查（先于字段级校验，尽早暴露拼写错误）
-    unknown = sorted(set(raw) - set(_PROFILE_FIELDS))
+    # 未知字段检查（先于字段级校验，尽早暴露拼写错误）。
+    # 键统一转 str 再排序：YAML 顶层出现 int/date 等混合键类型时不抛 TypeError。
+    unknown = sorted(map(str, set(raw) - set(_PROFILE_FIELDS)))
     if unknown:
         raise ValueError(f"未知字段 {unknown}（文件: {path}）")
 
@@ -113,6 +115,15 @@ def load_robot_profile(path: Path) -> RobotProfile:
         model_path = path.resolve().parent / model_path
     model_path = model_path.resolve()
 
+    # 存在性校验（位于字段级校验之后，不影响字段诊断优先）：
+    # 让"模型缺失"稳定报 FileNotFoundError 并给出两个路径，
+    # 而不是把错误推迟到 MuJoCo 加载层的 ParseXML/临时目录错误。
+    if not model_path.is_file():
+        raise FileNotFoundError(
+            f"model_path 指向的模型文件不存在或不是常规文件: "
+            f"{model_path}（描述文件: {path}）"
+        )
+
     return RobotProfile(
         schema_version=schema_version,
         robot_id=robot_id,
@@ -138,7 +149,7 @@ def default_rm65_profile_path() -> Path:
     )
 
 
-def _require_schema_version(raw: dict, path: Path) -> int:
+def _require_schema_version(raw: dict[str, Any], path: Path) -> int:
     """校验 schema_version 字段（bool 不视为合法整数）。"""
     value = raw.get("schema_version")
     if isinstance(value, bool) or not isinstance(value, int):
@@ -151,7 +162,7 @@ def _require_schema_version(raw: dict, path: Path) -> int:
     return value
 
 
-def _require_str(raw: dict, field: str, path: Path) -> str:
+def _require_str(raw: dict[str, Any], field: str, path: Path) -> str:
     """校验非空字符串字段。"""
     value = raw.get(field)
     if not isinstance(value, str) or not value.strip():
@@ -160,7 +171,7 @@ def _require_str(raw: dict, field: str, path: Path) -> str:
 
 
 def _require_name_tuple(
-    raw: dict, field: str, path: Path, *, allow_empty: bool
+    raw: dict[str, Any], field: str, path: Path, *, allow_empty: bool
 ) -> tuple[str, ...]:
     """校验名称列表字段：元素非空、不重复，返回不可变 tuple。"""
     value = raw.get(field)

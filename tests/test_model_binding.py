@@ -249,6 +249,31 @@ class TestRejection:
         with pytest.raises(ValueError, match="actA"):
             bind_robot_model(profile, model)
 
+    def test_actuator_count_mismatch_rejected(self, two_joint_model: mujoco.MjModel) -> None:
+        """手构 profile 执行器数多于主动关节数 → ValueError（不静默截断 zip）。"""
+        profile = _synthetic_profile(
+            active=("jA", "jB"), actuators=("actA", "actB", "actC"), tcp="tcp"
+        )
+        # actC 在模型中不存在，但维度校验先于名称解析触发
+        with pytest.raises(ValueError, match="actuator_names"):
+            bind_robot_model(profile, two_joint_model)
+
+    def test_duplicate_active_names_rejected(self, two_joint_model: mujoco.MjModel) -> None:
+        """手构 profile 主动关节重名 → ValueError（不返回重复地址）。"""
+        profile = _synthetic_profile(
+            active=("jA", "jA"), actuators=("actA", "actB"), tcp="tcp"
+        )
+        with pytest.raises(ValueError, match="active_joint_names"):
+            bind_robot_model(profile, two_joint_model)
+
+    def test_active_held_overlap_rejected(self, two_joint_model: mujoco.MjModel) -> None:
+        """手构 profile 主动与保持关节同名 → ValueError（qpos 地址不得重复）。"""
+        profile = _synthetic_profile(
+            active=("jA", "jB"), actuators=("actA", "actB"), held=("jA",)
+        )
+        with pytest.raises(ValueError, match="held_joint_names"):
+            bind_robot_model(profile, two_joint_model)
+
     def test_free_joint_as_active_rejected(self) -> None:
         """主动关节为 free（非标量）→ ValueError。"""
         xml = """

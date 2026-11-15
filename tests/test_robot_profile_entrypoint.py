@@ -74,30 +74,33 @@ class TestDefaultVsExplicitProfile:
 
 
 class TestBadProfileRejected:
-    """坏 profile 在任何驱动构造/传感器启动前报错。"""
+    """坏 profile 在任何驱动构造/传感器启动/后台线程前报错。"""
 
-    def test_unsupported_profile_fails_before_driver_and_sensor(
+    def test_unsupported_profile_fails_before_driver_sensor_and_thread(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """非 RM65 身份：构造 FakeRobot / 启动传感器之前抛 ValueError。"""
-        fake_calls = {"constructed": 0, "sensor_started": 0}
+        """非 RM65 身份：构造 FakeRobot / 启动传感器 / 启动重规划线程之前抛 ValueError。"""
+        fake_calls = {"constructed": 0, "sensor_started": 0, "thread_started": 0}
 
-        import src.real.fake_robot as fake_robot_mod
+        import src.ilqt.async_replanner as replanner_mod
         import src.real.ball_sensor as ball_sensor_mod
+        import src.real.fake_robot as fake_robot_mod
 
         class _SpyFake:
             def __init__(self, *args: object, **kwargs: object) -> None:
                 fake_calls["constructed"] += 1
 
-        real_start = ball_sensor_mod.SimulatedBallSensor.start
-
-        def _spy_start(self: object) -> None:
+        def _spy_sensor_start(self: object) -> None:
             fake_calls["sensor_started"] += 1
+
+        def _spy_thread_start(self: object, *args: object, **kwargs: object) -> None:
+            fake_calls["thread_started"] += 1
 
         monkeypatch.setattr(fake_robot_mod, "FakeRobot", _SpyFake)
         monkeypatch.setattr(
-            ball_sensor_mod.SimulatedBallSensor, "start", _spy_start
+            ball_sensor_mod.SimulatedBallSensor, "start", _spy_sensor_start
         )
+        monkeypatch.setattr(replanner_mod.AsyncReplanner, "start", _spy_thread_start)
 
         with pytest.raises(ValueError, match="testbot"):
             create_runner(
@@ -107,7 +110,7 @@ class TestBadProfileRejected:
             )
         assert fake_calls["constructed"] == 0
         assert fake_calls["sensor_started"] == 0
-        assert real_start is not None  # noqa: F841 — 保留原方法引用防误删
+        assert fake_calls["thread_started"] == 0
 
 
 class TestYamlOverridePreserved:
@@ -148,3 +151,63 @@ class TestCliArg:
             ["--mock", "--robot-config", str(default_rm65_profile_path())]
         )
         assert args_explicit.robot_config == str(default_rm65_profile_path())
+
+
+class TestMainCli:
+    """main() 的 --robot-config 加载路径：配置错误以退出码 2 呈现。"""
+
+    def _run_main_with_fake_runner(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        argv: list[str],
+    ) -> tuple[int, dict[str, int]]:
+        """以替身 create_runner 运行 main，返回 (SystemExit 退出码, 调用计数)。"""
+        calls = {"create_runner": 0}
+
+        def _fake_create_runner(*args: object, **kwargs: object) -> None:
+            calls["create_runner"] += 1
+
+        monkeypatch.setattr(run_real_robot, "create_runner", _fake_create_runner)
+        monkeypatch.setattr(sys, "argv", ["run_real_robot.py", *argv])
+        with pytest.raises(SystemExit) as exc_info:
+            run_real_robot.main()
+        return int(exc_info.value.code), calls
+
+    def test_missing_robot_config_exits_2(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """--robot-config 指向不存在的文件 → 退出码 2，create_runner 未被调用。"""
+        code, calls = self._run_main_with_fake_runner(
+            monkeypatch,
+            ["--mock", "--robot-config", str(tmp_path / "no_such.yaml")],
+        )
+        assert code == 2
+        assert calls["create_runner"] == 0
+
+    def test_unsupported_robot_config_exits_2(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """合法 YAML 但 robot_id 非 rm65 → 退出码 2（描述校验失败）。"""
+        import yaml
+
+        data = {
+            "schema_version": 1,
+            "robot_id": "d2",
+            "model_path": "model.xml",
+            "active_joint_names": ["j1"],
+            "actuator_names": ["a1"],
+            "held_joint_names": [],
+            "tcp_site_name": "tcp",
+        }
+        # model_path 指向已存在文件（加载器存在性校验），身份校验在其后失败
+        (tmp_path / "model.xml").touch()
+        yaml_path = tmp_path / "d2.yaml"
+        yaml_path.write_text(
+            yaml.safe_dump(data, allow_unicode=True), encoding="utf-8"
+        )
+
+        code, calls = self._run_main_with_fake_runner(
+            monkeypatch, ["--mock", "--robot-config", str(yaml_path)]
+        )
+        assert code == 2
+        assert calls["create_runner"] == 0
