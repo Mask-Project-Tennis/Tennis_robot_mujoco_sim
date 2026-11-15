@@ -28,7 +28,7 @@
 | `rm65_mpc_ilqr_5_5.py` | Tube/iLQR 基线（工具脚本依赖） |
 | `rm65_evaluate.py` | 评估脚本 |
 | `run_20hits_video.py` | 连续 20 次击打视频生成 |
-| `run_real_robot.py` | 真机入口（--robot-config 可选机器人描述，默认 configs/robots/rm65.yaml） |
+| `run_real_robot.py` | 真机入口（--robot-config 可选机器人描述，默认 configs/robots/rm65.yaml；描述加载/校验失败以日志+退出码 2 呈现） |
 | `replay_trajectory.py` | 轨迹回放（含 --speed 安全检查） |
 
 ## sim/ — 独立仿真（5 个）

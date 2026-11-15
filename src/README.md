@@ -54,8 +54,8 @@ from src.utils.mujoco_loader import load_mujoco_model     # 跨平台模型加�
 ### robot/ — 机器人模型
 
 - `constants.py`：共享常量单一事实来源（DT/INIT_Q/INIT_Q_REAL/INIT_Q_LEFT/SHOULDER_POS/WORKSPACE_RADIUS/KP/KD），仅依赖 numpy
-- `robot_profile.py`：`RobotProfile` 机器人描述加载器（configs/robots/*.yaml → 身份/模型路径/关节语义名称，纯配置层，不加载 MuJoCo/SDK、不含数值参数）
-- `model_binding.py`：`ModelBinding` 模型名称绑定器（按名称解析关节/执行器/TCP 的 qpos/qvel 地址，只接受标量关节，校验执行器传动目标，只读不修改模型）
+- `robot_profile.py`：`RobotProfile` 机器人描述加载器（configs/robots/*.yaml → 身份/模型路径/关节语义名称，纯配置层，不加载 MuJoCo/SDK、不含数值参数；校验 model_path 存在性）
+- `model_binding.py`：`ModelBinding` 模型名称绑定器（按名称解析关节/执行器/TCP 的 qpos/qvel 地址，只接受标量关节，校验执行器传动目标与描述维度/重名，只读不修改模型）
 - `rm65_model.xml`：MuJoCo XML 模型（双臂 12DOF + 球拍 + 球 freejoint），DOF 和关节顺序的唯一事实来源
 - `kinematics.py`：正运动学 / 雅可比矩阵工具函数
 
@@ -137,7 +137,7 @@ from src.utils.mujoco_loader import load_mujoco_model     # 跨平台模型加�
 - `robot_arm_protocol.py`：`RobotArmInterface` Protocol（@runtime_checkable，真机/Mock 共同接口）
 - `fake_robot.py`：`FakeRobot` Mock 实现（简单一阶动力学，测试用）
 - `real_runner.py`：`RealRunner` 真机部署主循环（start/step/stop 分步 + run_episode EpisodeRunner 编排）
-- `runner_factory.py`：工厂函数（build_robot_limits + build_solver 重导出 + build_real_robot_mpc_config + validate_rm65_runtime 运行能力校验 + build_robot_arm 驱动工厂 + 共享常量）
+- `runner_factory.py`：工厂函数（build_robot_limits + build_solver 重导出 + build_real_robot_mpc_config + validate_rm65_profile 纯描述校验 + validate_rm65_runtime 运行能力校验 + load_validated_rm65_binding 加载绑定校验 helper + build_robot_arm 驱动工厂（可选 binding 复用） + 共享常量）
 - `robot_executor.py`：`RobotExecutor` 适配器（RobotArmInterface → ExecutorComponent）
 - `perception_adapter.py`：`PerceptionAdapter` 适配器（BallPerceiver → PerceptionComponent）
 - `safety_adapter.py`：`SafetyAdapter` 适配器（SafetyMonitor → SafetyComponent）

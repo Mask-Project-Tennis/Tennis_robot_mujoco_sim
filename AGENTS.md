@@ -209,7 +209,7 @@ mujoco_sim/
 │   ├── test/           # 快速验证 10 个
 │   ├── archive/        # ★ 已归档脚本（V6-V10 + tube + 旧实验，详见 archive/README.md）
 │   └── README.md       # 完整清单与说明
-├── tests/                             # 单元测试（468 tests，48 个文件）
+├── tests/                             # 单元测试（702 tests，69 个文件；2 个 C++ 测试文件因扩展 ABI 不匹配暂无法收集，见 docs/experiments/reports/）
 │   ├── test_kinematics.py
 │   ├── test_linearize.py
 │   ├── test_mpc.py
@@ -235,10 +235,10 @@ mujoco_sim/
 │   ├── test_task2_replan_config_elimination.py # ReplanConfig 消除验证（5 tests）
 │   ├── test_real_runner.py                 # RealRunner Mock 闭环测试
 │   ├── test_robot_interface.py             # RobotInterface SDK Mock 测试
-│   ├── test_robot_profile.py               # RobotProfile 描述加载器测试（19 tests，阶段 1）
-│   ├── test_model_binding.py               # ModelBinding 名称绑定器测试（11 tests，阶段 1）
-│   ├── test_robot_factory.py               # 驱动工厂/运行能力校验测试（10 tests，阶段 1）
-│   ├── test_robot_profile_entrypoint.py    # run_real_robot --robot-config 入口测试（4 tests，阶段 1）
+│   ├── test_robot_profile.py               # RobotProfile 描述加载器测试（22 tests，阶段 1）
+│   ├── test_model_binding.py               # ModelBinding 名称绑定器测试（14 tests，阶段 1）
+│   ├── test_robot_factory.py               # 驱动工厂/运行能力校验测试（16 tests，阶段 1）
+│   ├── test_robot_profile_entrypoint.py    # run_real_robot --robot-config 入口测试（6 tests，阶段 1）
 │   ├── test_safety_monitor.py              # SafetyMonitor 测试
 │   ├── test_fake_robot.py                  # FakeRobot Mock 测试
 │   ├── test_torque_to_position.py          # 力矩→位置积分器测试
