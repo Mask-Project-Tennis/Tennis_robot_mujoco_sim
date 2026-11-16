@@ -2,26 +2,120 @@
 
 力矩模式的 JT 初始控制（compute_jacobian_init_control）输出力矩 τ = J^T * err * scale。
 位置模式需要输出目标角度 q_desired，本模块提供角度增量版本的 JT 初始控制。
+
+阶段 3 Task 3.8：维度无关化 + 绑定环境（BoundRobotEnv 族）适配——
+关节限位优先按 ``env.binding`` 的名称地址解析（支持 free joint 前置/
+执行器乱序的模型），旧 RM65 环境保持前缀布局路径原样。
 """
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from src.ilqt.robot_env_protocol import RobotEnv
 
+logger = logging.getLogger(__name__)
+
+
+def _is_bound_env(env: RobotEnv) -> bool:
+    """判定是否为绑定环境（BoundRobotEnv 族，阶段 3 新路径）。
+
+    绑定环境按 ``ModelBinding`` 名称地址访问状态/执行器（R1D n=7、
+    free joint 前置等），RM65Env/PlanningEnv 无 ``binding`` 属性走旧
+    前缀布局路径。本谓词是 3.8 的 R1D/RM65 策略分派依据（环境能力
+    判定，非维数猜测）。
+    """
+    return hasattr(env, "binding")
+
 
 def _get_jnt_range(env: RobotEnv) -> tuple[np.ndarray, np.ndarray]:
-    """获取右臂关节限位 (jnt_lo, jnt_hi)，各形状 (6,)。"""
+    """获取主动臂关节限位 (jnt_lo, jnt_hi)，各形状 (NU,)。
+
+    绑定环境：按 ``binding.actuator_ids`` 解析执行器→关节地址（不限
+    前缀布局），未声明限位的关节放宽为 ±inf（不硬裁剪）；
+    旧 RM65 环境：保持前缀 ``actuator_trnid[:NU]`` 路径原样。
+    """
     jnt_lo = np.zeros(env.NU)
     jnt_hi = np.zeros(env.NU)
+    if _is_bound_env(env):
+        binding = env.binding  # type: ignore[attr-defined]
+        for i, act_id in enumerate(binding.actuator_ids):
+            jnt_id = env.model.actuator_trnid[act_id, 0]
+            if env.model.jnt_limited[jnt_id]:
+                jnt_lo[i] = env.model.jnt_range[jnt_id, 0]
+                jnt_hi[i] = env.model.jnt_range[jnt_id, 1]
+            else:
+                jnt_lo[i] = -np.inf
+                jnt_hi[i] = np.inf
+        return jnt_lo, jnt_hi
     for i in range(env.NU):
         jnt_id = env.model.actuator_trnid[i, 0]
         jnt_lo[i] = env.model.jnt_range[jnt_id, 0]
         jnt_hi[i] = env.model.jnt_range[jnt_id, 1]
     return jnt_lo, jnt_hi
+
+
+def solve_ik_checked(
+    env: RobotEnv,
+    target_pos: np.ndarray,
+    q_init: np.ndarray | None = None,
+    robot_limits: Any = None,
+    max_iter: int = 100,
+    eps: float = 1e-3,
+    pos_tol: float = 0.02,
+    label: str = "",
+) -> np.ndarray:
+    """带误差与限位校验的逆运动学（阶段 3 Task 3.8）。
+
+    与裸 ``env.solve_ik`` 的差异：求解后显式 ``set_arm_state`` 复核
+    末端误差，并在提供 ``robot_limits`` 时校验关节限位——失败抛出
+    ``ValueError``（含目标/误差/裕度报告），而不是把坏初值交给下游
+    warm start / 控制指令继续。
+
+    Args:
+        env: 满足 RobotEnv 协议的环境。
+        target_pos: 目标末端位置 (3,)。
+        q_init: IK 初值 (NQ,)；None 用零位。
+        robot_limits: 关节限位（q_lower/q_upper）；None 跳过限位校验。
+        max_iter: IK 最大迭代次数。
+        eps: IK 收敛阈值（m）。
+        pos_tol: 求解后允许的最大末端误差（m）。
+        label: 报告用上下文标签（如 "随挥" / "工作空间中心"）。
+
+    Returns:
+        校验通过的关节角 (NQ,)。
+
+    Raises:
+        ValueError: 末端误差超 pos_tol 或关节超出限位。
+    """
+    nq = env.NQ
+    q = env.solve_ik(target_pos, q_init=q_init, max_iter=max_iter, eps=eps)
+    env.set_arm_state(np.concatenate([q, np.zeros(nq)]))
+    err = float(np.linalg.norm(env.get_ee_pos() - np.asarray(target_pos)))
+    if not np.isfinite(err) or err > pos_tol:
+        raise ValueError(
+            f"{label}IK 未收敛：目标 {np.round(np.asarray(target_pos), 4).tolist()}，"
+            f"末端误差 {err:.4f} m 超容差 {pos_tol:.4f} m"
+            f"（q_init={'零位' if q_init is None else '给定初值'}，"
+            f"max_iter={max_iter}）——拒绝带坏初值继续"
+        )
+    if robot_limits is not None:
+        below = q < np.asarray(robot_limits.q_lower)
+        above = q > np.asarray(robot_limits.q_upper)
+        if np.any(below) or np.any(above):
+            bad = np.flatnonzero(below | above).tolist()
+            raise ValueError(
+                f"{label}IK 解超关节限位：关节索引 {bad}，"
+                f"q={np.round(q, 4).tolist()}，"
+                f"下界={np.round(np.asarray(robot_limits.q_lower), 4).tolist()}，"
+                f"上界={np.round(np.asarray(robot_limits.q_upper), 4).tolist()}"
+                "——拒绝带坏初值继续"
+            )
+    return q
 
 
 def compute_joint1_backswing_trajectory(
@@ -103,16 +197,25 @@ def compute_jacobian_init_control_position(
 
     Args:
         env: RobotEnv 实例（需已配置位置模式）。
-        x0: 初始右臂状态 [q, qdot]，形状 (12,)。
+        x0: 初始右臂状态 [q, qdot]，形状 (2*NQ,)。
         p_hit: 目标击打点位置，形状 (3,)。
         horizon: 控制序列长度。
         gain: 角度增量步长（弧度），默认 0.5。
-        fix_joint5_angle: 若非 None，第 5 关节固定为该角度。
+        fix_joint5_angle: 若非 None，第 6 关节（索引 5）固定为该角度。
+            仅 RM65（NQ=6）可用；其他维数明确拒绝。
         damp: 阻尼因子，防止雅可比奇异。
 
     Returns:
-        控制序列 U，形状 (horizon, 6)，每行为 q_desired。
+        控制序列 U，形状 (horizon, NU)，每行为 q_desired。
+
+    Raises:
+        ValueError: fix_joint5_angle 非 None 但环境维数不是 6。
     """
+    if fix_joint5_angle is not None and env.NQ != 6:
+        raise ValueError(
+            f"fix_joint5 是 RM65（NQ=6）专属策略，当前环境 NQ={env.NQ}，"
+            "R1D 不使用 fix_joint5（Task 3.8 策略决定）"
+        )
     NQ = env.NQ
     NU = env.NU
     U = np.zeros((horizon, NU))
@@ -256,8 +359,18 @@ def generate_backswing_warm_start_position(
         n_des: 期望法向量，形状 (3,)。
 
     Returns:
-        (U, q_des_traj): U 形状 (horizon, 6)，q_des_traj 形状 (horizon, 6)。
+        (U, q_des_traj): U 形状 (horizon, NQ)，q_des_traj 形状 (horizon, NQ)。
+
+    Raises:
+        ValueError: 环境维数不是 6（关节 0 五次多项式后摆是 RM65 专属
+            策略，"索引 0 必是后摆轴"不继承到其他机器人）。
     """
+    if env.NQ != 6:
+        raise ValueError(
+            f"后摆 warm-start（关节 0 五次多项式）是 RM65（NQ=6）专属策略，"
+            f"当前环境 NQ={env.NQ}；R1D 默认全关节 JT/IK warm-start"
+            "（use_backswing=False，Task 3.8 策略决定）"
+        )
     NQ = env.NQ
     NU = env.NU
 
@@ -302,7 +415,15 @@ def fix_joint5_control_trajectory_position(
 
     Returns:
         修改后的 U（副本）。
+
+    Raises:
+        ValueError: U 维数不是 6（fix_joint5 为 RM65 专属策略）。
     """
+    if U.shape[-1] != 6:
+        raise ValueError(
+            f"fix_joint5 是 RM65（NU=6）专属策略，收到控制维数 "
+            f"{U.shape[-1]}（Task 3.8 策略决定）"
+        )
     U = U.copy()
     U[:, 5] = q_fixed
     return U

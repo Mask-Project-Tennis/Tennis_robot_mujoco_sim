@@ -24,7 +24,7 @@ from src.ilqt.tube_types import (
 BaseCost = CompositeCost
 
 if TYPE_CHECKING:
-    from src.sim.rm65_env import RM65Env
+    from src.ilqt.robot_env_protocol import RobotEnv
 
 
 logger = logging.getLogger(__name__)
@@ -32,6 +32,10 @@ logger = logging.getLogger(__name__)
 
 class TubeHittingCostWrapper:
     """包装 CompositeCost，在候选击球窗口内施加空间走廊式 tube 代价。
+
+    维度无关（阶段 3 Task 3.6）：env 仅要求满足 RobotEnv 协议
+    （RM65Env n=6 / BoundRobotEnv n=7 通吃），NQ/NX 取实例属性；
+    走廊/softmin 的导数缓冲维数全部随 env。
 
     空间走廊（hinge loss）：
       - 走廊半宽 = RACKET_RADIUS（固定）
@@ -56,7 +60,7 @@ class TubeHittingCostWrapper:
 
     def __init__(
         self,
-        env: "RM65Env",
+        env: "RobotEnv",
         base_cost: BaseCost,
         hitting_tube: HittingTube,
         horizon: int,
@@ -65,7 +69,7 @@ class TubeHittingCostWrapper:
         """初始化 Tube 代价包装器。
 
         Args:
-            env: RM-65 环境实例。
+            env: 满足 RobotEnv 协议的环境实例（维数任意，n=6/7）。
             base_cost: 基础代价实例（CompositeCost，提供终端代价和基础运行代价）。
             hitting_tube: 击球管道。
             horizon: 规划地平线步数。
@@ -468,7 +472,7 @@ class TubeOnlyCost(TubeHittingCostWrapper):
 
     def __init__(
         self,
-        env: "RM65Env",
+        env: "RobotEnv",
         base_cost: BaseCost,
         hitting_tube: HittingTube,
         horizon: int,
@@ -487,7 +491,7 @@ class SoftminOnlyCost(TubeHittingCostWrapper):
 
     def __init__(
         self,
-        env: "RM65Env",
+        env: "RobotEnv",
         base_cost: BaseCost,
         hitting_tube: HittingTube,
         horizon: int,

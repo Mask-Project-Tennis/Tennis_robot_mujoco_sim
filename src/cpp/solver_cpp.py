@@ -105,6 +105,30 @@ else:
         forward_pass_with_linesearch,
     )
 
+    def _require_cpp_compatible_env(env) -> None:
+        """C++ 内核 Python 入口能力拒绝（Task 3.5，仅 Python 层守卫）。
+
+        本类直接把 ``env.model``/``env.data`` 的 C 指针交给六维内核
+        （kNQ=6/kNX=12/kNU=6 硬编码，含前缀布局假设），任何非兼容环境
+        （七维 R1D、六维但地址重排的绑定环境、缺 RM65 专属属性的环境）
+        进入内核都会读/写错误内存布局。守卫复用
+        ``src.ilqt.solver.is_cpp_kernel_compatible`` 的判定规则（延迟
+        导入避免模块级环），在任何内核调用前抛 ``ValueError``。
+
+        Raises:
+            ValueError: 环境与旧六维 C++ 内核不兼容。
+        """
+        from src.ilqt.solver import is_cpp_kernel_compatible
+
+        if not is_cpp_kernel_compatible(env):
+            raise ValueError(
+                "C++ 内核为六维 RM65 前缀布局专用"
+                f"（kNQ=6/kNX=12/kNU=6），当前环境 NQ={env.NQ}/"
+                f"NX={env.NX}/NU={env.NU} 或地址布局不兼容；"
+                "请改用 build_solver(..., backend='python') 或 'auto'"
+                "（R1D 自动选择 Python FD）"
+            )
+
     class ILQTSolver:
         """iLQR 求解器（自动使用 C++ 加速）。
 
@@ -167,6 +191,7 @@ else:
 
         def _linearize_cpp(self, env, X, U):
             """C++ 加速的解析线性化。"""
+            _require_cpp_compatible_env(env)
             N = len(U)
             A_all = np.zeros((N, 12, 12))
             B_all = np.zeros((N, 12, 6))
@@ -281,6 +306,7 @@ else:
 
         def _forward_pass_cpp(self, env, X, U, Ks, ks, alpha, check_params=None):
             """C++ 前向传递（含 collision disable + actuator mode + optional limits）。"""
+            _require_cpp_compatible_env(env)
             N = len(U)
             X_new = np.zeros_like(X)
             U_new = np.zeros_like(U)
@@ -349,6 +375,8 @@ else:
                 (X_opt, U_opt, cost_history, success):
                   success=False 表示硬约束饱和。
             """
+            # Task 3.5：Python 入口能力拒绝——任何内核调用前拦截非兼容环境
+            _require_cpp_compatible_env(env)
             U = U_init.copy()
             X = self._rollout(env, x0, U)
             cost_old = compute_total_cost(env, cost_fn, X, U)

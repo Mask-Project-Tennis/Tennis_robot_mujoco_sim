@@ -42,6 +42,7 @@ class ControlEffortTerm:
         R_joint_scale: dict[int, float] | None = None,
         R_schedule: np.ndarray | None = None,
         actuator_mode: int = 0,
+        *,
         NU: int = 6,
     ) -> None:
         """初始化控制代价项。
@@ -51,7 +52,8 @@ class ControlEffortTerm:
             R_joint_scale: 关节级缩放，{关节索引: 缩放因子}。
             R_schedule: 时变 R 值，形状 (N,)。None 表示常数 R。
             actuator_mode: 0=力矩模式, 1=位置模式（R=0）。
-            NU: 控制维度。
+            NU: 控制维度（keyword-only；缺省 6 为 RM65 兼容值，
+                多机器人路径必须显式传 env.NU，不依赖缺省）。
         """
         self._actuator_mode = actuator_mode
         self._R_schedule = R_schedule
@@ -127,6 +129,7 @@ class SmoothnessTerm:
         Q_qdot: float,
         Q_qddot: float,
         Q_du: float,
+        *,
         NQ: int = 6,
         NX: int = 12,
         NU: int = 6,
@@ -138,9 +141,9 @@ class SmoothnessTerm:
             Q_qdot: 关节速度平滑权重（0=禁用）。
             Q_qddot: 关节加速度平滑权重（0=禁用）。
             Q_du: 控制变化率权重（0=禁用）。
-            NQ: 关节维度。
-            NX: 状态维度。
-            NU: 控制维度。
+            NQ: 关节维度（keyword-only；缺省 6 为 RM65 兼容值）。
+            NX: 状态维度（keyword-only；缺省 12 为 RM65 兼容值）。
+            NU: 控制维度（keyword-only；缺省 6 为 RM65 兼容值）。
             dt: 时间步长（用于 qddot ≈ qdot/dt）。
         """
         self._Q_qdot = max(0.0, Q_qdot)
@@ -288,6 +291,7 @@ class QdotLimitTerm:
         self,
         Q_qdot_limit: float,
         qdot_limit_thresholds: np.ndarray,
+        *,
         NQ: int = 6,
         NX: int = 12,
     ) -> None:
@@ -296,8 +300,8 @@ class QdotLimitTerm:
         Args:
             Q_qdot_limit: 软惩罚权重（0=禁用）。
             qdot_limit_thresholds: 各关节速度阈值 (NQ,)。
-            NQ: 关节维度。
-            NX: 状态维度。
+            NQ: 关节维度（keyword-only；缺省 6 为 RM65 兼容值）。
+            NX: 状态维度（keyword-only；缺省 12 为 RM65 兼容值）。
         """
         self._Q = max(0.0, Q_qdot_limit)
         self._thresholds = np.asarray(qdot_limit_thresholds, dtype=float).copy()
@@ -382,6 +386,7 @@ class TcpSoftTerm:
         self,
         Q_tcp_soft: float,
         tcp_threshold: float,
+        *,
         NQ: int = 6,
         NX: int = 12,
     ) -> None:
@@ -390,8 +395,8 @@ class TcpSoftTerm:
         Args:
             Q_tcp_soft: 软惩罚权重（0=禁用）。
             tcp_threshold: TCP 速度阈值（m/s）。
-            NQ: 关节维度。
-            NX: 状态维度。
+            NQ: 关节维度（keyword-only；缺省 6 为 RM65 兼容值）。
+            NX: 状态维度（keyword-only；缺省 12 为 RM65 兼容值）。
         """
         self._Q = max(0.0, Q_tcp_soft)
         self._threshold = float(tcp_threshold)
@@ -485,6 +490,7 @@ class TerminalHitTerm:
         Q_v: np.ndarray,
         Q_n: float = 0.0,
         n_des: np.ndarray | None = None,
+        *,
         NX: int = 12,
         NQ: int = 6,
     ) -> None:
@@ -497,8 +503,10 @@ class TerminalHitTerm:
             Q_v: 速度代价权重 (3,) 或 (3,3)。(3,) 视为对角线。
             Q_n: 法向量代价权重（标量，0=禁用）。
             n_des: 期望拍面法向量 (3,)。None 且 Q_n>0 时不参与。
-            NX: 状态维度。
-            NQ: 关节维度。
+            NX: 状态维度（keyword-only；缺省 12 为 RM65 兼容值，
+                多机器人路径必须显式传 env.NX）。
+            NQ: 关节维度（keyword-only；缺省 6 为 RM65 兼容值，
+                多机器人路径必须显式传 env.NQ，不依赖缺省）。
         """
         self._NQ = NQ
         self._NX = NX
@@ -635,6 +643,7 @@ class BodyAvoidanceTerm:
         radius: float,
         Q_body: float,
         body_names: list[str],
+        *,
         NX: int = 12,
         NQ: int = 6,
     ) -> None:
@@ -645,8 +654,8 @@ class BodyAvoidanceTerm:
             radius: 圆柱体半径（m）。
             Q_body: 规避代价权重。
             body_names: 需检测的 body 名称列表。
-            NX: 状态维度（占位，实现时使用）。
-            NQ: 关节维度（占位，实现时使用）。
+            NX: 状态维度（keyword-only 占位，实现时使用）。
+            NQ: 关节维度（keyword-only 占位，实现时使用）。
         """
         # TODO: 移植 _init_body_avoidance_ids + _add_body_avoidance_cost/derivatives
         # 注意：此项需要 env.get_body_pos_by_id，FKContext 需扩展
@@ -673,6 +682,7 @@ class JointLimitTerm:
         self,
         joint_limits: dict[int, tuple[float | None, float | None]],
         Q_joint_limit: float = 100000.0,
+        *,
         NQ: int = 6,
         NX: int = 12,
     ) -> None:
@@ -681,8 +691,8 @@ class JointLimitTerm:
         Args:
             joint_limits: {关节索引: (下界, 上界)}，None 表示该侧无边。
             Q_joint_limit: 限位惩罚权重。
-            NQ: 关节维度。
-            NX: 状态维度。
+            NQ: 关节维度（keyword-only；缺省 6 为 RM65 兼容值）。
+            NX: 状态维度（keyword-only；缺省 12 为 RM65 兼容值）。
         """
         self._Q = Q_joint_limit
         self._NQ = NQ
@@ -768,13 +778,23 @@ class XWallTerm:
 
     needs_fk = True
 
-    def __init__(self, limit_x: float, Q_x: float, body_names: list[str]) -> None:
+    def __init__(
+        self,
+        limit_x: float,
+        Q_x: float,
+        body_names: list[str],
+        *,
+        NX: int = 12,
+        NQ: int = 6,
+    ) -> None:
         """初始化 X 平面墙约束项。
 
         Args:
             limit_x: X 坐标上界（m），右臂 body 的 X 不得超过此值。
             Q_x: 越墙惩罚权重。
             body_names: 需检测的 body 名称列表。
+            NX: 状态维度（keyword-only 占位，实现时使用）。
+            NQ: 关节维度（keyword-only 占位，实现时使用）。
         """
         # TODO: 移植 _init_x_limit_ids + _add_x_limit_cost/derivatives
         raise NotImplementedError("XWallTerm — Phase 4 迁移旧脚本时实现")

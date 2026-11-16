@@ -1,7 +1,12 @@
-"""仿真感知组件 — 从 RM65Env / PlanningEnv 读球状态。
+"""仿真感知组件 — 从仿真环境读球状态。
 
 实现 ``PerceptionComponent`` Protocol，封装 V11 主循环中读取球状态的逻辑。
 支持可选的观测门控（obs_gate），用于噪声注入等外部处理。
+
+Task 3.9 起按接口而非具体类型消费环境：RM65Env / PlanningEnv（旧路径）
+与 ProfileSimEnv（R1D 执行环境，物理球）共同满足所需的球状态接口
+（``get_ball_state`` / ``get_ball_pos`` / ``get_ball_vel``），R1D 感知
+读到的就是 ProfileSimEnv 的物理球状态。
 """
 
 from __future__ import annotations
@@ -25,8 +30,9 @@ class SimPerception:
       - 有 ``obs_gate`` 时读原始 ``pos``/``vel`` 后过门控（用于噪声注入、KF 等）。
 
     Args:
-        env: RM65Env 或 PlanningEnv 实例（须提供 ``get_ball_state`` /
-            ``get_ball_pos`` / ``get_ball_vel`` 接口）。
+        env: 含球状态接口的环境实例（RM65Env / PlanningEnv /
+            ProfileSimEnv，按 ``get_ball_state`` / ``get_ball_pos`` /
+            ``get_ball_vel`` 接口消费，不绑定具体类型）。
         obs_gate: 观测门控，两种形态:
             - ``BallObservationGate`` 实例（有 ``get_state(step, pos, vel)``），
               按物理步驱动门控（观测频率/噪声/KF）；

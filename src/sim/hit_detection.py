@@ -12,6 +12,7 @@ def classify_hit_result(
     active_contact: bool,
     passive_contact: bool,
     pos_error: float,
+    robot_name: str = "RM-65",
 ) -> str:
     """根据接触类型和规划精度分类击球结果。
 
@@ -21,6 +22,8 @@ def classify_hit_result(
         active_contact: 是否主动击球（球拍速度 > 0.3 m/s 时触发）。
         passive_contact: 是否被动接触（球拍速度 ≤ 0.3 m/s 时触发）。
         pos_error: 末端到球（或规划点）的距离（米），作为辅助信息。
+        robot_name: 机器人显示名称（缺省 "RM-65" 保持旧输出逐字兼容；
+            R1D 传 "R1-A7-D"，Task 3.9）。
 
     Returns:
         分类消息字符串：
@@ -29,11 +32,11 @@ def classify_hit_result(
         - "未命中" — 无接触（即使 pos_error 小）
     """
     if active_contact:
-        return f"RM-65 击打成功！（主动击球，pos_error={pos_error:.4f}m）"
+        return f"{robot_name} 击打成功！（主动击球，pos_error={pos_error:.4f}m）"
     if passive_contact:
-        return f"RM-65 被动命中！（球拍速度较低，pos_error={pos_error:.4f}m）"
+        return f"{robot_name} 被动命中！（球拍速度较低，pos_error={pos_error:.4f}m）"
     return (
-        f"RM-65 未命中（无物理接触，规划距离 {pos_error:.4f}m，"
+        f"{robot_name} 未命中（无物理接触，规划距离 {pos_error:.4f}m，"
         f"球拍到达了规划点但球不在该位置）"
     )
 

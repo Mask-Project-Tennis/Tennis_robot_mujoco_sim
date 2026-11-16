@@ -131,10 +131,10 @@ def forward_pass_with_linesearch(
     Args:
         env: MuJoCo 环境实例。
         cost_fn: 代价函数实例。
-        X: 名义状态轨迹，形状 (N+1, 12)。
-        U: 名义控制轨迹，形状 (N, 6)。
-        Ks: 反馈增益列表，每个形状 (6, 12)。
-        ks: 前馈增益列表，每个形状 (6,)。
+        X: 名义状态轨迹，形状 (N+1, NX)。
+        U: 名义控制轨迹，形状 (N, NU)。
+        Ks: 反馈增益列表，每个形状 (NU, NX)。
+        ks: 前馈增益列表，每个形状 (NU,)。
         alpha_list: 线搜索步长列表。
         cost_old: 旧轨迹的总代价。
         limits: 真实机器人硬约束参数。None 表示不启用。
@@ -143,11 +143,14 @@ def forward_pass_with_linesearch(
         (X_new, U_new, cost_new, accepted): 新轨迹和新代价，以及是否被接受。
     """
     N = len(U)
-    n_u = env.NU
+    n_q = env.NQ
     dt = env.dt
 
-    ctrl_lo = env.model.actuator_ctrlrange[:n_u, 0]
-    ctrl_hi = env.model.actuator_ctrlrange[:n_u, 1]
+    # 控制裁剪范围来自 env.control_range（n,2）——按环境执行器绑定序，
+    # 不再假设前缀执行器占据 actuator_ctrlrange[:NU]（Task 3.5 维度无关化）
+    ctrl_range = np.asarray(env.control_range, dtype=np.float64)
+    ctrl_lo = ctrl_range[:, 0]
+    ctrl_hi = ctrl_range[:, 1]
 
     has_collision_ctrl = hasattr(env, "set_arm_collision")
     if has_collision_ctrl:
@@ -164,7 +167,7 @@ def forward_pass_with_linesearch(
 
         qdot_hist: deque = deque(maxlen=limits.qddot_window_size + 1 if limits is not None else 6)
         if limits is not None:
-            build_qdot_history(qdot_hist, X_new[0][6:], limits.qddot_window_size)
+            build_qdot_history(qdot_hist, X_new[0][n_q:], limits.qddot_window_size)
 
         valid = True
 
@@ -180,7 +183,7 @@ def forward_pass_with_linesearch(
 
             # 真实机器人硬约束: q/qdot/u 硬检查 + qddot 滑动窗口（Phase1仅日志）
             if limits is not None:
-                build_qdot_history(qdot_hist, X_new[k + 1][6:], limits.qddot_window_size)
+                build_qdot_history(qdot_hist, X_new[k + 1][n_q:], limits.qddot_window_size)
                 ok, reason = check_step_feasibility(
                     X_new[k], X_new[k + 1], U_new[k], limits, dt,
                     step=k, margin=fp_margin,
@@ -234,10 +237,10 @@ def forward_pass_single(
     Args:
         env: MuJoCo 环境实例。
         cost_fn: 代价函数实例。
-        X: 名义状态轨迹，形状 (N+1, 12)。
-        U: 名义控制轨迹，形状 (N, 6)。
-        Ks: 反馈增益列表，每个形状 (6, 12)。
-        ks: 前馈增益列表，每个形状 (6,)。
+        X: 名义状态轨迹，形状 (N+1, NX)。
+        U: 名义控制轨迹，形状 (N, NU)。
+        Ks: 反馈增益列表，每个形状 (NU, NX)。
+        ks: 前馈增益列表，每个形状 (NU,)。
         alpha: 首选固定步长（默认 0.5）。
         limits: 真实机器人硬约束参数。None 表示不启用。
         skip_cost: 是否跳过代价计算（MPC 模式默认 True）。
@@ -248,11 +251,14 @@ def forward_pass_single(
           - 失败: (None, None, inf, "qdot limit exceeded, joint=2")
     """
     N = len(U)
-    n_u = env.NU
+    n_q = env.NQ
     dt = env.dt
 
-    ctrl_lo = env.model.actuator_ctrlrange[:n_u, 0]
-    ctrl_hi = env.model.actuator_ctrlrange[:n_u, 1]
+    # 控制裁剪范围来自 env.control_range（n,2）——按环境执行器绑定序，
+    # 不再假设前缀执行器占据 actuator_ctrlrange[:NU]（Task 3.5 维度无关化）
+    ctrl_range = np.asarray(env.control_range, dtype=np.float64)
+    ctrl_lo = ctrl_range[:, 0]
+    ctrl_hi = ctrl_range[:, 1]
 
     has_collision_ctrl = hasattr(env, "set_arm_collision")
     if has_collision_ctrl:
@@ -276,7 +282,7 @@ def forward_pass_single(
 
         qdot_hist: deque = deque(maxlen=limits.qddot_window_size + 1 if limits is not None else 6)
         if limits is not None:
-            build_qdot_history(qdot_hist, X_new[0][6:], limits.qddot_window_size)
+            build_qdot_history(qdot_hist, X_new[0][n_q:], limits.qddot_window_size)
 
         valid = True
         reject_reason = ""
@@ -294,7 +300,7 @@ def forward_pass_single(
 
             # 真实机器人硬约束: q/qdot/u 硬检查 + qddot 滑动窗口（Phase1仅日志）
             if limits is not None:
-                build_qdot_history(qdot_hist, X_new[k + 1][6:], limits.qddot_window_size)
+                build_qdot_history(qdot_hist, X_new[k + 1][n_q:], limits.qddot_window_size)
                 ok, reason = check_step_feasibility(
                     X_new[k], X_new[k + 1], U_new[k], limits, dt,
                     step=k, margin=fp_margin,

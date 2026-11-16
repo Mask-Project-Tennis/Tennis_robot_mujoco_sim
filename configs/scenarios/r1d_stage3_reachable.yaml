@@ -1,0 +1,29 @@
+# R1D 阶段 3 Task 3.11 固定可达击球案例（scenario，schema v1）。
+#
+# 用途：本文件把「确定性击球验收」所需的输入冻结成单一案例，供
+# tests/test_r1d_closed_loop.py 读取并驱动真实 run_r1d_episode 调用链。
+# 路径一律相对本文件所在目录解析（本文件位于 configs/scenarios/）。
+#
+# 案例来源（Task 3.11）：先按左臂 FK/IK 与固定重力抛物线反推可达来球，
+# 再落盘固定；seed 固定为 42，不做 seed 扫描/挑选。
+#  - 来球：从 [2.5, 0.45, 2.8] m 以 [-5.0, -0.3, -1.0] m/s 飞出（纯重力
+#    抛物线，不含空气阻力）；t≈0.445s 时到达 [0.25, 0.315, 1.357] m。
+#  - 击球点可达性验算：左肩世界位置 [0.059, 0.086, 1.358] m（阶段 2 模板
+#    实测），击球点相对肩 [0.191, 0.229, -0.001] m（|·|≈0.298m < 臂展
+#    0.35m）；对 [0.25, 0.315, 1.357] 从规划段 q 起做 IK，解
+#    q=[18.0, -2.24, 11.51, -13.81, -21.51, -0.72, 29.26]°，
+#    FK 回代末端 [0.2499, 0.3142, 1.3575] m（误差 ~0.9mm），各关节离
+#    限位裕度均 >12°；执行器 torque_max/PD/限位来自
+#    configs/robots/r1d_sim_runtime_left.yaml（provisional）。
+#  - 案例验收：hit_type 必须为 active（真实球—拍接触、接触拍速 >0.3 m/s），
+#    且同 seed/同配置连续 3 次逐位一致（详见验收报告）。
+#
+# 注意：本文件不引入新的配置框架，字段与 3.10 run_r1d_episode 的三份
+# 配置参数一一对应；expected_hit_type 仅表达本案例的预期，不改变任何
+# 判定逻辑（判定仍由 3.9 的物理接触检测给出）。
+schema_version: 1
+profile_path: ../robots/r1d_left.yaml              # 左臂 profile（阶段 2 产物）
+runtime_path: ../robots/r1d_sim_runtime_left.yaml  # 左臂仿真 runtime（provisional）
+task_path: ../r1d_sim_left.yaml                    # 左臂仿真 task（3.11 已调参）
+seed: 42                                           # 固定 seed（不扫描/不挑选）
+expected_hit_type: active                          # 固定案例期望：主动击球

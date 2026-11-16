@@ -26,11 +26,16 @@ def test_robot_env_protocol_has_data():
     assert "data" in RobotEnv.__annotations__
 
 
-def test_robot_env_protocol_has_init_q_left():
-    """RobotEnv Protocol 声明 init_q_left 属性。"""
-    assert "init_q_left" in RobotEnv.__annotations__
+def test_robot_env_protocol_has_control_range():
+    """RobotEnv Protocol 声明 control_range 属性（Task 3.3 新增）。"""
+    assert "control_range" in RobotEnv.__annotations__
 
 
-def test_robot_env_protocol_has_left_arm_nq():
-    """RobotEnv Protocol 声明 LEFT_ARM_NQ 属性。"""
-    assert "LEFT_ARM_NQ" in RobotEnv.__annotations__
+def test_robot_env_protocol_left_arm_fields_are_legacy():
+    """LEFT_ARM_NQ/init_q_left 已移出协议（RM65 旧实现专属，非通用必需字段）。
+
+    Task 3.3 把协议从 RM65 专属假设中解放：通用规划消费者不再要求
+    左臂字段；RM65Env/PlanningEnv 继续提供它们供旧 C++/回放路径消费。
+    """
+    assert "LEFT_ARM_NQ" not in RobotEnv.__annotations__
+    assert "init_q_left" not in RobotEnv.__annotations__

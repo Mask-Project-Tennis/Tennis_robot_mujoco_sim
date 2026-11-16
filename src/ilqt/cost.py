@@ -7,6 +7,8 @@ Phase 2 (C2): CompositeCost + 惩罚项组合化（替换旧 HittingCost）。
 from __future__ import annotations
 
 import logging
+from typing import Any, Mapping
+
 import numpy as np
 from src.ilqt.components.protocols import (
     SmoothnessMixin,
@@ -77,20 +79,24 @@ class TerminalDerivatives:
 
 
 class FKContext:
-    """末端 FK 缓存上下文。
+    """末端 FK 缓存上下文（维度无关：n=6/7 通吃，缓冲随 env.NQ/NX）。
 
     缓存一次 env.set_arm_state(x) 的全部末端 FK 结果（位置/速度/雅可比/法向量），
     供所有惩罚项共享读取。惩罚项不直接接触 env，通过此对象获取 FK 量，
     便于单元测试（MockFKContext 纯数据，不依赖 MuJoCo）。
 
-    相同状态重复调用 update 时跳过（避免冗余 mj_forward）。
+    缓存失效语义（RM65 既有约定，保持不变）：缓存以传入状态 x 为键——
+    相同状态重复调用 update 时跳过（避免冗余 mj_forward）；环境状态
+    变化后传入新 x 即刷新。update 之外直接修改 env 状态不会使缓存
+    失效，消费方应始终以最新 x 调用 update。
     """
 
     def __init__(self, env) -> None:
         """初始化 FK 上下文。
 
         Args:
-            env: 满足 RobotEnv Protocol 的环境实例。
+            env: 满足 RobotEnv Protocol 的环境实例（NQ/NX 为实例属性或
+                类属性，维数任意，如 RM65Env n=6 / BoundRobotEnv n=7）。
         """
         self._env = env
         self._x_cached: np.ndarray | None = None
@@ -109,10 +115,10 @@ class FKContext:
     def update(self, x: np.ndarray) -> None:
         """设置机器人状态并缓存全部末端 FK 结果。
 
-        相同状态跳过（避免冗余 mj_forward 调用）。
+        相同状态跳过（避免冗余 mj_forward 调用）；新状态刷新全部缓存。
 
         Args:
-            x: 臂状态 [q(6), qdot(6)]，形状 (12,)。
+            x: 臂状态 [q(NQ), qdot(NQ)]，形状 (NX,)。
         """
         if self._x_cached is not None and np.array_equal(x, self._x_cached):
             return
@@ -459,31 +465,53 @@ def build_production_cost(
     p_hit: np.ndarray,
     v_hit: np.ndarray,
     n_des: np.ndarray | None,
-    Q_p_mat: np.ndarray,
-    Q_v_mat: np.ndarray,
+    Q_p_mat: np.ndarray | None,
+    Q_v_mat: np.ndarray | None,
+    *,
+    cost_config: Mapping[str, Any] | None = None,
 ) -> CompositeCost:
-    """从 MPCConfig 构建生产路径代价（replan_core.py 调用）。
+    """从 MPCConfig 构建生产路径代价（replan_core.py 调用，维度无关）。
 
+    维度全部显式取自 env（NQ/NX/NU），不依赖各 cost term 的 RM65 缺省 6。
     R2 修复：Q_p_mat/Q_v_mat 由调用方预计算（replan_core.py:256-269 基于
     sigmoid 位置误差调度），工厂函数不负责权重调度计算。
     R_schedule 同样由调用方在工厂返回后设置（replan_core.py:286-291 不动）。
 
-    组装的代价项：
-        运行项：ControlEffortTerm + SmoothnessTerm + TcpSoftTerm + QdotLimitTerm
-        终端项：TerminalHitTerm
+    机器人专属权重（阶段 3 Task 3.6）：``cost_config`` 接收 task YAML 的
+    cost_config 字典（``SimTaskConfig.cost_config``，3.1 交付），键名仅认
+    既有口径、不发明新键：
+
+    - 工厂消费的 MPCConfig 字段名：``R``、``Q_qdot_base``、``Q_qddot_base``、
+      ``Q_du_base``、``Q_tcp_soft``、``Q_qdot_limit``、``normal_weight``、
+      ``tcp_soft_ratio``、``qdot_limit_ratio``——出现即覆盖 ``config``
+      同名字段（None 缺省完全不覆盖，RM65 数值路径原样）；
+    - 终端基准权重 ``Q_p`` / ``Q_v``（3.1 YAML 已有键）：标量 → ×I₃、
+      (3,) → 对角、(3,3) → 原样；提供后可省 Q_p_mat/Q_v_mat（二者
+      全缺时 ValueError，不静默零权重）。注意不收 ``Q_p_base``/``Q_v_base``
+      （那是 replan_core 的 sigmoid 调度口径，避免歧义）；
+    - ``tube`` 子字典：仅校验键名须为 TubeConfig 字段（拼写错误快速
+      失败），本工厂不消费——Tube 包装由 MPC 层按 ``config.tube_cfg`` 组装。
 
     Args:
-        env: 规划环境（PlanningEnv 或 RM65Env），满足 RobotEnv Protocol。
+        env: 规划环境（PlanningEnv / RM65Env / BoundRobotEnv），满足
+            RobotEnv Protocol，维数任意（RM65 n=6 / R1D n=7）。
         config: MPCConfig 实例（包含 R/Q_qdot/Q_tcp_soft 等参数）。
         robot_limits: RobotLimits 实例（包含 max_tcp_speed/qdot_max）。
         p_hit: 终端击打位置 (3,)。
         v_hit: 终端击打速度 (3,)。
         n_des: 期望拍面法向量 (3,) 或 None。
-        Q_p_mat: 预计算的位置权重矩阵 (3,3)，由调用方从 config + sigmoid 调度生成。
+        Q_p_mat: 预计算的位置权重矩阵 (3,3)，由调用方从 config + sigmoid
+            调度生成。None 时必须由 cost_config["Q_p"] 提供。
         Q_v_mat: 预计算的速度权重矩阵 (3,3)，同上。
+        cost_config: task YAML 代价权重覆盖（keyword-only）。None=缺省，
+            行为与旧版完全一致（RM65 路径不变）。
 
     Returns:
         CompositeCost 实例，组装了生产路径全部活跃惩罚项。
+
+    Raises:
+        ValueError: cost_config 含未知键、tube 子字典含非 TubeConfig 字段，
+            或 Q_p/Q_v 两个来源（矩阵参数与 cost_config）均未提供。
     """
     from src.ilqt.cost_terms import (
         ControlEffortTerm,
@@ -493,29 +521,47 @@ def build_production_cost(
         TerminalHitTerm,
     )
 
+    overrides = _validate_task_cost_config(cost_config)
+
     NU = env.NU
     NQ = env.NQ
     NX = env.NX
     actuator_mode = 1 if config.is_position_mode else 0
 
+    # 终端基准权重：cost_config 覆盖 > 显式矩阵 > 拒绝（不静默零权重）
+    Q_p_final = _resolve_terminal_weight(
+        Q_p_mat, overrides.get("Q_p"), "Q_p"
+    )
+    Q_v_final = _resolve_terminal_weight(
+        Q_v_mat, overrides.get("Q_v"), "Q_v"
+    )
+
     running = [
         ControlEffortTerm(
-            R=config.R, actuator_mode=actuator_mode, NU=NU,
+            R=float(overrides.get("R", config.R)),
+            actuator_mode=actuator_mode,
+            NU=NU,
         ),
         SmoothnessTerm(
-            Q_qdot=config.Q_qdot_base,
-            Q_qddot=config.Q_qddot_base,
-            Q_du=config.Q_du_base,
+            Q_qdot=float(overrides.get("Q_qdot_base", config.Q_qdot_base)),
+            Q_qddot=float(overrides.get("Q_qddot_base", config.Q_qddot_base)),
+            Q_du=float(overrides.get("Q_du_base", config.Q_du_base)),
             NQ=NQ, NX=NX, NU=NU, dt=env.dt,
         ),
         TcpSoftTerm(
-            Q_tcp_soft=config.Q_tcp_soft,
-            tcp_threshold=config.tcp_soft_ratio * robot_limits.max_tcp_speed,
+            Q_tcp_soft=float(overrides.get("Q_tcp_soft", config.Q_tcp_soft)),
+            tcp_threshold=float(overrides.get("tcp_soft_ratio", config.tcp_soft_ratio))
+            * robot_limits.max_tcp_speed,
             NQ=NQ, NX=NX,
         ),
         QdotLimitTerm(
-            Q_qdot_limit=config.Q_qdot_limit,
-            qdot_limit_thresholds=config.qdot_limit_ratio * robot_limits.qdot_max,
+            Q_qdot_limit=float(
+                overrides.get("Q_qdot_limit", config.Q_qdot_limit)
+            ),
+            qdot_limit_thresholds=float(
+                overrides.get("qdot_limit_ratio", config.qdot_limit_ratio)
+            )
+            * robot_limits.qdot_max,
             NQ=NQ, NX=NX,
         ),
     ]
@@ -523,10 +569,109 @@ def build_production_cost(
     terminal = [
         TerminalHitTerm(
             p_hit=p_hit, v_hit=v_hit,
-            Q_p=Q_p_mat, Q_v=Q_v_mat,
-            Q_n=config.normal_weight, n_des=n_des,
+            Q_p=Q_p_final, Q_v=Q_v_final,
+            Q_n=float(overrides.get("normal_weight", config.normal_weight)),
+            n_des=n_des,
             NX=NX, NQ=NQ,
         ),
     ]
 
     return CompositeCost(env, running, terminal)
+
+
+# 工厂消费的 task cost_config 顶层键（MPCConfig 字段名 + 3.1 YAML 终端基准键）
+_FACTORY_COST_KEYS: frozenset[str] = frozenset(
+    {
+        "R",
+        "Q_qdot_base",
+        "Q_qddot_base",
+        "Q_du_base",
+        "Q_tcp_soft",
+        "Q_qdot_limit",
+        "normal_weight",
+        "tcp_soft_ratio",
+        "qdot_limit_ratio",
+        "Q_p",
+        "Q_v",
+        "tube",
+    }
+)
+
+
+def _validate_task_cost_config(
+    cost_config: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """校验 task cost_config 键名并返回普通 dict（None → 空 dict）。
+
+    键名口径：工厂消费的 MPCConfig 字段名 + 3.1 YAML 终端基准键 Q_p/Q_v
+    + tube 子字典（仅校验，不消费）。未知键（含杜撰键、Q_p_base 等
+    调度口径别名）快速失败，不静默忽略。
+
+    Args:
+        cost_config: task YAML 的 cost_config 映射；None 表示缺省路径。
+
+    Returns:
+        可覆盖键值 dict（空 = 无覆盖）。
+
+    Raises:
+        ValueError: 未知顶层键，或 tube 子字典含非 TubeConfig 字段名。
+    """
+    if cost_config is None:
+        return {}
+    unknown = set(cost_config) - _FACTORY_COST_KEYS
+    if unknown:
+        raise ValueError(
+            f"cost_config 含未识别键 {sorted(unknown)}；"
+            f"可用键（MPCConfig 字段名 / 3.1 YAML 终端基准键）: "
+            f"{sorted(_FACTORY_COST_KEYS)}。"
+            "注：Q_p_base/Q_v_base 是 replan_core 的 sigmoid 调度口径，"
+            "请经 MPCConfig 或 Q_p_mat/Q_v_mat 传入。"
+        )
+    tube_cfg = cost_config.get("tube")
+    if tube_cfg is not None:
+        from dataclasses import fields as dc_fields
+
+        from src.ilqt.tube_types import TubeConfig
+
+        if not isinstance(tube_cfg, Mapping):
+            raise ValueError("cost_config['tube'] 必须是映射（TubeConfig 字段名口径）")
+        valid_tube = {f.name for f in dc_fields(TubeConfig)}
+        tube_unknown = set(tube_cfg) - valid_tube
+        if tube_unknown:
+            raise ValueError(
+                f"cost_config['tube'] 含非 TubeConfig 字段 {sorted(tube_unknown)}；"
+                f"可用字段: {sorted(valid_tube)}"
+            )
+    return dict(cost_config)
+
+
+def _resolve_terminal_weight(
+    mat: np.ndarray | None,
+    override: Any,
+    name: str,
+) -> np.ndarray:
+    """解析终端基准权重矩阵（cost_config 覆盖 > 显式矩阵 > 拒绝）。
+
+    Args:
+        mat: 调用方预计算的权重（(3,)/(3,3) 均可，交由 TerminalHitTerm
+            统一化）或 None。
+        override: cost_config 提供的标量 / (3,) / (3,3) 权重。
+        name: 键名（用于报错信息）。
+
+    Returns:
+        (3,3) 或 (3,) 权重数组。
+
+    Raises:
+        ValueError: 两个来源均未提供（不静默零权重）。
+    """
+    if override is not None:
+        arr = np.asarray(override, dtype=float)
+        if arr.ndim == 0:
+            return float(arr) * np.eye(3)
+        return arr
+    if mat is not None:
+        return mat
+    raise ValueError(
+        f"终端权重 {name} 未提供：须传入 {name}_mat 或 cost_config['{name}']，"
+        "不接受静默零权重"
+    )

@@ -428,6 +428,15 @@ class RM65Env:
         return self.model.opt.timestep
 
     @property
+    def control_range(self) -> np.ndarray:
+        """右臂执行器控制范围 (NU, 2) 只读副本（RobotEnv 协议兼容，Task 3.3）。
+
+        行序为前缀执行器序（RM65 右臂占据 ctrl[0:NU]，与
+        actuator_ctrlrange[:NU] 一致）；随 configure_actuator_mode 切换。
+        """
+        return self.model.actuator_ctrlrange[: self.NU].copy()
+
+    @property
     def actuator_mode(self) -> int:
         """执行器模式：0=力矩, 1=位置。"""
         return self._actuator_mode

@@ -25,6 +25,7 @@ import sys
 import time
 import argparse
 import logging
+from collections.abc import Sequence
 from pathlib import Path
 
 import numpy as np
@@ -48,6 +49,10 @@ from src.ilqt.components.sim_component import SimComponent
 from src.real.trajectory_recorder import TrajectoryRecorder
 from src.robot.constants import SHOULDER_POS, WORKSPACE_RADIUS, INIT_Q, INIT_Q_LEFT
 from src.utils.yaml_utils import load_config, merge_configs
+
+# ── 多机器人入口（阶段 3 · Task 3.10）：R1D 仿真路径委托新 runner ──
+# 模块级导入使 CLI 分派可被测试 monkeypatch（不复制 V12 主循环）
+from src.sim.r1d_runner import run_r1d_episode
 
 logging.basicConfig(
     level=logging.INFO,
@@ -126,14 +131,22 @@ def _import_v11_visuals():
 
 
 # ==============================================================================
-# 主函数
+# 多机器人入口（阶段 3 · Task 3.10）：R1D 仿真路径分派
 # ==============================================================================
 
-def main() -> None:
-    """RM-65 V12 EpisodeRunner 管线架构主函数。"""
-    # ==========================================================================
-    # 1. 参数解析（与 V11 一致）
-    # ==========================================================================
+# R1D 路径明确支持的共享基础参数（其余 RM65 专属旧参数一律拒绝，
+# 不能接受后忽略 —— R1D 的来球/步数/权重等全部来自 --sim-task-config YAML）
+_R1D_SHARED_FLAGS = frozenset({
+    "robot_config", "runtime_config", "sim_task_config", "output",
+    "seed", "no_plot", "log_level",
+})
+
+# 最近一次 R1D 分派拒绝的 RM65 专属参数清单（供测试断言；非生产 API）
+_last_r1d_rejected_flags: list[str] = []
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    """构造 V12 参数解析器（RM65 参数面与 V11 一致 + 4 个多机器人新参数）。"""
     parser = argparse.ArgumentParser(description="RM-65 V12 EpisodeRunner 管线架构")
     parser.add_argument("--viewer", action="store_true", help="计算完成后以真实速度回放")
     parser.add_argument("--seed", type=int, default=None, help="随机种子")
@@ -241,8 +254,198 @@ def main() -> None:
                         help="输出每步主循环耗时摘要（__STEP_TIMING__, 同步/异步停顿对比用）")
     parser.add_argument("--dump-step-latencies", action="store_true",
                         help="额外输出逐步耗时原始序列（__STEP_LATENCIES__, 真 per-step ECDF 数据源）")
+    # ── 多机器人入口（Task 3.10）：R1D 仿真路径（缺省全部 None → RM65 旧路径）──
+    parser.add_argument("--robot-config", type=Path, default=None,
+                        help="机器人描述 YAML（缺省 RM65 旧路径；显式 rm65.yaml 等价缺省；"
+                             "unitree_r1d 进入 R1D 仿真路径，须与 --runtime-config/"
+                             "--sim-task-config 同时提供）")
+    parser.add_argument("--runtime-config", type=Path, default=None,
+                        help="R1D 仿真运行参数 YAML（仅 R1D 路径，如 configs/robots/"
+                             "r1d_sim_runtime_left.yaml）")
+    parser.add_argument("--sim-task-config", type=Path, default=None,
+                        help="R1D 仿真任务 YAML（仅 R1D 路径，如 configs/r1d_sim_left.yaml；"
+                             "来球/步数/权重全部来自该文件）")
+    parser.add_argument("--output", type=Path, default=None,
+                        help="R1D 产物输出目录（仅 R1D 路径；缺省 results/r1d_sim）")
+    return parser
+
+
+def _explicit_cli_actions(
+    parser: argparse.ArgumentParser, argv: Sequence[str]
+) -> list[argparse.Action]:
+    """把 argv 中实际出现的选项映射到对应 action（解析语义对齐）。
+
+    收集以 ``--`` 开头的 token（``--opt=value`` 取 ``=`` 前部分），
+    裸 ``--`` 之后视为位置参数停止收集；选项名按"精确命中 → 唯一
+    前缀缩写"匹配 action（与 argparse 缩写规则一致，歧义 token 由
+    parse_args 自行报错，不会到达此处）。
+    """
+    explicit: list[argparse.Action] = []
+    for token in argv:
+        if token == "--":
+            break
+        if not token.startswith("--"):
+            continue
+        name = token.split("=", 1)[0]
+        matched = [a for a in parser._actions if name in a.option_strings]  # noqa: SLF001 - argparse 无公开遍历 API
+        if not matched:
+            matched = [
+                a for a in parser._actions
+                if any(o.startswith(name) for o in a.option_strings)
+            ]
+        if len(matched) == 1:
+            explicit.append(matched[0])
+    return explicit
+
+
+def _collect_rejected_rm65_flags(
+    parser: argparse.ArgumentParser, argv: Sequence[str]
+) -> list[str]:
+    """收集 R1D 路径下命令行显式传入的 RM65 专属参数（不共享即拒绝）。
+
+    判定"显式设置" = argv 中实际出现该选项（含 ``--opt=value`` 与唯一
+    前缀缩写）；显式传入即拒绝，即使值与解析器缺省相同——与缺省值
+    比较无法识别"用户敲了默认值"的显式输入（审查 P2：--target-speed
+    1.8 / --normal-weight 500000 恰等于缺省值时曾被放行后静默忽略）。
+    """
+    rejected: list[str] = []
+    seen: set[str] = set()
+    for action in _explicit_cli_actions(parser, argv):
+        if action.dest in _R1D_SHARED_FLAGS or action.dest == "help":
+            continue
+        option = next(
+            (o for o in action.option_strings if o.startswith("--")),
+            action.dest,
+        )
+        if option not in seen:
+            seen.add(option)
+            rejected.append(option)
+    return rejected
+
+
+def _dispatch_robot_selection(
+    parser: argparse.ArgumentParser, args: argparse.Namespace,
+    argv: Sequence[str],
+) -> int | None:
+    """提前解析机器人选择：RM65 继续旧路径，R1D 委托新 runner。
+
+    Args:
+        parser: V12 参数解析器（错误经 parser.error 以退出码 2 呈现）。
+        args: 已解析参数。
+        argv: 实际传入的参数列表（不含程序名；main 传 sys.argv[1:]，
+            供按"命令行显式出现"而非"值 != 缺省"识别 RM65 专属参数）。
+
+    Returns:
+        None 表示 RM65 旧路径继续（main 后续零改动）；
+        int 为 R1D 路径完成/失败退出码（0 成功）。
+
+    Raises:
+        SystemExit: 配置类错误（缺 runtime/task、侧别错配、RM65 专属参数
+            混入、非法身份等）在构造 runner 前经 parser.error 退出码 2。
+    """
+    global _last_r1d_rejected_flags
+    _last_r1d_rejected_flags = []
+
+    has_r1d_cfg = (
+        args.runtime_config is not None or args.sim_task_config is not None
+    )
+    if args.robot_config is None:
+        if has_r1d_cfg:
+            parser.error(
+                "--runtime-config/--sim-task-config 须与 --robot-config 同时"
+                "提供（R1D 仿真路径三件套缺一不可）"
+            )
+        return None  # RM65 缺省路径
+
+    # robot_config 显式给出：加载并按身份分派
+    from src.robot.robot_profile import load_robot_profile
+    try:
+        profile = load_robot_profile(args.robot_config)
+    except (FileNotFoundError, ValueError) as exc:
+        parser.error(f"--robot-config 加载失败: {exc}")
+
+    if profile.robot_id == "rm65":
+        if has_r1d_cfg:
+            parser.error(
+                "rm65 不接受 --runtime-config/--sim-task-config"
+                "（R1D 仿真路径专用；显式 rm65.yaml 等价缺省，继续 RM65 旧路径）"
+            )
+        return None  # 显式 rm65 profile == 缺省（旧路径，行为逐字一致）
+
+    if profile.robot_id != "unitree_r1d":
+        parser.error(
+            f"不支持的 robot_id '{profile.robot_id}'（V12 仿真入口支持 "
+            f"rm65（缺省路径）与 unitree_r1d（R1D 仿真路径））"
+        )
+
+    # ── R1D 路径：三件套必须齐全 ──
+    if args.runtime_config is None:
+        parser.error(
+            "R1D 仿真路径缺少 --runtime-config（--robot-config 为 "
+            "unitree_r1d 时 --runtime-config 与 --sim-task-config 必须同时提供）"
+        )
+    if args.sim_task_config is None:
+        parser.error(
+            "R1D 仿真路径缺少 --sim-task-config（--robot-config 为 "
+            "unitree_r1d 时 --runtime-config 与 --sim-task-config 必须同时提供）"
+        )
+
+    # ── RM65 专属旧参数必须拒绝（不能接受后忽略）──
+    rejected = _collect_rejected_rm65_flags(parser, argv)
+    if rejected:
+        _last_r1d_rejected_flags = rejected
+        parser.error(
+            f"R1D 仿真路径不支持 RM65 专属参数（不能接受后忽略）: "
+            f"{', '.join(rejected)}；R1D 的来球/步数/权重/球速等全部来自 "
+            f"--sim-task-config YAML，共享基础参数仅 "
+            f"seed/no-plot/output/log-level"
+        )
+
+    output_dir = (
+        args.output
+        if args.output is not None
+        else Path(__file__).resolve().parent.parent / "results" / "r1d_sim"
+    )
+    try:
+        result = run_r1d_episode(
+            args.robot_config, args.runtime_config, args.sim_task_config,
+            output_dir, seed=args.seed,
+        )
+    except (ValueError, FileNotFoundError) as exc:
+        parser.error(f"R1D 仿真回合失败（配置错误，未构造 runner）: {exc}")
+
+    # 摘要输出（CLI 工具 print 例外；__R1D_RESULT__ 供脚本化解析）
+    hit = result.get("hit", {})
+    episode = result.get("episode", {})
+    print("__R1D_RESULT__: "
+          f"side={result.get('side')} "
+          f"hit_type={hit.get('type')} "
+          f"hit_step={hit.get('step')} "
+          f"total_steps={episode.get('total_steps')} "
+          f"safe_steps={episode.get('safe_steps')} "
+          f"failure_reason={episode.get('failure_reason')} "
+          f"first_plan_ms={episode.get('first_plan_ms')} "
+          f"output={output_dir}")
+    return 0
+
+
+# ==============================================================================
+# 主函数
+# ==============================================================================
+
+def main() -> None:
+    """RM-65 V12 EpisodeRunner 管线架构主函数。"""
+    # ==========================================================================
+    # 1. 参数解析（与 V11 一致）+ 多机器人选择分派（Task 3.10）
+    # ==========================================================================
+    parser = _build_parser()
     args = parser.parse_args()
     logging.getLogger().setLevel(getattr(logging, args.log_level))
+
+    # R1D 仿真路径在任何 RM65 配置加载前分派（缺省/显式 rm65 → 旧路径继续）
+    rc = _dispatch_robot_selection(parser, args, sys.argv[1:])
+    if rc is not None:
+        sys.exit(rc)
 
     # ==========================================================================
     # 2. 消融模式推导 + 随机扰动（与 V11 一致）

@@ -5,9 +5,9 @@
 | 模块 | 职责 | 关键文件 | 符号数 |
 |------|------|---------|--------|
 | `robot/` | 机器人模型定义（多机器人描述/参数/绑定/模型工厂 + MuJoCo XML + 正运动学） | `rm65_model.xml`, `kinematics.py`, `robot_profile.py`, `model_factory.py` | 9 |
-| `sim/` | MuJoCo 环境封装 + 轨迹回放 + 击打检测 | `rm65_env.py`, `env.py`, `viewer.py`, `replay.py`, `hit_detection.py` | 91 |
+| `sim/` | MuJoCo 环境封装 + 轨迹回放 + 击打检测 + R1D 单臂仿真栈（配置/场景/绑定/执行/规划环境/闭环入口） | `rm65_env.py`, `env.py`, `viewer.py`, `replay.py`, `hit_detection.py`, `sim_config.py`, `tennis_scene.py`, `bound_robot_env.py`, `profile_sim_env.py`, `env_factory.py`, `collision_checks.py`, `r1d_runner.py` | 91 |
 | `dynamics/` | 动力学线性化（解析/有限差分） | `linearize.py` | 5 |
-| `ilqt/` | iLQR 求解器 + MPCController + EpisodeRunner + 可插拔策略 + 可组合组件 | `solver.py`, `mpc_controller.py`, `episode_runner.py`, `strategies/`, `components/` | 160 |
+| `ilqt/` | iLQR 求解器 + MPCController + EpisodeRunner + 可插拔策略 + 可组合组件 + R1D 规划环境 | `solver.py`, `mpc_controller.py`, `episode_runner.py`, `profile_planning_env.py`, `strategies/`, `components/` | 160 |
 | `cpp/` | C++ 加速模块（pybind11：线性化、前向传递、约束检查） | `solver_cpp.py`, `mujoco_utils.h`, `cost_params.h` | 91 |
 | `perception/` | 球状态估计（6D 卡尔曼滤波 + 观测门控） | `ball_estimator.py`, `ball_obs_gate.py` | 31 |
 | `tennis/` | 网球抛物线预测 + 击打点计算 + 球拍接触判断 | `ball.py`, `hitting.py` | 24 |
@@ -49,6 +49,10 @@ from src.tennis.ball import predict_trajectory            # 抛物线预测
 from src.utils.mujoco_loader import load_mujoco_model     # 跨平台模型加载
 from src.robot.model_factory import load_robot_model      # R1D 模型工厂（profile+参数 → RobotModelBundle）
 from src.robot.model_kinematics import ModelKinematics    # 名称映射运动学探针（TCP 位姿/雅可比）
+from src.sim.sim_config import load_sim_task_config, validate_simulation_inputs  # R1D 仿真任务配置（阶段 3）
+from src.sim.env_factory import build_r1d_environments     # R1D 执行/规划环境组装（阶段 3）
+from src.sim.r1d_runner import run_r1d_episode             # R1D 单臂闭环仿真入口（阶段 3）
+from src.ilqt.profile_planning_env import ProfilePlanningEnv  # R1D 规划侧环境（虚拟球，阶段 3）
 ```
 
 ## 模块详解
@@ -72,6 +76,14 @@ from src.robot.model_kinematics import ModelKinematics    # 名称映射运动�
 - `env.py`：`MujocoEnv` 基类（模型加载、状态读写、仿真步进）
 - `rm65_env.py`：`RM65Env` 双臂环境（力矩/位置双模式、前馈补偿、雅可比缓存、球弹跳、碰撞控制、KF 集成）
 - `viewer.py`：MuJoCo 可视化工具
+- `hit_detection.py`：击打检测共享模块（`classify_hit_result` 主动/被动/未命中判定）；接触语义（球—拍 geom 对且 `contact.dist<=0`）与主动阈值 `ACTIVE_HIT_FACE_SPEED_THRESHOLD=0.3` 由 `src/ilqt/components/sim_component.py:29,301-332` 定义
+- `sim_config.py`（阶段 3）：`SimTaskConfig` + `load_sim_task_config(path, profile)` + `validate_simulation_inputs(profile, parameters, task)`（仿真任务 YAML 严格解析/侧别与工件契约校验，纯配置层）
+- `tennis_scene.py`（阶段 3）：`TennisSceneBundle` + `build_tennis_scene(profile, parameters, task)`（球 freejoint/球—拍 pair/球拍与机身碰撞掩码/torso 场景装配）
+- `bound_robot_env.py`（阶段 3）：`BoundRobotEnv` 名称绑定单臂环境（`NQ/NX/NU`、`control_range`、`set_arm_state/update_kinematics/get_ee_*`、`step_from_state` 私有 scratch 隔离、力矩裁剪到 `torque_max`）
+- `profile_sim_env.py`（阶段 3）：`ProfileSimEnv` 带球执行环境（`step_full` + 球状态读写 + `set_arm_collision` 只切球—拍 pair_margin + `get_racket_face_speed`）
+- `env_factory.py`（阶段 3）：`RobotEnvironments` + `build_r1d_environments(profile, parameters, task)`（执行/规划双环境组装、位置模式 PD 同步、球初态注入）
+- `collision_checks.py`（阶段 3）：`has_forbidden_contact` + `ForbiddenContactChecker.from_env/has_contact_at_q`（禁止机身—臂接触检查，独立 MjData 零污染）
+- `r1d_runner.py`（阶段 3）：★ `run_r1d_episode(profile_path, runtime_path, task_path, output_dir, *, seed=None)` R1D 单臂闭环入口（MPCController + SimComponent/SimPerception/PredictiveSafetyFilter + EpisodeRunner，写 `r1d_episode.json`/`r1d_episode.npz`）
 
 ### dynamics/ — 动力学
 
@@ -88,6 +100,7 @@ from src.robot.model_kinematics import ModelKinematics    # 名称映射运动�
 - `jt_init.py`：位置模式 JT 初始控制 + 后摆 warm-start
 - `robot_env_protocol.py`：`RobotEnv` Protocol（@runtime_checkable，RM65Env/PlanningEnv 共同接口）
 - `planning_env.py`：`PlanningEnv` MPC 规划计算环境（MuJoCo 纯计算，无球/无左臂/无碰撞，供真机管线 iLQR 规划用）
+- `profile_planning_env.py`（阶段 3）：`ProfilePlanningEnv`（`BoundRobotEnv` 子类）R1D 规划侧环境——裸模型 + `BallPredictor` 纯内存虚拟球（`set_ball_state/predict_ball_trajectory` 等，不承担真实碰撞）
 - `tube_types.py`：Tube 数据结构（TubeConfig/HitWindow/HittingTube/BallTrajectoryTube/ReplanState）
 - `tube_builder.py`：Tube 构建函数（search_hit_window/build_hitting_tube）
 - `tube_cost.py`：代价包装器（TubeHittingCostWrapper/TubeOnlyCost/SoftminOnlyCost）

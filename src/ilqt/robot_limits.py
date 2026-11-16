@@ -1,4 +1,15 @@
-"""REALMAN RM65-B 真实机器人硬约束参数与 feasibility check（含滑动窗口 qddot）。"""
+"""机器人硬约束参数与 feasibility check（含滑动窗口 qddot）— n 维通用。
+
+历史版本面向 REALMAN RM65-B（n=6）；阶段 3 Task 3.7 起维度通用化：
+- 全部检查函数按 ``RobotLimits`` 限值维数 n 取状态切片（q = x[:n]，
+  qdot = x[n:]），不再硬编码 6；状态宽度与限值维数不符时显式报错；
+- ``from_config`` 保留 RM65 六维缺省（n=6 时行为不变），其余维数要求
+  配置显式提供数值；
+- 新增 ``from_runtime_parameters``：RobotRuntimeParameters（阶段 2/3
+  参数层）→ RobotLimits 适配 —— 完整参数才能构造，逐值直传（无 margin/
+  scale 隐式缩放），模型 q 限位（jnt_range 回填权威）与人为运行约束互
+  不覆盖、不互相顶替。
+"""
 
 from __future__ import annotations
 
@@ -10,21 +21,21 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 if TYPE_CHECKING:
-    pass
+    from src.robot.runtime_parameters import RobotRuntimeParameters
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class RobotLimits:
-    """REALMAN 65B 真实机器人硬约束参数（全部 SI 单位）。"""
+    """机器人硬约束参数（全部 SI 单位，n 维通用；RM65 n=6 / R1D n=7）。"""
 
-    q_lower: np.ndarray              # (6,) [rad]
-    q_upper: np.ndarray              # (6,) [rad]
-    qdot_max: np.ndarray             # (6,) [rad/s]
-    qddot_max: np.ndarray            # (6,) [rad/s²]
-    u_min: np.ndarray                # (6,) [Nm]
-    u_max: np.ndarray                # (6,) [Nm]
+    q_lower: np.ndarray              # (n,) [rad]
+    q_upper: np.ndarray              # (n,) [rad]
+    qdot_max: np.ndarray             # (n,) [rad/s]
+    qddot_max: np.ndarray            # (n,) [rad/s²]
+    u_min: np.ndarray                # (n,) [Nm]
+    u_max: np.ndarray                # (n,) [Nm]
     alpha_fallback: list[float] = field(default_factory=lambda: [0.5, 0.3, 0.2, 0.1, 0.05])
     forward_pass_margin: float = 1.5
     forward_pass_q_tol_rad: float = 0.0   # 前向传递 q 额外容忍 (rad)
@@ -42,30 +53,63 @@ class RobotLimits:
         dt: float,
         ctrlrange: np.ndarray,
     ) -> RobotLimits:
-        deg_to_rad = np.pi / 180.0
+        """从旧 RM65 风格配置构建限位（n=6 缺省行为不变，n 维显式要求）。
 
-        q_min_raw = np.array(config.get("q_min_deg", [-178, -130, -135, -178, -128, -360]), dtype=np.float64)
-        q_max_raw = np.array(config.get("q_max_deg", [178, 130, 135, 178, 128, 360]), dtype=np.float64)
+        Args:
+            config: 旧配置字典（度单位的 q/qdot/qddot 声明 + 过程参数）。
+            dt: 时间步长 (s)。
+            ctrlrange: (n,2) 执行器控制范围（u 界缺省来源）。
+
+        Returns:
+            RobotLimits 实例。
+
+        Raises:
+            ValueError: ctrlrange 形状不符，或 n≠6 时缺省项未显式提供。
+        """
+        deg_to_rad = np.pi / 180.0
+        n = _validate_control_range(ctrlrange)
+
+        # RM65 六维缺省仅在 n=6 时可用；其余维数必须显式配置
+        def _deg_array(key: str, rm65_default: list[float]) -> np.ndarray:
+            if key in config:
+                arr = np.array(config[key], dtype=np.float64)
+            elif n == 6:
+                arr = np.array(rm65_default, dtype=np.float64)
+            else:
+                raise ValueError(
+                    f"配置缺少 {key}，且非 RM65 六维（n={n}）无缺省值，"
+                    "必须显式提供（或改用 from_runtime_parameters）"
+                )
+            if arr.shape != (n,):
+                raise ValueError(f"配置 {key} 形状 {arr.shape} 应为 ({n},)")
+            return arr
+
+        q_min_raw = _deg_array("q_min_deg", [-178, -130, -135, -178, -128, -360])
+        q_max_raw = _deg_array("q_max_deg", [178, 130, 135, 178, 128, 360])
         q_margin_cfg = config.get("q_margin_deg", 8.0)
         # 支持标量（统一裕度）和数组（per-joint 裕度）
         if np.ndim(q_margin_cfg) == 0:
-            q_margin_rad = np.full(6, float(q_margin_cfg) * deg_to_rad, dtype=np.float64)
+            q_margin_rad = np.full(n, float(q_margin_cfg) * deg_to_rad, dtype=np.float64)
         else:
             q_margin_rad = np.array(q_margin_cfg, dtype=np.float64) * deg_to_rad
+            if q_margin_rad.shape != (n,):
+                raise ValueError(
+                    f"配置 q_margin_deg 形状 {q_margin_rad.shape} 应为 ({n},)"
+                )
 
         q_lower = (q_min_raw * deg_to_rad) + q_margin_rad
         q_upper = (q_max_raw * deg_to_rad) - q_margin_rad
 
-        qdot_max_raw = np.array(config.get("qdot_max_deg_s", [180, 180, 225, 225, 225, 225]), dtype=np.float64)
+        qdot_max_raw = _deg_array("qdot_max_deg_s", [180, 180, 225, 225, 225, 225])
         qdot_scale = float(config.get("qdot_scale", 0.9))
         qdot_max = qdot_max_raw * deg_to_rad * qdot_scale
 
-        qddot_max_raw = np.array(config.get("qddot_max_deg_s2", [400, 400, 500, 500, 500, 500]), dtype=np.float64)
+        qddot_max_raw = _deg_array("qddot_max_deg_s2", [400, 400, 500, 500, 500, 500])
         qddot_scale = float(config.get("qddot_scale", 0.7))
         if qddot_scale > 0.0:
             qddot_max = qddot_max_raw * deg_to_rad * qddot_scale
         else:
-            qddot_max = np.full(6, np.inf, dtype=np.float64)
+            qddot_max = np.full(n, np.inf, dtype=np.float64)
 
         u_cfg_min = config.get("u_min", None)
         u_cfg_max = config.get("u_max", None)
@@ -76,33 +120,178 @@ class RobotLimits:
             u_min_arr = ctrlrange[:, 0].copy()
             u_max_arr = ctrlrange[:, 1].copy()
 
-        alpha_fallback = [float(a) for a in config.get("alpha_fallback", [0.5, 0.3, 0.2, 0.1, 0.05])]
-        forward_pass_margin = float(config.get("forward_pass_margin", 1.5))
-        fwd_q_tol_deg = float(config.get("forward_pass_q_tol_deg", 1.5))
-        forward_pass_q_tol_rad = fwd_q_tol_deg * deg_to_rad
-        qdot_window_size = int(config.get("qdot_window", 3))
-        qddot_window_size = int(config.get("qddot_window", 5))
-        qddot_hard_reject = bool(config.get("qddot_hard_reject", False))
-        max_tcp_speed = float(config.get("max_tcp_speed", float('inf')))
-        terminal_exempt_steps = int(config.get("terminal_exempt_steps", 20))
-
-        dq_max_fraction = float(config.get("dq_max_fraction", 0.5))
-        dq_max = qdot_max * dt * dq_max_fraction
-
         return cls(
             q_lower=q_lower, q_upper=q_upper,
             qdot_max=qdot_max, qddot_max=qddot_max,
             u_min=u_min_arr, u_max=u_max_arr,
-            alpha_fallback=alpha_fallback,
-            forward_pass_margin=forward_pass_margin,
-            forward_pass_q_tol_rad=forward_pass_q_tol_rad,
-            qdot_window_size=qdot_window_size,
-            qddot_window_size=qddot_window_size,
-            qddot_hard_reject=qddot_hard_reject,
-            max_tcp_speed=max_tcp_speed,
-            terminal_exempt_steps=terminal_exempt_steps,
-            dq_max=dq_max,
+            alpha_fallback=[float(a) for a in config.get("alpha_fallback", [0.5, 0.3, 0.2, 0.1, 0.05])],
+            forward_pass_margin=float(config.get("forward_pass_margin", 1.5)),
+            forward_pass_q_tol_rad=float(config.get("forward_pass_q_tol_deg", 1.5)) * deg_to_rad,
+            qdot_window_size=int(config.get("qdot_window", 3)),
+            qddot_window_size=int(config.get("qddot_window", 5)),
+            qddot_hard_reject=bool(config.get("qddot_hard_reject", False)),
+            max_tcp_speed=float(config.get("max_tcp_speed", float('inf'))),
+            terminal_exempt_steps=int(config.get("terminal_exempt_steps", 20)),
+            dq_max=qdot_max * dt * float(config.get("dq_max_fraction", 0.5)),
         )
+
+    @classmethod
+    def from_runtime_parameters(
+        cls,
+        parameters: RobotRuntimeParameters,
+        control_range: np.ndarray,
+        config: dict | None = None,
+    ) -> RobotLimits:
+        """从 RobotRuntimeParameters 构建限位（阶段 3 · Task 3.7 适配）。
+
+        语义约定（施工计划 Task 3.7）：
+        - **完整参数才能构造**：q_lower/q_upper/qdot_max/qddot_max/
+          torque_max/max_tcp_speed 任一为 None 即拒绝（未知限值不得进入
+          仿真/执行；与 ``validate_runtime_parameters(purpose="simulation")``
+          同一完整性口径，但此处不依赖 profile，独立逐项校验）；
+        - **逐值直传**：不加 q margin、不乘 qdot/qddot scale —— runtime
+          声明值即最终限值（与 ``from_config`` 的 RM65 裕度/缩放路径不同，
+          两条路径互不影响）；
+        - **不互相覆盖**：模型 q 限位（阶段 2 jnt_range 回填权威）与人为
+          运行约束各自保留；``control_range`` 仅作维数锚定与有限性校验，
+          不顶替 torque_max（u 界）也不顶替 q 界 —— 位置模式下
+          control_range 是关节范围，力矩界限仍以 torque_max 为准；
+        - u 界取 ±torque_max（对称幅值，来自 runtime）。
+
+        Args:
+            parameters: RobotRuntimeParameters 实例（通常为模型回填后的
+                ``bundle.parameters``，q_lower/q_upper 已从 jnt_range 解析）。
+            control_range: (n,2) 执行器控制范围（``env.control_range`` 副本；
+                仅锚定维数，不参与限值合成）。
+            config: 可选过程参数（键名同 ``from_config``：alpha_fallback /
+                forward_pass_margin / forward_pass_q_tol_deg / qdot_window /
+                qddot_window / qddot_hard_reject / terminal_exempt_steps /
+                dq_max_fraction；缺省与 from_config 一致）。
+
+        Returns:
+            RobotLimits 实例（n = control_range 行数）。
+
+        Raises:
+            ValueError: 限值不完整（None）、control_range/数组形状不符、
+                数组含非有限值或符号约束失败。
+        """
+        cfg = config or {}
+        n = _validate_control_range(control_range)
+        context = f"robot_id: {getattr(parameters, 'robot_id', '?')}"
+
+        # 完整性：六个动态限值字段全部必须已知
+        required = (
+            "q_lower", "q_upper", "qdot_max", "qddot_max",
+            "torque_max", "max_tcp_speed",
+        )
+        missing = [name for name in required if getattr(parameters, name, None) is None]
+        if missing:
+            raise ValueError(
+                f"限值不完整：缺少 {missing}（完整参数才能构造 RobotLimits，"
+                f"未知限值不得进入仿真/执行；{context}）"
+            )
+
+        def _array(name: str, *, positive: bool) -> np.ndarray:
+            arr = np.array(getattr(parameters, name), dtype=np.float64)
+            if arr.shape != (n,):
+                raise ValueError(
+                    f"字段 {name} 形状 {arr.shape} 与 control_range 维数 "
+                    f"({n},) 不符（{context}）"
+                )
+            if not bool(np.all(np.isfinite(arr))):
+                raise ValueError(f"字段 {name} 含非有限值（{context}）")
+            if positive and bool(np.any(arr <= 0.0)):
+                raise ValueError(f"字段 {name} 必须逐元素为正（{context}）")
+            return arr
+
+        q_lower = _array("q_lower", positive=False)
+        q_upper = _array("q_upper", positive=False)
+        if bool(np.any(q_lower >= q_upper)):
+            raise ValueError(f"字段 q_lower 存在 >= q_upper 的关节（{context}）")
+        qdot_max = _array("qdot_max", positive=True)
+        qddot_max = _array("qddot_max", positive=True)
+        torque_max = _array("torque_max", positive=True)
+        tcp_speed_raw = parameters.max_tcp_speed
+        if tcp_speed_raw is None:
+            # 不可达（missing 检查已含 max_tcp_speed）；显式收窄供类型检查
+            raise ValueError(
+                f"限值不完整：缺少 ['max_tcp_speed']（完整参数才能构造，{context}）"
+            )
+        max_tcp_speed = float(tcp_speed_raw)
+        if not np.isfinite(max_tcp_speed) or max_tcp_speed <= 0.0:
+            raise ValueError(
+                f"字段 max_tcp_speed={max_tcp_speed} 必须为正有限值（{context}）"
+            )
+
+        deg_to_rad = np.pi / 180.0
+        dt = float(parameters.dt)
+        return cls(
+            q_lower=q_lower.copy(),
+            q_upper=q_upper.copy(),
+            qdot_max=qdot_max.copy(),
+            qddot_max=qddot_max.copy(),
+            u_min=-torque_max.copy(),
+            u_max=torque_max.copy(),
+            alpha_fallback=[float(a) for a in cfg.get("alpha_fallback", [0.5, 0.3, 0.2, 0.1, 0.05])],
+            forward_pass_margin=float(cfg.get("forward_pass_margin", 1.5)),
+            forward_pass_q_tol_rad=float(cfg.get("forward_pass_q_tol_deg", 1.5)) * deg_to_rad,
+            qdot_window_size=int(cfg.get("qdot_window", 3)),
+            qddot_window_size=int(cfg.get("qddot_window", 5)),
+            qddot_hard_reject=bool(cfg.get("qddot_hard_reject", False)),
+            max_tcp_speed=max_tcp_speed,
+            terminal_exempt_steps=int(cfg.get("terminal_exempt_steps", 20)),
+            dq_max=qdot_max * dt * float(cfg.get("dq_max_fraction", 0.5)),
+        )
+
+
+# ==============================================================================
+#  维数解析与状态切片辅助（n 维通用）
+# ==============================================================================
+
+
+def _validate_control_range(ctrlrange: np.ndarray) -> int:
+    """校验控制范围形状并返回维数 n。
+
+    Raises:
+        ValueError: ctrlrange 不是 (n,2) 有限数组。
+    """
+    arr = np.asarray(ctrlrange, dtype=np.float64)
+    if arr.ndim != 2 or arr.shape[1] != 2 or arr.shape[0] < 1:
+        raise ValueError(f"ctrlrange 形状 {arr.shape} 应为 (n,2)，n ≥ 1")
+    if not bool(np.all(np.isfinite(arr))):
+        raise ValueError("ctrlrange 含非有限值")
+    return int(arr.shape[0])
+
+
+def _nq_from_limits(limits: RobotLimits) -> int:
+    """从限值数组解析维数 n 并校验各限值数组维数一致。
+
+    Raises:
+        ValueError: 任一限值数组形状与 q_lower 不一致。
+    """
+    n = int(np.asarray(limits.q_lower).shape[0])
+    for name in ("q_upper", "qdot_max", "qddot_max", "u_min", "u_max"):
+        if int(np.asarray(getattr(limits, name)).shape[0]) != n:
+            raise ValueError(
+                f"RobotLimits 限值数组维数不一致：q_lower 为 {n}，"
+                f"{name} 为 {np.asarray(getattr(limits, name)).shape[0]}"
+            )
+    return n
+
+
+def _validate_state_width(x: np.ndarray, nq: int, label: str) -> np.ndarray:
+    """校验状态/控制向量宽度（q/qdot 分界 = nq），失败显式报错。
+
+    Raises:
+        ValueError: 状态向量宽度不等于 2*nq。
+    """
+    arr = np.asarray(x, dtype=np.float64)
+    if arr.shape != (2 * nq,):
+        raise ValueError(
+            f"状态向量 {label} 形状 {arr.shape} 应为 ({2 * nq},)"
+            f"（q/qdot 分界 = 限值维数 nq={nq}）"
+        )
+    return arr
 
 
 # ==============================================================================
@@ -114,9 +303,13 @@ def compute_qddot_filtered(
     dt: float,
     window_size: int,
 ) -> np.ndarray:
+    """滑动窗口加速度估算（n 维：返回与 history 元素同维的数组）。"""
     effective_len = min(len(qdot_history), window_size + 1)
     if effective_len < 2:
-        return np.zeros(6)
+        # 窗口不足：返回与最近一次记录同形状的零加速度（无记录时为零长）
+        if len(qdot_history) == 0:
+            return np.zeros(0)
+        return np.zeros_like(np.asarray(qdot_history[-1]))
     return (qdot_history[-1] - qdot_history[-effective_len]) / ((effective_len - 1) * dt)
 
 
@@ -174,11 +367,16 @@ def compute_trajectory_metrics(
     dt: float,
     env=None,
 ) -> TrajectoryMetrics:
-    """对已 rollout 的轨迹采集约束指标。
+    """对已 rollout 的轨迹采集约束指标（n 维：q/qdot 分界取自 limits）。
 
     若提供 env，则用 FK 计算 TCP 和球拍面速度（仅后 10 步节省开销）。
+
+    Raises:
+        ValueError: 轨迹状态宽度与限值维数不一致。
     """
-    nq = 6
+    nq = _nq_from_limits(limits)
+    if len(X) > 0 and np.asarray(X[0]).shape != (2 * nq,):
+        _validate_state_width(np.asarray(X[0]), nq, "X[0]")
     metrics = TrajectoryMetrics()
     qdot_hist: deque = deque(maxlen=limits.qddot_window_size + 1)
     n = len(U)
@@ -285,11 +483,19 @@ def check_step_feasibility(
 
     Returns:
         (pass, reason)
+
+    Raises:
+        ValueError: 状态/控制宽度与限值维数不一致。
     """
-    nq = 6
-    q_next = x_next[:nq]
-    qdot_next = x_next[nq:]
-    qdot_prev = x_prev[nq:]
+    nq = _nq_from_limits(limits)
+    x_next_arr = _validate_state_width(np.asarray(x_next, dtype=np.float64), nq, "x_next")
+    _validate_state_width(np.asarray(x_prev, dtype=np.float64), nq, "x_prev")
+    u_arr = np.asarray(u_try, dtype=np.float64)
+    if u_arr.shape != (nq,):
+        raise ValueError(f"控制向量 u_try 形状 {u_arr.shape} 应为 ({nq},)")
+    q_next = x_next_arr[:nq]
+    qdot_next = x_next_arr[nq:]
+    qdot_prev = np.asarray(x_prev, dtype=np.float64)[nq:]
 
     # 1. 关节角度（前向传递可以用 fp_q_tol 额外放宽）
     for j in range(nq):
@@ -410,11 +616,19 @@ def strict_braking_check(
       - 只检查 q/u，不检查 qdot/TCP（击球需要速度）
       - terminal_exempt_steps=0 时全程无豁免
     actuator_mode: 0=力矩模式(检查 u_min/u_max), 1=位置模式(检查 dq_max)。
+
+    Raises:
+        ValueError: 状态/控制宽度与限值维数不一致。
     """
-    nq = 6
-    q_next = x_next[:nq]
-    qdot_prev = x_prev[nq:]
-    qdot_next = x_next[nq:]
+    nq = _nq_from_limits(limits)
+    x_next_arr = _validate_state_width(np.asarray(x_next, dtype=np.float64), nq, "x_next")
+    x_prev_arr = _validate_state_width(np.asarray(x_prev, dtype=np.float64), nq, "x_prev")
+    u_arr = np.asarray(u_try, dtype=np.float64)
+    if u_arr.shape != (nq,):
+        raise ValueError(f"控制向量 u_try 形状 {u_arr.shape} 应为 ({nq},)")
+    q_next = x_next_arr[:nq]
+    qdot_prev = x_prev_arr[nq:]
+    qdot_next = x_next_arr[nq:]
 
     for j in range(nq):
         if q_next[j] < limits.q_lower[j]:
@@ -489,11 +703,20 @@ def check_limits_on_trajectory(
     dt: float,
     actuator_mode: int = 0,
 ) -> tuple[bool, int, str]:
+    """整条轨迹逐步限位检查（n 维：q/qdot 分界取自 limits 维数）。
+
+    Returns:
+        (ok, 首个违规步索引 k 或 -1, reason)。
+    """
     if limits is None:
         return True, -1, ""
+    nq = _nq_from_limits(limits)
     qdot_hist: deque = deque(maxlen=limits.qddot_window_size + 1)
     for k in range(len(U)):
-        build_qdot_history(qdot_hist, X[k][6:], limits.qddot_window_size)
+        build_qdot_history(
+            qdot_hist, np.asarray(X[k], dtype=np.float64)[nq:],
+            limits.qddot_window_size,
+        )
         ok, reason = check_step_feasibility(
             X[k], X[k + 1], U[k], limits, dt, step=k,
             skip_qdot=False, skip_qddot=False,
@@ -502,5 +725,8 @@ def check_limits_on_trajectory(
         )
         if not ok:
             return False, k, reason
-        build_qdot_history(qdot_hist, X[k + 1][6:], limits.qddot_window_size)
+        build_qdot_history(
+            qdot_hist, np.asarray(X[k + 1], dtype=np.float64)[nq:],
+            limits.qddot_window_size,
+        )
     return True, -1, ""

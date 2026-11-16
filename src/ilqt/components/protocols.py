@@ -5,7 +5,7 @@
 """
 
 from __future__ import annotations
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 from numpy.typing import NDArray
 import numpy as np
 
@@ -28,11 +28,15 @@ class ExecutorComponent(Protocol):
     """执行组件接口 — 执行控制指令、提供臂状态和指标。"""
 
     def get_arm_state(self) -> NDArray[np.floating]:
-        """读取当前臂状态 [q(6), qdot(6)]，弧度，形状 (12,)。"""
+        """读取当前臂状态 [q(n), qdot(n)]，弧度，形状 (2n,)。
+
+        n 为臂关节数（RM65=6 → (12,)；R1D=7 → (14,)），维度由
+        注入的环境决定，组件不得假设固定宽度。
+        """
         ...
 
     def execute(self, u_cmd: NDArray[np.floating]) -> None:
-        """执行控制指令（力矩或 q_desired）。"""
+        """执行控制指令（力矩或 q_desired），形状 (n,)。"""
         ...
 
     def get_metrics(self) -> dict:
@@ -53,6 +57,109 @@ class SafetyComponent(Protocol):
         self, u_cmd: NDArray[np.floating], arm_state: NDArray[np.floating]
     ) -> tuple[NDArray[np.floating], bool]:
         """安全滤波 → (safe_u, is_safe)。"""
+        ...
+
+
+# ── 仿真执行环境协议（Task 3.9：SimComponent 按协议而非 RM65 类型消费）──
+
+
+@runtime_checkable
+class SimExecutionEnv(Protocol):
+    """仿真执行环境接口 — SimComponent 消费的最小成员集合。
+
+    RM65Env（旧 RM65 路径）与 ProfileSimEnv（R1D 路径，阶段 3 · 3.4）
+    共同满足本协议；SimComponent 依赖本协议而非具体环境类型，
+    执行/诊断逻辑对臂维数 n（6 或 7）通用。
+
+    成员语义：
+      - ``NQ``/``NU``：主动臂关节数/执行器数（实例属性或 property）；
+      - ``dt``：物理步长（秒）；
+      - ``model``/``data``：MuJoCo 模型与 live 数据（接触判定读
+        ``data.ncon``/``data.contact``，geom 查询走 ``model``）；
+      - ``control_range``：(n,2) 执行器控制范围副本（X 墙推回/
+        advance_ball 的力矩裁剪用它，不假设执行器占据地址前缀）；
+      - ``step_full(u)``：前进一步返回 (arm_state, ball_pos, ball_vel)；
+      - ``set_arm_collision(enabled)``：碰撞窗口（RM65=臂 geom 掩码；
+        ProfileSimEnv=仅球—拍 pair_margin 通道，机身保护常开）；
+      - 球读写：``get_ball_pos``/``get_ball_vel``/``set_ball_vel``；
+      - 末端查询：``get_ee_pos``/``get_ee_vel``/``get_ee_normal``/
+        ``get_racket_face_speed``（主动命中拍速阈值判定）。
+    """
+
+    @property
+    def NQ(self) -> int:
+        """主动臂关节数 n。"""
+        ...
+
+    @property
+    def NU(self) -> int:
+        """执行器数 n。"""
+        ...
+
+    @property
+    def dt(self) -> float:
+        """物理步长（秒）。"""
+        ...
+
+    @property
+    def model(self) -> Any:
+        """MuJoCo MjModel（geom 查询与接触判定用）。"""
+        ...
+
+    @property
+    def data(self) -> Any:
+        """MuJoCo MjData（live 状态与接触数组）。"""
+        ...
+
+    @property
+    def control_range(self) -> NDArray[np.floating]:
+        """(n,2) 执行器控制范围副本。"""
+        ...
+
+    def get_arm_state(self) -> NDArray[np.floating]:
+        """读取臂状态 (2n,)。"""
+        ...
+
+    def update_kinematics(self) -> None:
+        """轻量运动学刷新。"""
+        ...
+
+    def step_full(
+        self, u: NDArray[np.floating]
+    ) -> tuple[NDArray[np.floating], NDArray[np.floating], NDArray[np.floating]]:
+        """前进一步 → (arm_state, ball_pos, ball_vel)。"""
+        ...
+
+    def set_arm_collision(self, enabled: bool) -> None:
+        """碰撞窗口开关（语义见类 docstring）。"""
+        ...
+
+    def get_ball_pos(self) -> NDArray[np.floating]:
+        """物理球位置 (3,)。"""
+        ...
+
+    def get_ball_vel(self) -> NDArray[np.floating]:
+        """物理球线速度 (3,)。"""
+        ...
+
+    def set_ball_vel(self, vel: NDArray[np.floating]) -> None:
+        """写入物理球速度（反弹）。"""
+        ...
+
+    def get_ee_pos(self) -> NDArray[np.floating]:
+        """末端（拍面中心）位置 (3,)。"""
+        ...
+
+    def get_ee_vel(self) -> NDArray[np.floating]:
+        """末端线速度 (3,)。"""
+        ...
+
+    def get_ee_normal(self) -> NDArray[np.floating]:
+        """拍面法向 (3,)。"""
+        ...
+
+    def get_racket_face_speed(self) -> float:
+        """拍面中心线速度标量 [m/s]。"""
         ...
 
 

@@ -1,4 +1,17 @@
-"""动力学线性化（有限差分法 + 解析法）。"""
+"""动力学线性化（有限差分法 + 解析法）。
+
+维度约定（Task 3.5 起）：
+- **有限差分路径**（``linearize_dynamics``/``linearize_trajectory``）完全
+  维度无关：维数取自 ``env.NX/NQ/NU`` 实例属性，状态推进走
+  ``env.step_from_state``（按环境绑定地址读写），n=6/7 及地址重排模型
+  均正确——R1D 的既定线性化路径。
+- **解析路径**（``linearize_analytical``/``linearize_fast_trajectory``）
+  含**前缀布局假设**：质量矩阵子块直接取 ``M_full[:nv,:nv]``、偏置力
+  偏导直接写 ``data.qpos[:nv]``，仅适用于臂占据模型地址前缀的旧 RM65
+  环境（RM65Env/PlanningEnv）。非前缀布局环境（free joint 前置、执行器
+  乱序）不得走解析路径——``build_solver`` 已按
+  ``is_cpp_kernel_compatible`` 同源规则强制此类环境使用 FD。
+"""
 
 import numpy as np
 import mujoco
@@ -14,15 +27,17 @@ def linearize_dynamics(
     """在 (x, u) 处用中心差分线性化动力学。
 
     计算 A = ∂f/∂x, B = ∂f/∂u, 以及 f(x, u) 的基准下一步状态。
+    完全维度无关（n=6/7 通吃）：所有扰动经 ``env.step_from_state``
+    推进，按环境绑定地址生效，不依赖前缀布局假设。
 
     Args:
         env: MuJoCo 环境实例。
-        x: 当前臂状态，形状 (12,)。
-        u: 当前控制，形状 (6,)。
+        x: 当前臂状态，形状 (NX,)。
+        u: 当前控制，形状 (NU,)。
         eps: 有限差分步长。
 
     Returns:
-        (A, B, x_next): A 形状 (12,12)，B 形状 (12,6)，x_next 形状 (12,)。
+        (A, B, x_next): A 形状 (NX,NX)，B 形状 (NX,NU)，x_next 形状 (NX,)。
     """
     n_x = env.NX
     n_u = env.NU
@@ -69,8 +84,8 @@ def linearize_trajectory(
 
     Args:
         env: MuJoCo 环境实例。
-        X: 状态轨迹，形状 (N+1, 12)。
-        U: 控制轨迹，形状 (N, 6)。
+        X: 状态轨迹，形状 (N+1, NX)。
+        U: 控制轨迹，形状 (N, NU)。
         eps: 有限差分步长。
 
     Returns:
@@ -126,6 +141,11 @@ def linearize_analytical(
       B_c = [0; M^{-1}*diag(Kp)]
       跳过 H_q/H_qdot 计算（约 50% 加速）。
 
+    ⚠️ 布局假设（模块 docstring）：质量矩阵/偏置力偏导按
+    ``M_full[:nv,:nv]``、``data.qpos[:nv]`` **前缀地址**取子块，仅适用
+    于臂占据模型地址前缀的旧 RM65 环境；非前缀布局环境（R1D 带球模型
+    等）不得调用本函数（走有限差分路径）。
+
     方法：
     1. mj_fullM 一次求 M（解析质量矩阵）
     2. mj_rne 多次求 h 和其偏导数 H_q, Ḣ（中心差分，前馈模式跳过）
@@ -161,11 +181,12 @@ def linearize_analytical(
     M_inv = np.linalg.solve(M, np.eye(nv))
 
     # ---- 2. 计算基准偏置力 h(q, qdot) ----
-    # mj_rne(flq_acc=0) 返回 h = C*qdot + g(q)
+    # mj_rne(flq_acc=0) 返回 h = C*qdot + g(q)；h 本身不直接使用，
+    # 其偏导 H_q/H_qdot 在下方以差分计算（此处调用仅为保持与既有
+    # 实现一致的 RNE 状态序列）
     data.qacc[:] = 0.0
     h_base = np.zeros(model.nv)
     mujoco.mj_rne(model, data, 0, h_base)
-    h_arm = h_base[:nv].copy()
 
     # ---- 3-4. 计算 ∂h/∂q 和 ∂h/∂qdot（前馈模式跳过） ----
     H_q = np.zeros((nv, nv))
@@ -309,6 +330,11 @@ def linearize_fast_trajectory(
     f 通过完整动力学 step_from_state 计算，保证前向传递精度。
 
     适用于 far 阶段 MPC 重规划：线性模型精度较低但计算速度约快 10×。
+
+    ⚠️ 布局假设（模块 docstring）：``M_full[:nv,:nv]`` 取前缀子块，
+    仅适用于臂占据模型地址前缀的旧 RM65 环境；非前缀布局环境不得
+    调用本函数（FD 后端的求解器在 ``use_fast_lin=True`` 时由
+    ``ILQTSolver._linearize_fast`` 自动回退完整 FD，Task 3.5）。
 
     Args:
         env: MuJoCo 环境实例。

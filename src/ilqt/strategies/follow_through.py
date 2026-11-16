@@ -27,11 +27,15 @@ class FollowContext:
         step_count: 当前 MPC 步索引。
         mpc_horizon: MPC 阶段总步数（超过即强制触发随挥）。
         k_hit: 剩余击球步数（planned 模式下 ≤1 触发）。
-        arm_state: 臂状态 [q(6), qdot(6)] (12,)。
+        arm_state: 臂状态 [q(n), qdot(n)] (2n,)。
         ball_pos: 球当前位置 (3,)（触发时记录为 ball_pos_at_hit）。
         d_follow: 随挥方向单位向量 (3,)。
         v_hit_desired: 期望击球时刻末端速度 (3,)。
-        env: 规划环境（提供 FK/IK/Jacobian）。
+        env: 规划环境（提供 FK/IK/Jacobian；RM65 PlanningEnv 或 R1D
+            绑定环境族，鸭子类型：set_arm_state/get_ee_pos/get_ee_jacp/
+            solve_ik/control_range）。
+        robot_limits: 关节限位（可选；绑定环境位置模式随挥 IK 校验用，
+            Task 3.8）。None 跳过限位校验（RM65 原行为）。
     """
 
     step_count: int
@@ -42,6 +46,7 @@ class FollowContext:
     d_follow: NDArray[np.floating]
     v_hit_desired: NDArray[np.floating]
     env: Any  # PlanningEnv（鸭子类型：set_arm_state/get_ee_pos/get_ee_jacp/solve_ik/model）
+    robot_limits: Any = None  # 关节限位（R1D 随挥 IK 校验，Task 3.8）
 
 
 @runtime_checkable
@@ -223,9 +228,7 @@ class PlannedFollowThrough:
 
         ctx.env.set_arm_state(ctx.arm_state)
         if self._is_position_mode:
-            u_follow = ctx.env.solve_ik(
-                p_des_follow, q_init=ctx.arm_state[: self._NQ], max_iter=20, eps=1e-2,
-            )
+            u_follow = self._solve_follow_ik(ctx, p_des_follow)
         else:
             p_ee_cur = ctx.env.get_ee_pos()
             J_p = ctx.env.get_ee_jacp()
@@ -235,9 +238,48 @@ class PlannedFollowThrough:
             )
             u_follow = J_p.T @ F_follow
 
-        ctrl_lo = ctx.env.model.actuator_ctrlrange[: self._NU, 0]
-        ctrl_hi = ctx.env.model.actuator_ctrlrange[: self._NU, 1]
-        return np.clip(u_follow, ctrl_lo, ctrl_hi)
+        # Task 3.8: 控制界经 env.control_range（RobotEnv 协议，按执行器
+        # 绑定序；RM65 前缀序与旧 actuator_ctrlrange[:NU] 逐值一致）
+        ctrl_range = np.asarray(ctx.env.control_range, dtype=np.float64)
+        return np.clip(u_follow, ctrl_range[:, 0], ctrl_range[:, 1])
+
+    def _solve_follow_ik(
+        self, ctx: FollowContext, p_des_follow: NDArray[np.floating],
+    ) -> NDArray[np.floating]:
+        """位置模式随挥 IK（绑定环境带误差/限位校验，失败回退 hold）。
+
+        RM65（无 binding 属性）保持原行为：裸 solve_ik，不校验。
+        绑定环境（R1D，Task 3.8）：IK 结果必须检查误差和限位——失败
+        告警并回退 hold（当前角度），不带坏指令继续。
+
+        Args:
+            ctx: 随挥上下文。
+            p_des_follow: 随挥目标位置 (3,)。
+
+        Returns:
+            位置指令 (NU,)；IK 失败时为当前角度（hold 回退）。
+        """
+        if not hasattr(ctx.env, "binding"):
+            # RM65 原路径
+            return ctx.env.solve_ik(
+                p_des_follow, q_init=ctx.arm_state[: self._NQ],
+                max_iter=20, eps=1e-2,
+            )
+        from src.ilqt.jt_init import solve_ik_checked
+
+        try:
+            return solve_ik_checked(
+                ctx.env, p_des_follow,
+                q_init=ctx.arm_state[: self._NQ],
+                robot_limits=ctx.robot_limits,
+                max_iter=20, eps=1e-2, pos_tol=0.05,
+                label="随挥 ",
+            )
+        except ValueError as exc:
+            logger.warning(
+                "随挥 IK 失败，回退 hold（保持当前角度）: %s", exc,
+            )
+            return ctx.arm_state[: self._NQ].copy()
 
     def is_done(self, step_in_follow: int, ctx: FollowContext) -> bool:
         """判定随挥是否完成。

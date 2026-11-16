@@ -2,6 +2,19 @@
 
 iLQT 求解器、代价函数、安全滤波器仅依赖此协议，
 实现仿真（RM65Env）与规划计算（PlanningEnv）的零耦合替换。
+
+阶段 3 Task 3.3 起，协议从 RM65 专属假设中解放为维度无关：
+- 维度常量 ``NQ/NX/NU`` 允许实现为类变量（旧 RM65 实现，n=6）或
+  实例属性（``src/sim/bound_robot_env.py::BoundRobotEnv``，按
+  ``ModelBinding`` 维数确定，n=6/7 通吃）；
+- ``control_range``：每执行器 (n,2) 控制范围**只读副本**，行序与
+  环境的执行器绑定顺序一致（旧实现为前缀 ``[:NU]``，绑定实现为
+  ``binding.actuator_ids``）；求解器与限位层按它裁剪控制；
+- ``LEFT_ARM_NQ`` / ``init_q_left`` 为 **RM65 双臂旧实现专属属性**
+  （RM65Env/PlanningEnv 继续提供），仅供旧 C++ 线性化/回放管线
+  （``src/cpp/solver_cpp.py``、回放脚本）消费；它们不属于通用规划
+  消费者的必需接口，新实现（BoundRobotEnv）不提供。旧路径保持
+  原样，不做迁移。
 """
 
 from typing import Protocol, runtime_checkable, TYPE_CHECKING
@@ -14,26 +27,24 @@ if TYPE_CHECKING:
 
 @runtime_checkable
 class RobotEnv(Protocol):
-    """机器人环境协议 — RM65Env 和 PlanningEnv 的共同接口。
-
-    维度常量 NQ/NX/NU/LEFT_ARM_NQ 为类变量（非 property），
-    model/data 为 MuJoCo 模型实例。
+    """机器人环境协议 — RM65Env、PlanningEnv 与 BoundRobotEnv 的共同接口。
 
     属性:
         model: MuJoCo 模型（MjModel），用于读取关节范围、actuator 等静态信息。
         data: MuJoCo 数据（MjData），用于读取/写入当前状态及 FK 结果。
-        init_q_left: 左臂初始关节角度，用于双臂模型中设置左臂零位。
-        LEFT_ARM_NQ: 左臂自由度数（6），用于 qpos 索引偏移计算。
+        NQ: 主动关节数 n（类变量或实例属性）。
+        NX: 状态维数 2n。
+        NU: 控制维数 n。
+        control_range: (n,2) 每执行器控制范围只读副本（随执行器模式切换）。
     """
 
     NQ: int
     NX: int
     NU: int
-    LEFT_ARM_NQ: int
-    init_q_left: np.ndarray
 
     model: "mujoco.MjModel"
     data: "mujoco.MjData"
+    control_range: np.ndarray
 
     @property
     def dt(self) -> float: ...

@@ -12,7 +12,9 @@
 - ``load_robot_model``：读取磁盘模板 → 仅在副本上应用本次参数（经
   ``load_mujoco_model`` 的 xml_text 通道，不改磁盘模板）→ 绑定名称 →
   校验维数与初态 → 从 ``model.jnt_range`` 填充 q_lower/q_upper →
-  返回 RobotModelBundle。
+  返回 RobotModelBundle。组装管线提取为私有共享函数
+  ``_assemble_bound_model``（阶段 3 Task 3.2 的 build_tennis_scene 复用，
+  不改变本函数的模型形状与验收契约）。
 
 约定：
 - 支持集 robot_id = ``unitree_r1d``（无 unitree_d2 分支；原 D2 场景组装
@@ -40,7 +42,7 @@ import shutil
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 import mujoco
 import numpy as np
@@ -237,29 +239,69 @@ def load_robot_model(
     # 身份/关节序/维数/初态（kinematics 级）统一走 2.2 校验
     validate_runtime_parameters(parameters, profile, purpose="kinematics")
 
+    bundle = _assemble_bound_model(
+        profile, parameters, validate_shape=_validate_model_shape
+    )
+    logger.info(
+        "R1D 模型组装完成: nq=%d nv=%d nu=%d TCP site=%s（参数来源: %s）",
+        bundle.model.nq,
+        bundle.model.nv,
+        bundle.model.nu,
+        profile.tcp_site_name,
+        bundle.parameters.source,
+    )
+    return bundle
+
+
+def _assemble_bound_model(
+    profile: RobotProfile,
+    parameters: RobotRuntimeParameters,
+    *,
+    validate_shape: Callable[[mujoco.MjModel, RobotProfile], None],
+    mutate: Callable[[ET.Element], None] | None = None,
+) -> RobotModelBundle:
+    """共享组装管线（load_robot_model 与 3.2 带球场景 build_tennis_scene 共用）。
+
+    流程：读取磁盘模板 → 仅在模板副本（xml_text）上应用本次参数 →
+    可选 ``mutate`` 追加组装（如 3.2 的球/掩码）→ 经 load_mujoco_model
+    编译 → ``validate_shape`` 校验模型形状（裸模型与带球模型维数契约
+    不同，由调用方注入）→ bind_robot_model 按名绑定 → 校验初态 → 从
+    model.jnt_range 填充 q_lower/q_upper 并复核。磁盘模板字节不变。
+
+    Args:
+        profile: 机器人描述（model_path 指向模板）。
+        parameters: 运行参数（须含 scene；仅做 kinematics 级校验，
+            完整仿真预检由 3.1 validate_simulation_inputs 负责）。
+        validate_shape: 模型形状校验回调（裸/带球维数契约不同）。
+        mutate: 模板副本的追加组装回调（元素级修改，须保持可编译）。
+
+    Returns:
+        同源组装结果；parameters 为填充关节限位后的新对象（输入不改写）。
+
+    Raises:
+        ValueError: scene 缺失、模板结构漂移、形状校验失败、名称绑定
+            失败、初态超限或显式限位与模型不一致。
+    """
+    _require_scene(parameters, "_assemble_bound_model")
+
     # 仅在模板副本上应用参数：磁盘模板只读，数值经 xml_text 编译
     template_root = ET.fromstring(profile.model_path.read_bytes())
     _apply_scene_parameters(template_root, parameters)
+    if mutate is not None:
+        mutate(template_root)
     xml_text = ET.tostring(template_root, encoding="unicode")
     model = load_mujoco_model(profile.model_path, xml_text=xml_text)
 
-    _validate_model_shape(model, profile)
+    validate_shape(model, profile)
     binding = bind_robot_model(profile, model)
     _check_initial_state(model, binding, parameters)
 
     filled = _populate_joint_limits(parameters, model, binding)
     # 填充限位后复核：init_q 必须落在模型 jnt_range 界内
     validate_runtime_parameters(filled, profile, purpose="kinematics")
-
-    logger.info(
-        "R1D 模型组装完成: nq=%d nv=%d nu=%d TCP site=%s（参数来源: %s）",
-        model.nq,
-        model.nv,
-        model.nu,
-        profile.tcp_site_name,
-        filled.source,
+    return RobotModelBundle(
+        profile=profile, parameters=filled, model=model, binding=binding
     )
-    return RobotModelBundle(profile=profile, parameters=filled, model=model, binding=binding)
 
 
 # ---------------------------------------------------------------- 组装辅助

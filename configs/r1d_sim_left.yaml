@@ -1,0 +1,126 @@
+# R1D 左臂仿真击球任务配置（SimTaskConfig，schema v1）— 阶段 3 Task 3.1。
+# 消费：load_sim_task_config(configs/r1d_sim_left.yaml, r1d_left.yaml 的 profile)。
+# 侧别由 robot_id + joint_names 与 profile 校验（不靠本文件名猜测）。
+# 配套 runtime：configs/robots/r1d_sim_runtime_left.yaml（完整显式，provisional）。
+#
+# ⚠ 本文件全部可调数值为 provisional 试验值（3.11 调参时留版本记录），
+# 不冒充硬件参数；每项给出数值、理由与来源：
+# - ball_joint_name/ball_geom_name：沿用项目网球命名先例（rm65_model.xml
+#   L305/L308：freejoint "ball_freejoint"、geom "ball"）；3.2 按名组装带球场景。
+# - racket_geom_names：racket_face（r1d_model_left.xml L103，阶段 2 模板球拍唯一 geom）。
+# - protected_geom_pairs：7 个臂连杆 geom（r1d_model_left.xml L75-99，
+#   URDF mesh geom 名 *_visual）+ 球拍 geom，各与简化机身 torso_box（L121）
+#   组成禁止接触对（3.2 计划"臂—简化机身、球拍—机身必要禁止对显式配置"）。
+#   非相邻臂段间保护由 3.2 的排除表负责，不在此堆列。
+# - workspace_center/radius：FK 实测依据 — 左肩世界位置 [0.059, 0.086, 1.358]，
+#   init_q 拍面 [0.169, 0.106, 1.502]，肘伸直位拍面 [0.393, 0.141, 1.332]
+#   （阶段 2 模板 mj_forward 实测）；取肩前外方 0.25m 为击球区中心，
+#   半径 0.45 = 臂+拍可达半径（肩球约 0.35）+ 拍面半径 0.12 的量级。
+#   provisional。
+# - initial_ball_position/velocity：来球距离 2.5m、球速 5 m/s（低于 RM65
+#   仿真 7-9 m/s 的首轮保守值）、自 2.8m 高度下落弧线；抛物线验算
+#   t≈0.44s 到达击球高度 1.40m、落点 [0.30, 0.32, 1.41]（工作区球内）。
+#   provisional。
+# - max_steps：600 步 = 3.0s（dt=0.005），覆盖 0.44s 来球 + 挥拍 + 随挥
+#   与收尾上限。provisional。
+# - actuator_mode：torque（力矩模式；位置模式为仿真 PD，需 runtime kp/kd）。
+# - solver_config：backend=python（Global Constraints：R1D 默认 Python+FD，
+#   七维输入不得落 C++ 六维内核）；horizon=80（0.4s，覆盖较慢挥拍行程，
+#   RM65 60=0.3s 的加长）；其余为 iLQR 数值参数（LM 正则化/线搜索表，
+#   与机器人维数无关，取既有求解器缺省量级）；lin_eps 为 FD 关节扰动
+#   步长（rad）。全部 provisional。
+# - mpc_config：键名对齐 MPCConfig 字段；dt 与 runtime 一致；total_horizon
+#   200（1.0s）/fixed_horizon 160（0.8s）按 1.0s 有效击球窗口设定；
+#   replan_interval 20（100ms）沿既有节奏；Q_p/Q_v scale 为 far/near
+#   相对权重调度（与机器人无关的比例）；R=1e-4 控制代价；normal_weight
+#   2e5 法向对齐；racket_speed/target_speed=1.2 与 max_tcp_speed 一致；
+#   软惩罚（Q_tcp_soft/Q_qdot_limit）默认关闭。全部 provisional。
+# - 3.11 调参记录（左固定案例、seed 42、同 seed/同配置连跑 3 次逐位一致）：
+#   * total_horizon 400→200：上游 replan_core.do_replan 的节流 guard
+#     （k_hit_candidate < max(10, k_hit_new//4) 且 k_hit_new>30 时改写为
+#     k_hit_new-replan_interval）在 total_horizon=400 时把真实 k_hit≈90
+#     放大为 380 并随重规划逐次滞后，导致全程落 far/JT 分支、near iLQR
+#     与接触窗口永不触发（实测 hit=miss、min_dist 0.1243m）；改 200 后
+#     k_hit 恢复 90（与抛物线预测一致），near 阶段/碰撞窗口/随挥正常。
+#   * follow_through_steps 0→20：开启 planned 随挥（k_hit<=1 触发），
+#     用平滑 PD 随挥替代击球后 horizon=1 的激进重规划，避免安全滤波在
+#     接触步预测 qdot 超限而停回合；20 步 = 100ms。
+# - cost_config：Q_p=50000/Q_v=200（3.11 调参：原 2000/100 下终端位置
+#   权重被 normal_weight=2e5 压制，规划末端位置误差达 0.14–0.19m；
+#   改为与 RM65 configs/default.yaml L25-26 生产终端权重一致后，规划误差
+#   降至 ~5cm，实测 min_dist 0.0507m、接触 dist -0.0070m）；tube 沿
+#   TubeConfig 字段名（window 50ms、softmin β=5、use_softmin_terminal 开）。
+#   全部 provisional。
+schema_version: 1
+robot_id: unitree_r1d
+joint_names: [left_shoulder_pitch_joint, left_shoulder_roll_joint,
+              left_shoulder_yaw_joint, left_elbow_joint,
+              left_wrist_roll_joint, left_wrist_pitch_joint,
+              left_wrist_yaw_joint]
+ball_joint_name: ball_freejoint     # 3.2 带球场景 free joint 名（沿项目命名先例）
+ball_geom_name: ball                # 球碰撞 geom 名
+racket_geom_names: [racket_face]    # 阶段 2 模板球拍 geom（r1d_model_left.xml）
+protected_geom_pairs:               # 禁止接触对（3.2 解析为 geom id 对）
+  # 臂 geom 名以模板为准：仅 shoulder_pitch 连杆名含大写 Link（URDF mesh
+  # 文件名如此），其余为小写 link（3.2 修正初版大小写笔误）
+  - [left_shoulder_pitch_Link_visual, torso_box]
+  - [left_shoulder_roll_link_visual, torso_box]
+  - [left_shoulder_yaw_link_visual, torso_box]
+  - [left_elbow_link_visual, torso_box]
+  - [left_wrist_roll_link_visual, torso_box]
+  - [left_wrist_pitch_link_visual, torso_box]
+  - [left_wrist_yaw_link_visual, torso_box]
+  - [racket_face, torso_box]
+workspace_center: [0.25, 0.25, 1.35]   # 世界系击球区中心（FK 实测依据，provisional）
+workspace_radius: 0.45                  # m，臂+拍可达半径量级（provisional）
+initial_ball_position: [2.5, 0.45, 2.8]  # 世界系来球初位置（provisional）
+initial_ball_velocity: [-5.0, -0.3, -1.0]  # m/s，朝左侧击球区下落（provisional）
+max_steps: 600          # 3.0s @ dt=0.005（provisional）
+actuator_mode: torque   # 力矩模式默认；position 为仿真 PD（需 kp/kd）
+solver_config:
+  backend: python       # R1D 默认 Python+FD（七维不落 C++ 六维内核）
+  horizon: 80           # 0.4s 求解视野（provisional）
+  max_iter: 10
+  tol: 1.0e-4
+  mu_min: 1.0e-6
+  mu_max: 1.0e10
+  mu_init: 0.01
+  delta_0: 1.6
+  alpha_list: [1.0, 0.5, 0.25, 0.1, 0.05, 0.01]
+  lin_eps: 1.0e-6       # FD 扰动步长（rad，provisional）
+mpc_config:
+  dt: 0.005
+  total_horizon: 200    # 1.0s episode 规划视野（3.11：400→200，见文件头调参记录）
+  fixed_horizon: 160    # 0.8s 固定段（provisional）
+  replan_interval: 20   # 100ms 重规划节奏（沿既有节奏）
+  max_iter_per_plan: 10
+  first_plan_iters: 30
+  near_plan_iters: 5
+  near_threshold: 80
+  Q_p_scale_far: 5.0
+  Q_v_scale_far: 3.0
+  Q_p_scale_near: 8.0
+  Q_v_scale_near: 120.0
+  R: 1.0e-4
+  normal_weight: 2.0e5
+  racket_speed: 1.2     # 与 max_tcp_speed 一致
+  target_speed: 1.2
+  Q_tcp_soft: 0.0       # 软惩罚默认关闭
+  Q_qdot_limit: 0.0
+  tcp_soft_ratio: 0.8
+  qdot_limit_ratio: 0.8
+  softmin_beta: 5.0
+  follow_through_steps: 20   # planned 随挥步数（3.11：0→20，见文件头调参记录）
+cost_config:
+  Q_p: 50000.0          # 终端位置权重基准（3.11：2000→50000，对齐 RM65 L25）
+  Q_v: 200.0            # 终端速度权重基准（3.11：100→200，对齐 RM65 L26）
+  tube:
+    window_half_ms: 50.0
+    contact_offset: 0.0
+    Q_p_tube: 50000.0
+    Q_v_tube: 200.0
+    Q_n_tube: 100000.0
+    tube_cost_mode: weighted_sum
+    tube_cost_ratio: 1.0
+    softmin_beta: 5.0
+    use_softmin_terminal: true

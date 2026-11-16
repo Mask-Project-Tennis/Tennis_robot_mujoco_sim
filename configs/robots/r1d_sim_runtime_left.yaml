@@ -1,0 +1,61 @@
+# R1D 左臂（unitree_r1d）仿真专用运行参数 — 阶段 3 Task 3.1 交付。
+# 用途：simulation 预检（validate_simulation_inputs，purpose="simulation"），
+# 区别于阶段 2 的 r1d_runtime_left.yaml（未知限值 null，仅 kinematics 用途）。
+# 阶段 2 文件字节不动；本文件是完整显式 runtime，不做多层隐式合并。
+#
+# 数值来源与 provisional 标记（全部为仿真建模试验值，不冒充硬件限值）：
+# - torque_max / qdot_max：官方 URDF 声明逐项抄录（r1d.urdf，主树
+#   .superpowers/sdd/2026-11-15-unitree-stage2-construction/r1d-src/）：
+#   左肩俯仰 effort=60 velocity=18.8（L479）、左肩侧摆 60/18.8（L508）、
+#   左肩偏航 33/33.4（L537）、左肘 33/33.4（L566）、左腕滚转 33/33.4（L595）、
+#   左腕俯仰 10/37.7（L624）、左腕偏航 10/37.7（L653）。
+#   URDF 声明非 0，可作仿真建模参考；未经实机验证，仍标 provisional。
+# - qddot_max：URDF 无加速度声明（未知能力），试验值 = qdot_max / 0.15s
+#   （150ms 标称加速时间达到全速），取整：18.8/0.15≈125、33.4/0.15≈223→220、
+#   37.7/0.15≈251→250。provisional。
+# - kp/kd（位置模式仿真 PD）：按 ω_n≈60 rad/s、阻尼比 ζ≈1 设计；
+#   等效惯量按 URDF link 质量（肩俯仰 0.838/肩侧摆 0.740/肩偏航 0.738/
+#   肘 0.759/腕滚转 0.370/腕俯仰 0.107/腕偏航 0.109 kg）与臂段长
+#   （肩→腕约 0.35m、肘→腕约 0.2m）估算 I≈0.01~0.11 kg·m²，
+#   kp=ω²·I、kd=2·sqrt(kp·I) 取整。dt=0.005 下 ω·dt≈0.3，implicitfast
+#   可稳定。provisional。
+# - max_tcp_speed：1.2 m/s。R1D 拍面末段由腕部 10 N·m 驱动，取低于
+#   RM65 仿真上限 1.8 m/s 的保守试验值（真机 TCP 1.0 m/s 的先例之上）。
+#   provisional。
+# - q_lower/q_upper 保持 null：模型 jnt_range 是位置限位唯一权威，
+#   由 model_factory.load_robot_model 绑定后回填（不入 provisional_fields）。
+# - dt/init_q/scene：沿阶段 2 r1d_runtime_left.yaml 逐值复制（本身 provisional）。
+# 关节顺序与 r1d_left.yaml active_joint_names 同序（URDF 原名）。
+schema_version: 1
+robot_id: unitree_r1d
+joint_names: [left_shoulder_pitch_joint, left_shoulder_roll_joint,
+              left_shoulder_yaw_joint, left_elbow_joint,
+              left_wrist_roll_joint, left_wrist_pitch_joint,
+              left_wrist_yaw_joint]
+dt: 0.005                    # 仿真计算步长，与阶段 2 一致（provisional）
+init_q: [0.0, 0.2, 0.0, -0.6, 0.0, 0.0, 0.0]  # 阶段 2 准备姿态逐值复制（provisional）
+held_q: []                   # held_joint_names=[]，保持关节无角度
+kp: [400.0, 400.0, 250.0, 120.0, 60.0, 40.0, 40.0]   # 仿真 PD 位置增益（provisional，见文件头）
+kd: [12.0, 12.0, 8.0, 5.0, 2.5, 1.5, 1.5]            # 仿真 PD 阻尼增益（provisional）
+q_lower: null                # 由模型 jnt_range 回填（唯一权威，不手抄 URDF）
+q_upper: null
+qdot_max: [18.8, 18.8, 33.4, 33.4, 33.4, 37.7, 37.7]  # URDF velocity 声明（provisional）
+qddot_max: [125.0, 125.0, 220.0, 220.0, 220.0, 250.0, 250.0]  # qdot/0.15s（provisional）
+torque_max: [60.0, 60.0, 33.0, 33.0, 33.0, 10.0, 10.0]  # URDF effort 声明（provisional）
+max_tcp_speed: 1.2           # TCP 速度上限 m/s（provisional）
+scene:
+  base_position: [0.0, 0.0, 1.0]      # 虚拟固定基座（环境链 base_link 原点，世界系）
+  base_quaternion: [1.0, 0.0, 0.0, 0.0]  # wxyz 单位四元数
+  racket_position: [0.0, 0.0, 0.25]   # 相对 r1d_flange（该侧 dex1_base_joint origin），非实物标定
+  racket_quaternion: [1.0, 0.0, 0.0, 0.0]  # 拍面局部 +Z 为法向
+  racket_radius: 0.12                 # 实心圆盘占位几何（provisional）
+  racket_half_thickness: 0.005
+  racket_mass: 0.30                   # 实心圆盘近似惯量，不宣称实物惯量
+  torso_position: [-0.25, 0.0, -0.30]  # 相对固定基座的简化机身 box 中心（provisional）
+  torso_half_size: [0.15, 0.20, 0.30]  # 简化 box，不是整机外形
+provisional_fields: [dt, init_q,
+                     base_position, base_quaternion,
+                     racket_position, racket_quaternion,
+                     racket_radius, racket_half_thickness, racket_mass,
+                     torso_position, torso_half_size,
+                     kp, kd, qdot_max, qddot_max, torque_max, max_tcp_speed]

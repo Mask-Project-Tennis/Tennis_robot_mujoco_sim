@@ -16,6 +16,7 @@ from src.ilqt.async_replanner import PlanRequest, PlanResult
 from src.ilqt.cost import build_production_cost
 from src.ilqt.tube_types import ReplanState
 from src.ilqt.mpc_helpers import (
+    _is_bound_env,
     _jt_init_dispatch,
     _backswing_dispatch,
     _fix_joint5_dispatch,
@@ -35,31 +36,97 @@ from src.tennis.hitting import find_hitting_point_physics
 
 if TYPE_CHECKING:
     from src.ilqt.mpc_controller import MPCConfig
+    from src.ilqt.robot_env_protocol import RobotEnv
     from src.ilqt.robot_limits import RobotLimits
     from src.ilqt.solver import ILQTSolver
-    from src.sim.rm65_env import RM65Env
-
 
 logger = logging.getLogger(__name__)
 
 
+def _resolve_task_terminal_base(value: object) -> np.ndarray | None:
+    """把 task cost_config 的 Q_p/Q_v 基准值解析为 (3,3) 矩阵。
+
+    标量 → 标量×I₃；(3,) → 对角；(3,3) → 原样；None → None。
+    """
+    if value is None:
+        return None
+    arr = np.asarray(value, dtype=np.float64)
+    if arr.ndim == 0:
+        return float(arr) * np.eye(3)
+    if arr.ndim == 1:
+        return np.diag(arr)
+    return arr
+
+
+def _resolve_cost_bases(
+    config: "MPCConfig",
+    q_p_scale: float,
+    q_v_scale: float,
+) -> tuple[np.ndarray, np.ndarray, dict | None]:
+    """解析终端权重基底与工厂透传的 cost_config 覆盖（Task 3.8）。
+
+    单源纪律（3.6 契约"避免 Q_p_mat 与 cost_config 同时给"）：
+    task ``cost_config`` 的 ``Q_p``/``Q_v`` 在此提取为终端基准并乘上
+    sigmoid 调度 scale，剩余键原样透传 ``build_production_cost``——
+    工厂不会再收到 Q_p/Q_v 键，不存在双源覆盖。
+
+    RM65（``cost_config=None``）：与旧实现逐值一致——基底取
+    ``config.Q_p_base``/``config.Q_v_base``（None → I₃，(3,) → 对角，
+    (3,3) → 原样），透传字典为 None（工厂走缺省路径）。
+
+    Args:
+        config: MPCConfig（可能携带 task cost_config）。
+        q_p_scale: 位置权重调度 scale（sigmoid far/near）。
+        q_v_scale: 速度权重调度 scale。
+
+    Returns:
+        (Q_p_mat, Q_v_mat, cost_overrides)：
+        前两者为已含 scale 的 (3,3) 终端权重；cost_overrides 为剔除
+        Q_p/Q_v 后的工厂覆盖字典（None = 缺省路径）。
+    """
+    overrides: dict | None = None
+    q_p_task: object = None
+    q_v_task: object = None
+    if config.cost_config is not None:
+        overrides = dict(config.cost_config)
+        q_p_task = overrides.pop("Q_p", None)
+        q_v_task = overrides.pop("Q_v", None)
+
+    base_p = _resolve_task_terminal_base(q_p_task)
+    if base_p is None:
+        base_p = _resolve_task_terminal_base(config.Q_p_base)
+    base_v = _resolve_task_terminal_base(q_v_task)
+    if base_v is None:
+        base_v = _resolve_task_terminal_base(config.Q_v_base)
+    if base_p is None:
+        base_p = np.eye(3)
+    if base_v is None:
+        base_v = np.eye(3)
+
+    return q_p_scale * base_p, q_v_scale * base_v, overrides
+
+
 def do_replan(
     request: PlanRequest,
-    env_plan: "RM65Env",
+    env_plan: "RobotEnv",
     state: ReplanState,
     config: "MPCConfig",
     robot_limits: "RobotLimits",
     solver: ILQTSolver,
 ) -> PlanResult:
-    """在后台线程中执行完整的重规划流程。
+    """执行完整的重规划流程（同步调用；异步由 AsyncReplanner 后台执行）。
 
-    使用独立的 env_plan（独立 MjData），不与主线程共享可变 MuJoCo 状态。
+    使用独立的 env_plan（RM65：独立 MjData；R1D：ProfilePlanningEnv
+    规划副本），不与主线程共享可变 MuJoCo 状态。维度无关（n=6/7 通吃），
+    R1D 策略差异（无 fix_joint5/无后摆/均匀 R 退火/cost_config 透传）
+    由 MPCConfig 与环境能力自动分派。
 
     Args:
         request: 规划请求（球状态、臂状态、击球方向 d_hat 等）。
         env_plan: 独立 MjData 的规划环境。
         state: 当前的重规划状态快照。
-        config: MPCConfig（规划参数集，类型安全直接消费）。
+        config: MPCConfig（规划参数集，类型安全直接消费；cost_config
+            携带 task 代价覆盖时透传 build_production_cost）。
         robot_limits: 关节约束 + 安全滤波器实例。
         solver: ILQTSolver 实例（C++ 或 Python 实现）。
 
@@ -341,32 +408,35 @@ def do_replan(
 
     # 9. 构建 cost_fn（使用临时 cost_fn，env_plan 独立 MjData）
     # v12: 使用配置中的 Q_p_base/Q_v_base（对齐 V11 base_cost_fn 的权重基底）
-    _q_p_base = config.Q_p_base
-    if _q_p_base is None:
-        Q_p_mat = Q_p_scale * np.eye(3)
-    elif _q_p_base.ndim == 1:
-        Q_p_mat = Q_p_scale * np.diag(_q_p_base)
-    else:
-        Q_p_mat = Q_p_scale * _q_p_base
-    _q_v_base = config.Q_v_base
-    if _q_v_base is None:
-        Q_v_mat = Q_v_scale * np.eye(3)
-    elif _q_v_base.ndim == 1:
-        Q_v_mat = Q_v_scale * np.diag(_q_v_base)
-    else:
-        Q_v_mat = Q_v_scale * _q_v_base
-    # Q_p_mat/Q_v_mat 已在上方基于 sigmoid 调度预计算（保留不动）
+    # Task 3.8: task cost_config 的 Q_p/Q_v 提取为终端基准（乘调度 scale），
+    # 其余键（R/Q_qdot_base/tube 等）透传工厂——Q_p_mat 与 cost_config
+    # 不同时给 Q_p/Q_v（3.6 单源纪律）
+    Q_p_mat, Q_v_mat, cost_overrides = _resolve_cost_bases(
+        config, Q_p_scale, Q_v_scale,
+    )
     # 工厂函数仅组装代价项，不负责权重调度；R_schedule 在工厂返回后由下方设置
     cost_fn_plan = build_production_cost(
         env_plan, config, robot_limits,
         p_hit=p_terminal_v5, v_hit=v_terminal_v5, n_des=n_des_new,
         Q_p_mat=Q_p_mat, Q_v_mat=Q_v_mat,
+        cost_config=cost_overrides,
     )
 
     if config.use_r_decay and not config.is_position_mode:
+        # Task 3.8: R1D（绑定环境）均匀关节 R 比例（无关节 1 特殊衰减）；
+        # RM65 环境保持原值原行为（n=6 + joint1_extra_decay=10）。
+        # 退火基底 = 配置覆盖后的有效 R（task cost_config 的 R 优先于
+        # config.R，与 build_production_cost 的 R 解析同源；否则退火
+        # 调度会以 config.R 为基底覆盖机器人专属代价权重）
+        effective_R = (
+            float(cost_overrides.get("R", config.R))
+            if cost_overrides is not None else config.R
+        )
         R_schedule = compute_r_schedule(
-            horizon_full, config.R,
+            horizon_full, effective_R,
             decay_ratio=config.r_decay_ratio,
+            n_joints=env_plan.NU,
+            uniform_decay=_is_bound_env(env_plan),
         )[:horizon_plan]
         cost_fn_plan.set_R_schedule(R_schedule)
 

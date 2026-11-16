@@ -23,13 +23,31 @@
 
 | 文件 | 用途 |
 |------|------|
-| `rm65_mpc_v12.py` | ★ V12：EpisodeRunner 管线架构 + MPCController 策略化（命中率 85.7%） |
+| `rm65_mpc_v12.py` | ★ V12：EpisodeRunner 管线架构 + MPCController 策略化（命中率 85.7%）；阶段 3 起支持 R1D 单臂仿真入口（`--robot-config`/`--runtime-config`/`--sim-task-config`，见下方 R1D 小节） |
 | `rm65_mpc_v11.py` | V11 薄壳（29 行，委托到 V12 main） |
 | `rm65_mpc_ilqr_5_5.py` | Tube/iLQR 基线（工具脚本依赖） |
 | `rm65_evaluate.py` | 评估脚本 |
 | `run_20hits_video.py` | 连续 20 次击打视频生成 |
 | `run_real_robot.py` | 真机入口（--robot-config 可选机器人描述，默认 configs/robots/rm65.yaml；描述加载/校验失败以日志+退出码 2 呈现） |
 | `replay_trajectory.py` | 轨迹回放（含 --speed 安全检查） |
+
+## R1D 单臂仿真入口（阶段 3）
+
+`scripts/rm65_mpc_v12.py` 同时是 R1-A7-D 单臂闭环仿真入口（实现委托 `src/sim/r1d_runner.py::run_r1d_episode`）。
+R1D 路径只接受 `--robot-config`/`--runtime-config`/`--sim-task-config`/`--output`/`--seed`/`--no-plot`/`--log-level`（其中 `--seed`/`--no-plot`/`--output`/`--log-level` 为共享基础参数，`--robot-config`/`--runtime-config`/`--sim-task-config` 为 R1D 专属配置项），其余 RM65 旧参数（`--serve-box`/`--position-mode`/`--async-replan`/`--fix-joint5`/`--dump-trajectory` 等）被拒绝（退出码 2）：
+
+```bash
+python scripts/rm65_mpc_v12.py \
+  --robot-config configs/robots/r1d_left.yaml \
+  --runtime-config configs/robots/r1d_sim_runtime_left.yaml \
+  --sim-task-config configs/r1d_sim_left.yaml \
+  --output results/r1d_episode --seed 42 --no-plot
+```
+
+- 三份 YAML 必须显式给出，侧别（left/right）与路径一致，否则退出码 2。
+- 产物：`--output` 目录下 `r1d_episode.json`（schema `r1d_sim_episode_v1`：输入 SHA256、固定场景参数、hit/碰撞/耗时/指标）+ `r1d_episode.npz`（`X`(N+1,14)/`U`(N,7)/`ball_pos`/`ball_vel`(N+1,3)/`t`）。
+- 固定可达案例（阶段 3 验收）：`configs/scenarios/r1d_stage3_reachable.yaml`（`seed 42`，`expected_hit_type: active`；路径相对 scenario 文件解析）。
+- 离线仿真口径：单回合首 plan 约 6–14 s、整回合 8–14 s（Python 有限差分后端），非实时。
 
 ## sim/ — 独立仿真（5 个）
 

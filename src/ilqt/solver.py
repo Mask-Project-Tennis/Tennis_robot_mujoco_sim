@@ -2,7 +2,7 @@
 
 import logging
 import numpy as np
-from typing import Any
+from typing import Any, Literal
 from src.ilqt.robot_env_protocol import RobotEnv
 from src.dynamics.linearize import linearize_trajectory, linearize_analytical_trajectory
 from src.ilqt.components.protocols import RunningCost, SmoothnessMixin
@@ -73,8 +73,8 @@ class ILQTSolver:
         Args:
             env: MuJoCo 环境实例。
             cost_fn: 代价函数实例。
-            x0: 初始臂状态，形状 (12,)。
-            U_init: 初始控制序列，形状 (N, 6)。若为 None 则用零初始化。
+            x0: 初始臂状态，形状 (NX,)。
+            U_init: 初始控制序列，形状 (N, NU)。若为 None 则用零初始化。
             limits: 真实机器人硬约束参数。None 表示不启用。
 
         Returns:
@@ -165,12 +165,14 @@ class ILQTSolver:
         Args:
             env: MuJoCo 环境实例。
             cost_fn: 代价函数实例。
-            x0: 初始臂状态，形状 (12,)。
-            U_init: 初始控制序列，形状 (N, 6)。
+            x0: 初始臂状态，形状 (NX,)。
+            U_init: 初始控制序列，形状 (N, NU)。
             max_iter: 最大迭代次数。
             skip_linesearch: 是否跳过线搜索（MPC 模式默认 True）。
             limits: 真实机器人硬约束参数。None 表示不启用。
             use_fast_lin: 是否使用快速线性化（跳过 ∂h/∂q, ∂h/∂qdot）。
+                ``use_analytical=False``（FD 后端）时该快捷路径自动回退
+                完整有限差分，不绕过 backend 选择（Task 3.5）。
 
         Returns:
             (X_opt, U_opt, cost_history, success):
@@ -307,7 +309,16 @@ class ILQTSolver:
     def _linearize_fast(
         self, env: RobotEnv, X: np.ndarray, U: np.ndarray
     ) -> tuple[list[np.ndarray], list[np.ndarray], list[np.ndarray]]:
-        """快速线性化（仅 M^{-1}，跳过 ∂h/∂q, ∂h/∂qdot 有限差分）。"""
+        """快速线性化（仅 M^{-1}，跳过 ∂h/∂q, ∂h/∂qdot 有限差分）。
+
+        后端选择保护（Task 3.5）：``use_analytical=False``（FD 后端，
+        R1D 等非前缀布局环境的既定选择）时**回退完整有限差分**，
+        确保任何 solve 路径（含 ``solve_few_iters(use_fast_lin=True)``
+        快捷路径）都不会绕过 backend 选择去计算基于前缀布局假设的
+        解析近似 A/B。
+        """
+        if not self.use_analytical:
+            return self._linearize(env, X, U)
         from src.dynamics.linearize import linearize_fast_trajectory
         actuator_mode = getattr(env, 'actuator_mode', 0)
         kp = getattr(env, 'kp', None)
@@ -384,29 +395,146 @@ class ILQTSolver:
         return Ks, ks
 
 
-def build_solver() -> Any:
-    """构建 ILQTSolver（优先 C++ 加速版，失败回退纯 Python 版）。
+# 旧 C++ 内核硬编码维数（src/cpp/types.h kNQ/kNX/kNU），兼容性判定的依据
+_CPP_KERNEL_NQ = 6
+_CPP_KERNEL_NX = 12
+_CPP_KERNEL_NU = 6
+
+# 缺省 iLQT 超参数（build_solver 无 config 时使用，与旧版本逐值一致）
+_DEFAULT_SOLVER_CONFIG: dict[str, Any] = {
+    "max_iter": 10,
+    "tol": 1e-4,
+    "horizon": 60,
+    "mu_min": 1e-6,
+    "mu_max": 1e10,
+    "mu_init": 0.01,
+    "delta_0": 1.6,
+    "alpha_list": [1.0, 0.5, 0.25, 0.1, 0.05, 0.01],
+    "lin_eps": 1e-6,
+}
+
+
+def is_cpp_kernel_compatible(env: RobotEnv) -> bool:
+    """判定环境是否满足旧六维 C++ 内核的全部布局假设。
+
+    C++ 内核（``src/cpp/*``，kNQ=6/kNX=12/kNU=6 硬编码）假设：
+    1. 受控臂维数恰为 n=6（NX=12/NU=6）——**维数是必要条件而非充分条件**；
+    2. Python 入口直接消费 RM65 专属属性 ``init_q_left`` 与
+       ``_torque_ctrlrange``（缺失即运行期崩溃，见
+       ``src/cpp/solver_cpp.py::_linearize_cpp/_forward_pass_cpp``）；
+    3. 臂的 qpos/qvel/执行器地址为**前缀布局**（qpos[0:6]/qvel[0:6]/
+       ctrl[0:6]）——六维但地址重排（如 free joint 前置或执行器乱序的
+       绑定环境）同样会落入错误的内存布局，必须拒绝。
+
+    带 ``binding`` 属性的环境（``BoundRobotEnv`` 族）按绑定地址显式核对
+    前缀；旧 RM65 环境（RM65Env/PlanningEnv，无 binding 属性）按属性
+    组合判定。本谓词是 build_solver 的 backend 判定规则，也被
+    ``src/cpp/solver_cpp.py`` 的 Python 入口能力拒绝复用（Task 3.5）。
+
+    Args:
+        env: 待判定的机器人环境。
+
+    Returns:
+        True 表示环境可安全进入旧六维 C++ 内核。
+    """
+    if env.NQ != _CPP_KERNEL_NQ or env.NX != _CPP_KERNEL_NX or env.NU != _CPP_KERNEL_NU:
+        return False
+    # 条件 2：C++ Python 入口直接消费的 RM65 专属属性
+    if not hasattr(env, "init_q_left") or not hasattr(env, "_torque_ctrlrange"):
+        return False
+    # 条件 3：绑定环境必须为前缀地址布局
+    binding = getattr(env, "binding", None)
+    if binding is not None:
+        prefix = np.arange(_CPP_KERNEL_NQ)
+        if not (
+            np.array_equal(np.asarray(binding.qpos_indices), prefix)
+            and np.array_equal(np.asarray(binding.qvel_indices), prefix)
+            and np.array_equal(np.asarray(binding.actuator_ids), prefix)
+        ):
+            return False
+    return True
+
+
+def build_solver(
+    *,
+    env: RobotEnv | None = None,
+    backend: Literal["auto", "python", "cpp"] = "auto",
+    config: dict[str, Any] | None = None,
+) -> Any:
+    """构建 ILQTSolver（带后端选择，Task 3.5 扩展签名）。
 
     纯 ILQTSolver 工厂函数，零真机依赖，自然属于 ``src.ilqt``。
     ``src/real/runner_factory.py`` 重导出本函数以保持真机入口与测试零改动。
 
+    Backend 判定规则（3.8 消费方以此为准）：
+    - ``backend='python'``：恒返回纯 Python ``ILQTSolver``。兼容环境
+      （六维前缀布局 RM65 族）沿用旧 Python 缺省 ``use_analytical=True``；
+      非兼容环境（R1D n=7、六维地址重排等）强制 ``use_analytical=False``
+      （Python FD）——解析线性化同样基于前缀布局假设，非前缀环境不可用。
+    - ``backend='cpp'``：显式要求 C++ 后端。环境不兼容旧六维内核时
+      ``ValueError``（判定先于导入尝试，与机器上是否装有扩展无关）；
+      入口不可导入或扩展不可用（未编译/ABI 不匹配）时同样 ``ValueError``，
+      不静默回退。
+    - ``backend='auto'``（缺省）：
+      - ``env=None``：与旧版零参行为逐字一致（入口可导入 → C++ 类，
+        否则 Python 类）；
+      - 兼容环境：同旧偏好（入口可导入 → C++ 类，否则 Python 解析）；
+      - 非兼容环境：**强制 Python FD**（``use_analytical=False``），
+        即使机器上装有可用扩展也不让七维/重排输入落进六维内核。
+
+    Args:
+        env: 目标规划环境；None 表示沿用旧零参缺省行为。
+        backend: 'auto' | 'python' | 'cpp'。
+        config: iLQT 超参数字典；在缺省值上做按键覆盖（浅合并）。
+
     Returns:
         ILQTSolver 实例（C++ 或 Python 实现，二者接口一致）。
+
+    Raises:
+        ValueError: backend 非法；显式 cpp 但环境不兼容或扩展不可用。
     """
+    if backend not in ("auto", "python", "cpp"):
+        raise ValueError(
+            f"未知 backend={backend!r}（支持 'auto' / 'python' / 'cpp'）"
+        )
+    cfg: dict[str, Any] = {**_DEFAULT_SOLVER_CONFIG, **(config if config is not None else {})}
+    compatible = True if env is None else is_cpp_kernel_compatible(env)
+
+    if backend == "python":
+        # 兼容环境沿用旧 Python 缺省（解析线性化）；非兼容环境强制 FD
+        return ILQTSolver(cfg, use_analytical=compatible)
+
+    if backend == "cpp":
+        if env is not None and not compatible:
+            raise ValueError(
+                "显式要求 C++ 后端，但环境与旧六维内核不兼容"
+                f"（NQ={env.NQ}/NX={env.NX}/NU={env.NU} 或地址布局非前缀；"
+                "C++ 内核为 RM65 前缀布局专用，R1D 等请使用 "
+                "backend='python'——auto 会自动选择 Python FD）"
+            )
+        try:
+            from src.cpp.solver_cpp import ILQTSolver as CppILQTSolver
+            from src.cpp import solver_cpp as _solver_cpp
+        except ImportError as exc:
+            raise ValueError(
+                "显式要求 C++ 后端，但 src.cpp.solver_cpp 入口不可导入: "
+                f"{exc}"
+            ) from exc
+        if not bool(getattr(_solver_cpp, "_CPP_AVAILABLE", False)):
+            raise ValueError(
+                "显式要求 C++ 后端，但 C++ 扩展模块不可用"
+                "（未编译或 ABI 不匹配，如 cp313 扩展在 py3.11 下）；"
+                "不静默回退 Python"
+            )
+        return CppILQTSolver(cfg)
+
+    # backend == 'auto'
+    if env is not None and not compatible:
+        # R1D（n=7）及六维地址重排等非兼容环境：强制 Python FD，
+        # 不做导入尝试——即使扩展可导入也不进旧内核
+        return ILQTSolver(cfg, use_analytical=False)
     try:
-        from src.cpp.solver_cpp import ILQTSolver
+        from src.cpp.solver_cpp import ILQTSolver as CppILQTSolver
     except ImportError:
-        from src.ilqt.solver import ILQTSolver
-    return ILQTSolver(
-        {
-            "max_iter": 10,
-            "tol": 1e-4,
-            "horizon": 60,
-            "mu_min": 1e-6,
-            "mu_max": 1e10,
-            "mu_init": 0.01,
-            "delta_0": 1.6,
-            "alpha_list": [1.0, 0.5, 0.25, 0.1, 0.05, 0.01],
-            "lin_eps": 1e-6,
-        }
-    )
+        CppILQTSolver = ILQTSolver  # 旧回退语义：入口导入失败 → Python 类
+    return CppILQTSolver(cfg)

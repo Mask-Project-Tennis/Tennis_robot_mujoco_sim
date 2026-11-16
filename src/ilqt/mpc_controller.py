@@ -12,11 +12,12 @@ import logging
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, Mapping, TYPE_CHECKING
 
 import numpy as np
 
 from src.ilqt.async_replanner import AsyncReplanner, PlanRequest
+from src.ilqt.mpc_helpers import _is_bound_env, validate_workspace_against_model
 from src.ilqt.planning_env import PlanningEnv
 from src.ilqt.replan_core import do_replan
 from src.ilqt.strategies.direction import DirectionPolicy, ReflectDirection
@@ -39,6 +40,10 @@ from src.ilqt.robot_limits import RobotLimits
 from src.ilqt.solver import build_solver
 from src.ilqt.tube_types import ReplanState, TubeConfig
 from src.ilqt.strategy_config import StrategyConfig
+
+if TYPE_CHECKING:
+    # 仅类型标注：绑定环境（R1D 规划副本）作为 MPCController 的 env
+    from src.sim.bound_robot_env import BoundRobotEnv
 
 logger = logging.getLogger(__name__)
 
@@ -158,6 +163,17 @@ class MPCConfig:
     j1_warn_margin_deg: float = 8.0      # 关节1 警告裕度（度）
     refiner_window_half: int = 15        # Refiner 搜索窗口半宽（步）
 
+    # ── 多机器人（阶段 3 Task 3.8）──
+    # task YAML cost_config 透传（3.6 键域：MPCConfig 字段名 + Q_p/Q_v
+    # + tube 子字典）。do_replan 会把 Q_p/Q_v 提取为终端基准（乘 sigmoid
+    # 调度 scale），其余键透传 build_production_cost。None = RM65 缺省路径。
+    cost_config: Mapping[str, Any] | None = None
+    # 求解器后端（3.5 build_solver backend 参数；R1D 传 env 后 auto 自动
+    # 落 Python FD，显式 'cpp' 不兼容时报 ValueError）
+    solver_backend: Literal["auto", "python", "cpp"] = "auto"
+    # 求解器数值参数覆盖（3.5 build_solver config；缺省用求解器缺省值）
+    solver_config: dict[str, Any] | None = None
+
     # ── 异步重规划 ──
     async_mode: bool = False
 
@@ -192,7 +208,7 @@ class MPCController:
 
     def __init__(
         self,
-        env: PlanningEnv,
+        env: "PlanningEnv | BoundRobotEnv",
         config: MPCConfig,
         robot_limits: RobotLimits,
         strategies: "StrategyConfig | None" = None,
@@ -200,28 +216,69 @@ class MPCController:
         """初始化 solver/limits/replanner/state 构建。
 
         Args:
-            env: 规划环境（PlanningEnv 或 RM65Env），用于主线程规划计算。
+            env: 规划环境（RM65：PlanningEnv/RM65Env；R1D：绑定环境族
+                ProfilePlanningEnv），用于规划计算。绑定环境触发 Task 3.8
+                的 R1D 分派：build_solver env 注入（Python FD）、工作空间
+                对模型校验、异步明确拒绝、同步直用 env 作 env_plan。
             config: MPC 配置（控制规划行为）。
             robot_limits: 关节限位 + 安全滤波器（必传）。调用方负责构建，
                 仿真通常用 ``build_robot_limits(env, RealRobotConfig())``，
                 研究对比可传入自定义限位。
             strategies: 可选策略注入容器。None → 全部使用 MPCConfig 驱动的默认实现。
+
+        Raises:
+            ValueError: 绑定环境 + async_mode=True（本阶段不支持 R1D 异步），
+                或工作空间中心/半径对模型校验失败。
         """
         self._env = env
         self._config = config
         self._NU: int = env.NU
         self._NQ: int = env.NQ
+        # 绑定环境（BoundRobotEnv 族，R1D 路径）：策略/后端/校验按
+        # Task 3.8 决定分派；RM65（PlanningEnv/RM65Env）保持原路径原行为
+        self._is_bound_env: bool = _is_bound_env(env)
+
+        # ── R1D：工作空间中心/半径显式来自当前侧配置并对模型校验 ──
+        # （中心 IK 可达 + 限位内；不能读 RM65 SHOULDER_POS/WORKSPACE_RADIUS）
+        if self._is_bound_env:
+            validate_workspace_against_model(
+                env,
+                np.asarray(config.shoulder_pos, dtype=np.float64),
+                float(config.workspace_radius),
+                robot_limits=robot_limits,
+            )
+
+        # ── R1D 异步重规划：本阶段明确拒绝（不静默改同步）──
+        # FD 规划 ~209ms/次，异步收益有限；AsyncReplanner 的 env_plan
+        # 构造依赖 RM65 系构造签名（model_path, dt），绑定环境不支持
+        if self._is_bound_env and config.async_mode:
+            raise ValueError(
+                "R1D（绑定环境）本阶段不支持异步重规划：入口明确拒绝，"
+                "不静默改为同步。请设 async_mode=False（Task 3.8 决定；"
+                "后续版本如开放，须独立 planning env + 线程实例隔离测试）"
+            )
 
         # ── RobotLimits（调用方注入，依赖方向不再反转到 src.real）──
         self._robot_limits = robot_limits
-        self._solver: Any = build_solver()
+        # Task 3.8: env 注入 build_solver —— R1D（非 C++ 兼容）自动落
+        # Python FD；RM65（兼容环境）行为与旧 build_solver() 零参一致
+        self._solver: Any = build_solver(
+            env=env, backend=config.solver_backend, config=config.solver_config,
+        )
 
         # ── AsyncReplanner（独立 env_plan；config/robot_limits/solver 静态注入）──
-        model_path = Path(__file__).resolve().parent.parent / "robot" / "rm65_model.xml"
-        self._replanner = AsyncReplanner(
-            env, do_replan, config, robot_limits, self._solver,
-            state=None, model_path=model_path,
-        )
+        # 绑定环境（R1D）不构造 AsyncReplanner：同步路径直接以 env 为
+        # env_plan（规划副本本就无球/无私 scratch 副作用）
+        if self._is_bound_env:
+            self._replanner: AsyncReplanner | None = None
+        else:
+            model_path = (
+                Path(__file__).resolve().parent.parent / "robot" / "rm65_model.xml"
+            )
+            self._replanner = AsyncReplanner(
+                env, do_replan, config, robot_limits, self._solver,
+                state=None, model_path=model_path,
+            )
         self._replan_state: ReplanState | None = None
 
         # ── 规划状态变量（V11 行 1047-1067）──
@@ -307,10 +364,15 @@ class MPCController:
         Returns:
             PlanResult（do_replan 结果）。
         """
-        assert self._replanner.env_plan is not None
+        env_plan = (
+            self._replanner.env_plan
+            if self._replanner is not None
+            else self._env
+        )
+        assert env_plan is not None
         assert self._replan_state is not None
         return do_replan(
-            request, self._replanner.env_plan,
+            request, env_plan,
             self._replan_state, self._config,
             self._robot_limits, self._solver,
         )
@@ -343,11 +405,13 @@ class MPCController:
             U_prev=np.zeros((0, self._NU)),
             is_first_plan=True,
         )
-        self._replanner._state = self._replan_state
+        # 绑定环境（R1D）：无 AsyncReplanner，同步以 env 为 env_plan
+        if self._replanner is not None:
+            self._replanner._state = self._replan_state
 
-        # 3. 启动 AsyncReplanner + 确保 env_plan 就绪（V11 行 1315-1318）
-        self._replanner.start()
-        self._replanner._ensure_env_plan()
+            # 3. 启动 AsyncReplanner + 确保 env_plan 就绪（V11 行 1315-1318）
+            self._replanner.start()
+            self._replanner._ensure_env_plan()
 
         # 4. 首次同步 do_replan（V11 行 1349-1364）
         first_request = PlanRequest(
@@ -363,10 +427,15 @@ class MPCController:
             d_hat=self._d_hat.copy(),
             is_first_plan=True,
         )
-        assert self._replanner.env_plan is not None, "env_plan 未就绪"
+        env_plan = (
+            self._replanner.env_plan
+            if self._replanner is not None
+            else self._env
+        )
+        assert env_plan is not None, "env_plan 未就绪"
         t_replan_start = time.perf_counter()
         result = do_replan(
-            first_request, self._replanner.env_plan,
+            first_request, env_plan,
             self._replan_state, self._config,
             self._robot_limits, self._solver,
         )
@@ -472,6 +541,9 @@ class MPCController:
             d_follow=self._d_follow,
             v_hit_desired=self._v_hit_desired,
             env=self._env,
+            # Task 3.8: 绑定环境位置模式随挥 IK 误差/限位校验用；
+            # RM65 策略忽略该字段（原行为）
+            robot_limits=self._robot_limits,
         )
         if not self._follow_through.is_active:
             if self._follow_through.should_trigger(follow_ctx):
@@ -565,8 +637,9 @@ class MPCController:
         )
 
     def stop(self) -> None:
-        """停止 AsyncReplanner 后台线程。"""
-        self._replanner.stop()
+        """停止 AsyncReplanner 后台线程（绑定环境为空操作）。"""
+        if self._replanner is not None:
+            self._replanner.stop()
 
     @property
     def done(self) -> bool:
@@ -750,9 +823,9 @@ class MPCController:
             else:
                 tau_backup = J_p.T @ err * 30.0
                 tau_backup -= 2.0 * arm_state[self._NQ:]
-                ctrl_lo = self._env.model.actuator_ctrlrange[:self._NU, 0]
-                ctrl_hi = self._env.model.actuator_ctrlrange[:self._NU, 1]
-                return np.clip(tau_backup, ctrl_lo, ctrl_hi)
+                # Task 3.8: 控制界经 env.control_range（按执行器绑定序）
+                ctrl_range = np.asarray(self._env.control_range, dtype=np.float64)
+                return np.clip(tau_backup, ctrl_range[:, 0], ctrl_range[:, 1])
         return self._hold_control(arm_state)
 
     def _hold_control(self, arm_state: np.ndarray) -> np.ndarray:

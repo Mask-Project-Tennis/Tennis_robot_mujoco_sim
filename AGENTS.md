@@ -119,6 +119,7 @@ mujoco_sim/
 │   │   ├── jt_init.py                 # 位置模式 JT 初始控制 + 后摆 warm-start
 │   │   ├── robot_env_protocol.py      # RobotEnv Protocol（@runtime_checkable，RM65Env/PlanningEnv 共同接口）
 │   │   ├── planning_env.py            # MPC 规划计算环境（MuJoCo 纯计算，无球/无左臂/无碰撞）
+│   │   ├── profile_planning_env.py    # R1D 规划侧环境（BoundRobotEnv + BallPredictor 虚拟球；阶段 3）
 │   │   ├── mpc_controller.py          # ★ MPCController 可组合规划模块（策略注入）+ MPCConfig + MPCStepResult（robot_limits 必传参数）
 │   │   ├── episode_runner.py          # ★ EpisodeRunner 通用管线（4 组件 + 5 hook 插入点）
 │   │   ├── step_context.py            # StepContext 步骤上下文（hook 间数据传递容器）
@@ -157,7 +158,14 @@ mujoco_sim/
 │   │   ├── rm65_env.py                # RM65Env 双臂环境封装
 │   │   ├── viewer.py                  # 可视化工具
 │   │   ├── replay.py                  # 轨迹回放共享模块（replay_trajectory + 碰撞窗口 + 弹性反弹）
-│   │   └── hit_detection.py           # 击打检测共享模块（classify_hit_result + determine_hit_from_type）
+│   │   ├── hit_detection.py           # 击打检测共享模块（classify_hit_result + determine_hit_from_type）
+│   │   ├── sim_config.py              # R1D 仿真任务配置 SimTaskConfig（加载/侧别与工件校验，阶段 3）
+│   │   ├── tennis_scene.py            # R1D 球/球拍/机身场景装配（球—拍 pair + 碰撞掩码，阶段 3）
+│   │   ├── bound_robot_env.py         # BoundRobotEnv 名称绑定单臂环境（14/13/7、step_from_state scratch，阶段 3）
+│   │   ├── profile_sim_env.py         # ProfileSimEnv 带球执行环境（step_full/球状态/碰撞开关，阶段 3）
+│   │   ├── env_factory.py             # build_r1d_environments 执行/规划双环境组装（阶段 3）
+│   │   ├── collision_checks.py        # has_forbidden_contact / ForbiddenContactChecker（禁止机身接触，阶段 3）
+│   │   └── r1d_runner.py              # ★ run_r1d_episode R1D 单臂闭环入口（JSON/NPZ 产物，阶段 3）
 │   ├── perception/                    # 感知模块（噪声+滤波）
 │   │   ├── __init__.py
 │   │   ├── ball_estimator.py          # 6D 卡尔曼滤波器（位置+速度，匀速+重力过程模型）
@@ -197,13 +205,16 @@ mujoco_sim/
 │   ├── robots/rm65.yaml               # RM65 机器人描述（身份+模型路径+关节语义名称，无数值参数；阶段 1）
 │   ├── robots/r1d_left.yaml / r1d_right.yaml                # R1-A7-D 双侧描述（侧别经路径显式表达，阶段 2）
 │   ├── robots/r1d_runtime_left.yaml / r1d_runtime_right.yaml # R1D 双侧运行参数（未知限值显式 null，阶段 2）
+│   ├── robots/r1d_sim_runtime_left.yaml / r1d_sim_runtime_right.yaml # R1D 仿真运行参数（仿真临时数值，全部 provisional，阶段 3）
+│   ├── r1d_sim_left.yaml / r1d_sim_right.yaml # R1D 仿真任务配置（来球/工作区/MPC/代价，阶段 3；3.11 定稿参数见文件头）
+│   ├── scenarios/r1d_stage3_reachable.yaml    # 阶段 3 固定可达来球案例（seed 42，expected_hit_type: active）
 │   ├── robots/d2_runtime.yaml         # D2 运行参数（历史资产，不作 R1-A7-D 配置，阶段 2）
 │   ├── mpc.yaml                       # MPC 专用参数
 │   ├── v4_follow_through.yaml         # V4 随挥策略配置
 │   ├── v5_active_hit.yaml             # V5 主动击球配置
 │   └── real_robot.yaml                # 真实机器人配置（底座位姿、坐标系标定、控制频率）
 ├── scripts/
-│   ├── rm65_mpc_v12.py                           # ★ V12 仿真主脚本（EpisodeRunner 管线架构 + MPCController 策略化）
+│   ├── rm65_mpc_v12.py                           # ★ V12 仿真主脚本（EpisodeRunner 管线架构 + MPCController 策略化；阶段 3 起兼 R1D 单臂仿真入口 --robot-config/--runtime-config/--sim-task-config）
 │   ├── rm65_mpc_v11.py                           # V11 薄壳（29 行，委托到 V12 main）
 │   ├── rm65_mpc_ilqr_5_5.py                      # Tube/iLQR 基线（工具脚本依赖）
 │   ├── rm65_evaluate.py                          # 评估脚本
@@ -218,7 +229,7 @@ mujoco_sim/
 │   ├── test/           # 快速验证 10 个
 │   ├── archive/        # ★ 已归档脚本（V6-V10 + tube + 旧实验，详见 archive/README.md）
 │   └── README.md       # 完整清单与说明
-├── tests/                             # 单元测试（848 collect = 846 passed + 2 skipped，78 个文件；2 个 C++ 测试文件因扩展 ABI 不匹配暂无法收集，见 docs/experiments/reports/）
+├── tests/                             # 单元测试（全量 1240 passed + 2 skipped，89 个测试文件；2 个 C++ 测试文件因扩展 ABI 不匹配不可收集，全量运行用 --ignore 排除，见 docs/experiments/reports/）
 │   ├── test_kinematics.py
 │   ├── test_linearize.py
 │   ├── test_mpc.py
@@ -261,6 +272,14 @@ mujoco_sim/
 │   ├── test_fake_robot.py                  # FakeRobot Mock 测试
 │   ├── test_torque_to_position.py          # 力矩→位置积分器测试
 │   ├── test_planning_env.py                # PlanningEnv 测试
+│   ├── test_sim_config.py                  # R1D 仿真任务配置解析/校验测试（阶段 3）
+│   ├── test_tennis_scene.py                # R1D 球/球拍/机身场景装配测试（阶段 3）
+│   ├── test_bound_robot_env.py             # BoundRobotEnv 绑定/scratch 隔离测试（阶段 3）
+│   ├── test_multi_robot_env.py / test_multi_robot_linearize.py / test_multi_robot_cost.py / test_multi_robot_mpc.py / test_multi_robot_safety.py  # 七维 RM65↔R1D 能力/回归矩阵（阶段 3）
+│   ├── test_solver_backend_selection.py    # solver 后端选择/兼容拒绝测试（阶段 3）
+│   ├── test_r1d_sim_pipeline.py            # R1D 仿真闭环管线测试（阶段 3）
+│   ├── test_multi_robot_sim_entrypoint.py  # V12 多机器人 CLI 分派/产物 schema 测试（阶段 3）
+│   ├── test_r1d_closed_loop.py             # ★ R1D 固定可达案例闭环验收 + RM65 seed42 逐位回归（阶段 3.11）
 │   └── ... （完整清单见 tests/ 目录）
 ├── experiment_data/                  # 实验数据（按 exp1~exp12 组织）
 │   └── README.md                     # 数据存储规范
@@ -438,6 +457,8 @@ mujoco_sim/
 - 真机入口机器人描述: 追加 `--robot-config configs/robots/rm65.yaml`（默认即此文件，显式与缺省行为一致；阶段 1 仅支持 RM65）
 - TCP 软惩罚实验: 追加 `--Q-tcp-soft 5000`（默认 0 禁用）
 - 关节安全扫描: `python scripts/scan_joint_safety.py`
+- R1D 单臂闭环仿真（阶段 3，离线）: `python scripts/rm65_mpc_v12.py --robot-config configs/robots/r1d_left.yaml --runtime-config configs/robots/r1d_sim_runtime_left.yaml --sim-task-config configs/r1d_sim_left.yaml --output results/r1d_episode --seed 42 --no-plot`（右臂把 left 换成 right；R1D 路径只接受 --robot-config/--runtime-config/--sim-task-config/--output/--seed/--no-plot/--log-level，其余旧参数退出码 2）
+- R1D 固定可达案例（阶段 3 验收）: `configs/scenarios/r1d_stage3_reachable.yaml`（seed 42、expected_hit_type: active）
 - 运行测试: `pytest tests/`
 - 代码检查: `ruff check src/ tests/ scripts/`
 - 类型检查: `mypy src/`
@@ -446,6 +467,13 @@ mujoco_sim/
   - 读关节: `python scripts/tools/test_real_robot/02_read_joints.py`
   - 回零位: `python scripts/tools/test_real_robot/04_send_zero_pose.py`
   - 完整清单: `scripts/tools/test_real_robot/README.md`
+
+### R1-A7-D 单臂仿真（阶段 3）
+
+- 入口：`scripts/rm65_mpc_v12.py` 在 R1D 模式（`--robot-config` 指向 `configs/robots/r1d_*.yaml`）经 `src/sim/r1d_runner.py::run_r1d_episode` 执行「预测 → MPC/iLQR 重规划 → 安全滤波 → 仿真执行 → 物理接触判定」闭环，产物 `r1d_episode.json`（schema `r1d_sim_episode_v1`）+ `r1d_episode.npz`（`X(N+1,14)`/`U(N,7)`/`ball_pos(N+1,3)`/`ball_vel(N+1,3)`/`t(N+1)`）。
+- 配置分层：描述 `configs/robots/r1d_{left,right}.yaml`（阶段 2，非临时数值）；运行参数 `configs/robots/r1d_sim_runtime_{left,right}.yaml`（仿真临时值，全部 provisional）；仿真任务 `configs/r1d_sim_{left,right}.yaml`（来球/工作区/MPC/代价）；固定可达案例 `configs/scenarios/r1d_stage3_reachable.yaml`（seed 42、expected_hit_type: active）。
+- 本机实测（2026-11-16，Windows/py3.11/CPU）：左侧固定案例 seed 42 真实命中 `hit_type=active`（拍面接触速度 0.72 m/s > 0.3、击球帧球心—拍心距离 5.07 cm（`metrics.min_dist`=击球帧 pos_error；轨迹采样最小 4.58 cm）、111 控制步、`mpc_done=true`、禁止机身接触 0 帧），同配置同 seed 连跑 3 次逐位一致；右侧生产配置可真实跑通短回合但未命中（不宣称右侧命中）。规划耗时属离线仿真量级（生产配置首 plan ≈6.1–6.4 s、整回合 ≈7.9–10.8 s；调参前首 plan ≈11–14 s），**不得称实时**。
+- 验收状态：**阶段 3 已通过（2026-11-16）**——GF①–④ 由主代理在最终提交 `1711cbd` 上亲跑（全量 1240 passed + 2 skipped、闭环 4 passed、RM65 seed42 NPZ 逐字段与整文件 SHA 一致、ruff 仅 6 条基线 E702），GF⑤ 由独立终审 subagent 对 `754ccc0..1711cbd` 全分支包（55 files +14804/−357）裁决 **Approved**（0 Critical / 0 Important / 6 Minor，均非阻断）；证据见 `docs/experiments/reports/2026-11-16-unitree-stage3.md`。
 
 ## 批量实验架构
 

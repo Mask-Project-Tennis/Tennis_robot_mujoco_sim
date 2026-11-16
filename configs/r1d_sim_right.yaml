@@ -1,0 +1,102 @@
+# R1D 右臂仿真击球任务配置（SimTaskConfig，schema v1）— 阶段 3 Task 3.1。
+# 消费：load_sim_task_config(configs/r1d_sim_right.yaml, r1d_right.yaml 的 profile)。
+# 侧别由 robot_id + joint_names 与 profile 校验（不靠本文件名猜测）。
+# 配套 runtime：configs/robots/r1d_sim_runtime_right.yaml（完整显式，provisional）。
+#
+# ⚠ 本文件全部可调数值为 provisional 试验值（3.11 调参时留版本记录），
+# 不冒充硬件参数；与左侧 r1d_sim_left.yaml 逐项镜像，依据相同：
+# - ball_joint_name/ball_geom_name：沿用项目网球命名先例（rm65_model.xml
+#   L305/L308：freejoint "ball_freejoint"、geom "ball"）；3.2 按名组装带球场景。
+# - racket_geom_names：racket_face（r1d_model_right.xml，阶段 2 模板球拍唯一 geom）。
+# - protected_geom_pairs：右侧 7 个臂连杆 geom（*_visual）+ 球拍 geom，
+#   各与简化机身 torso_box 组成禁止接触对；臂 geom 名以右侧模板为准
+#   （right_*_Link_visual）。
+# - workspace_center/radius：FK 实测依据 — 右肩世界位置 [0.059, -0.086, 1.358]，
+#   init_q 拍面 [0.169, -0.170, 1.502]，肘伸直位拍面 [0.393, -0.136, 1.332]
+#   （阶段 2 模板 mj_forward 实测，与左侧 y 镜像）；半径 0.45。provisional。
+#   * 3.11 处置：中心 y 由 -0.25 改 -0.10。原因：3.8
+#     validate_workspace_against_model 在 [0.25,-0.25,1.35] 的局部 IK 解
+#     q[1]=0.3289 rad 超过右肩侧摆上界 +0.2268 rad（3.10 已订正该点
+#     并非物理绝对不可达：换 IK 初值存在限位内分支 q1=-0.3779/误差 0.9mm，
+#     3.8 校验为多初值/局部问题）；本片无权改 3.8 校验，故把右生产中心
+#     移到右臂可达区 -0.10（3.10 实测可通过该校验），使右侧环境/求解器/
+#     短回合测试可真实运行。右侧不宣称命中（见验收报告）。
+# - initial_ball_position/velocity：与左侧 y 镜像（来球自 y=-0.45 朝中线
+#   下落）；抛物线验算 t≈0.44s 到击球高度 1.40m、落点 [0.30, -0.32, 1.41]。
+#   provisional。
+# - max_steps/solver_config/mpc_config/cost_config：与左侧同值（双侧同构，
+#   见左侧文件头逐项理由，含 3.11 的 total_horizon 200 / follow_through 20 /
+#   Q_p 50000 / Q_v 200 调参记录）。provisional。
+schema_version: 1
+robot_id: unitree_r1d
+joint_names: [right_shoulder_pitch_joint, right_shoulder_roll_joint,
+              right_shoulder_yaw_joint, right_elbow_joint,
+              right_wrist_roll_joint, right_wrist_pitch_joint,
+              right_wrist_yaw_joint]
+ball_joint_name: ball_freejoint     # 3.2 带球场景 free joint 名（沿项目命名先例）
+ball_geom_name: ball                # 球碰撞 geom 名
+racket_geom_names: [racket_face]    # 阶段 2 模板球拍 geom（r1d_model_right.xml）
+protected_geom_pairs:               # 禁止接触对（3.2 解析为 geom id 对）
+  # 臂 geom 名以模板为准：仅 shoulder_pitch 连杆名含大写 Link（URDF mesh
+  # 文件名如此），其余为小写 link（3.2 修正初版大小写笔误）
+  - [right_shoulder_pitch_Link_visual, torso_box]
+  - [right_shoulder_roll_link_visual, torso_box]
+  - [right_shoulder_yaw_link_visual, torso_box]
+  - [right_elbow_link_visual, torso_box]
+  - [right_wrist_roll_link_visual, torso_box]
+  - [right_wrist_pitch_link_visual, torso_box]
+  - [right_wrist_yaw_link_visual, torso_box]
+  - [racket_face, torso_box]
+workspace_center: [0.25, -0.10, 1.35]   # 世界系击球区中心（3.11：y -0.25→-0.10，见文件头处置）
+workspace_radius: 0.45                  # m，臂+拍可达半径量级（provisional）
+initial_ball_position: [2.5, -0.45, 2.8]  # 世界系来球初位置（provisional）
+initial_ball_velocity: [-5.0, 0.3, -1.0]  # m/s，朝右侧击球区下落（provisional）
+max_steps: 600          # 3.0s @ dt=0.005（provisional）
+actuator_mode: torque   # 力矩模式默认；position 为仿真 PD（需 kp/kd）
+solver_config:
+  backend: python       # R1D 默认 Python+FD（七维不落 C++ 六维内核）
+  horizon: 80           # 0.4s 求解视野（provisional）
+  max_iter: 10
+  tol: 1.0e-4
+  mu_min: 1.0e-6
+  mu_max: 1.0e10
+  mu_init: 0.01
+  delta_0: 1.6
+  alpha_list: [1.0, 0.5, 0.25, 0.1, 0.05, 0.01]
+  lin_eps: 1.0e-6       # FD 扰动步长（rad，provisional）
+mpc_config:
+  dt: 0.005
+  total_horizon: 200    # 1.0s episode 规划视野（3.11：400→200，机理见左文件头）
+  fixed_horizon: 160    # 0.8s 固定段（provisional）
+  replan_interval: 20   # 100ms 重规划节奏（沿既有节奏）
+  max_iter_per_plan: 10
+  first_plan_iters: 30
+  near_plan_iters: 5
+  near_threshold: 80
+  Q_p_scale_far: 5.0
+  Q_v_scale_far: 3.0
+  Q_p_scale_near: 8.0
+  Q_v_scale_near: 120.0
+  R: 1.0e-4
+  normal_weight: 2.0e5
+  racket_speed: 1.2     # 与 max_tcp_speed 一致
+  target_speed: 1.2
+  Q_tcp_soft: 0.0       # 软惩罚默认关闭
+  Q_qdot_limit: 0.0
+  tcp_soft_ratio: 0.8
+  qdot_limit_ratio: 0.8
+  softmin_beta: 5.0
+  follow_through_steps: 20   # planned 随挥步数（3.11：0→20，同左侧）
+cost_config:
+  Q_p: 50000.0          # 终端位置权重基准（3.11：2000→50000，对齐 RM65 L25）
+  Q_v: 200.0            # 终端速度权重基准（3.11：100→200，对齐 RM65 L26）
+  tube:
+    window_half_ms: 50.0
+    contact_offset: 0.0
+    Q_p_tube: 50000.0
+    Q_v_tube: 200.0
+    Q_n_tube: 100000.0
+    tube_cost_mode: weighted_sum
+    tube_cost_ratio: 1.0
+    softmin_beta: 5.0
+    use_softmin_terminal: true

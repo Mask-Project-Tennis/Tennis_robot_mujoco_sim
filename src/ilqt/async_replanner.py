@@ -109,6 +109,20 @@ class AsyncReplanner:
         state: object | None = None,
         model_path: "Path | None" = None,
     ) -> None:
+        """初始化异步重规划器（仅支持 RM65 系环境）。
+
+        Raises:
+            ValueError: 传入绑定环境（BoundRobotEnv 族，R1D）。阶段 3
+                Task 3.8 决定本阶段不实现 R1D 异步——env_plan 的延迟
+                构造依赖 RM65 系构造签名 ``(model_path, dt=...)``，绑定
+                环境不支持；明确拒绝而非静默改同步或延迟崩溃。
+        """
+        if hasattr(env, "binding"):
+            raise ValueError(
+                "AsyncReplanner 当前不支持绑定环境（R1D）：本阶段 R1D 仅"
+                "同步重规划（Task 3.8 决定）。如需开放 R1D 异步，须为工作"
+                "线程构建独立 planning env 并补线程实例隔离测试"
+            )
         self._replan_fn = replan_fn
         # 静态配置：MPCConfig + RobotLimits + ILQTSolver 直接注入，
         # 后台线程调用 do_replan(request, env_plan, state, config, robot_limits, solver)
