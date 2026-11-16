@@ -1,0 +1,63 @@
+<?xml version='1.0' encoding='utf-8'?>
+<mujocoinclude>
+  <!--自动生成文件，勿手改。重建：python scripts/tools/build_d2_model.py
+来源：https://github.com/unitreerobotics/D2-Arm commit 8d505a8c511f2a8dd401bd4c410e37121b1bfd17
+      urdf/urdf/D2_URDF.urdf（SHA256 6f508a49719d8f7f02af284f7ecf4d6312c9cca17fd8251951a8bba232cbec73）
+契约（阶段 2 共享约束）：
+  1) <mujocoinclude> 片段：仅 compiler + worldbody（根 body=d2_base），
+     无地面/球拍/执行器/世界位姿；场景组装归 Task 2.5。
+  2) d2_base 对应 URDF base_link（按契约重命名的固定根 body）。
+  3) joint_8（固定）与 link_8（末端附件，0.01 kg）已移除，
+     原始 URDF 保留该段；工具安装面为 joint_8 的 origin
+     （link_7 系 xyz=0.1888 0 0.024），d2_flange site 由场景组装添加。
+  4) 限位单位：compiler angle=degree，URDF rad 已换算写出；
+     tests/test_d2_assets.py 在编译后对照 rad 值。
+  5) URDF velocity/effort=0 表示官方未提供能力值：本片段及其派生
+     场景不设 ctrlrange/forcerange/速度限值（未知能力见 source_manifest）。
+  6) 惯量逐字保留 URDF 质量/COM/完整张量，无 balanceinertia 修补。
+  7) 几何仅视觉 geom（contype=0 conaffinity=0，自碰撞关闭约定）；
+     URDF collision 与 visual 同网格，碰撞几何由后续场景模型决定。
+  8) URDF 未提供关节阻尼/armature，不虚构数值。-->
+  <compiler angle="degree" />
+  <worldbody>
+    <body name="d2_base">
+      <inertial pos="-0.0030416 5.4731E-06 0.037081" mass="0.978815939026316" fullinertia="0.00065474 0.00055033 0.00071198 8.1752E-07 -1.05E-05 -2.3459E-08" />
+      <geom name="base_link_visual" type="mesh" mesh="base_link" contype="0" conaffinity="0" rgba="1 1 1 1" />
+      <body name="link_1" pos="0 0 0.071">
+        <joint name="joint_1" type="hinge" axis="0 0 1" range="-155.9992189 155.9992189" />
+        <inertial pos="0.00018625 0.0028108 0.048197" mass="0.90463101514463" fullinertia="0.00044894 0.00051997 0.00053206 -7.3834E-07 -2.9057E-06 -7.5596E-06" />
+        <geom name="link_1_visual" type="mesh" mesh="link_1" contype="0" conaffinity="0" rgba="1 1 1 1" />
+        <body name="link_2" pos="-6.5708949380125E-05 0.041 0.051">
+          <joint name="joint_2" type="hinge" axis="0 1 0" range="0 195.000456" />
+          <inertial pos="-0.080215 -0.040235 -0.00055867" mass="0.988504630899383" fullinertia="0.00056364 0.0010076 0.0009018 -9.7233E-06 3.1963E-06 -2.904E-07" />
+          <geom name="link_2_visual" type="mesh" mesh="link_2" contype="0" conaffinity="0" rgba="1 1 1 1" />
+          <body name="link_3" pos="-0.137934292304992 -0.041 0">
+            <joint name="joint_3" type="hinge" axis="1 0 0" range="-159.9984643 159.9984643" />
+            <inertial pos="-0.11872 -0.00087188 0.020828" mass="1.01188099441379" fullinertia="0.00060444 0.0020826 0.0021527 -6.2024E-06 -0.00017512 -7.7017E-07" />
+            <geom name="link_3_visual" type="mesh" mesh="link_3" contype="0" conaffinity="0" rgba="1 1 1 1" />
+            <body name="link_4" pos="-0.16390903495379 -0.0364999999999997 0.0349474820302971">
+              <joint name="joint_4" type="hinge" axis="0 1 0" range="-180.0004209 0" />
+              <inertial pos="0.067319 0.035024 0.029057" mass="0.74397482133801" fullinertia="0.00043617 0.00064151 0.00052477 5.6988E-06 6.1035E-05 -8.5606E-08" />
+              <geom name="link_4_visual" type="mesh" mesh="link_4" contype="0" conaffinity="0" rgba="1 1 1 1" />
+              <body name="link_5" pos="0.11321 0.0365 0.031553">
+                <joint name="joint_5" type="hinge" axis="1 0 0" range="-101.9979467 101.9979467" />
+                <inertial pos="0.037228 -0.0004101 0.002758" mass="0.250577441361768" fullinertia="9.7267E-05 0.00029103 0.00023847 -4.0732E-07 -1.3043E-06 -1.5336E-07" />
+                <geom name="link_5_visual" type="mesh" mesh="link_5" contype="0" conaffinity="0" rgba="0.89804 0.91765 0.92941 1" />
+                <body name="link_6" pos="0.1057 0.024 0.0034999">
+                  <joint name="joint_6" type="hinge" axis="0 1 0" range="-86.49943833 86.49943833" />
+                  <inertial pos="0.025306 -0.023213 -0.00074849" mass="0.756134727110493" fullinertia="0.00028001 0.00070828 0.00070785 4.166E-07 4.17E-06 -6.7034E-08" />
+                  <geom name="link_6_visual" type="mesh" mesh="link_6" contype="0" conaffinity="0" rgba="0.85098 0.85098 0.85098 1" />
+                  <body name="link_7" pos="0.050998 -0.024 -0.024">
+                    <joint name="joint_7" type="hinge" axis="0 0 1" range="-90.00021046 90.00021046" />
+                    <inertial pos="0.01812 -1.1699E-06 0.025328" mass="0.0910180586464669" fullinertia="2.5481E-05 3.2841E-05 4.8534E-05 2.7363E-09 -1.115E-08 1.4762E-10" />
+                    <geom name="link_7_visual" type="mesh" mesh="link_7" contype="0" conaffinity="0" rgba="1 1 1 1" />
+                  </body>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+</mujocoinclude>

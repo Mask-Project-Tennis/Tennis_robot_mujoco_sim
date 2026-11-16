@@ -4,7 +4,7 @@
 
 | 模块 | 职责 | 关键文件 | 符号数 |
 |------|------|---------|--------|
-| `robot/` | 机器人模型定义（MuJoCo XML + 正运动学） | `rm65_model.xml`, `kinematics.py` | 9 |
+| `robot/` | 机器人模型定义（多机器人描述/参数/绑定/模型工厂 + MuJoCo XML + 正运动学） | `rm65_model.xml`, `kinematics.py`, `robot_profile.py`, `model_factory.py` | 9 |
 | `sim/` | MuJoCo 环境封装 + 轨迹回放 + 击打检测 | `rm65_env.py`, `env.py`, `viewer.py`, `replay.py`, `hit_detection.py` | 91 |
 | `dynamics/` | 动力学线性化（解析/有限差分） | `linearize.py` | 5 |
 | `ilqt/` | iLQR 求解器 + MPCController + EpisodeRunner + 可插拔策略 + 可组合组件 | `solver.py`, `mpc_controller.py`, `episode_runner.py`, `strategies/`, `components/` | 160 |
@@ -47,6 +47,8 @@ from src.ilqt.robot_limits import RobotLimits # 关节约束参数
 from src.perception.ball_estimator import BallEstimator  # 卡尔曼滤波器
 from src.tennis.ball import predict_trajectory            # 抛物线预测
 from src.utils.mujoco_loader import load_mujoco_model     # 跨平台模型加载
+from src.robot.model_factory import load_robot_model      # R1D 模型工厂（profile+参数 → RobotModelBundle）
+from src.robot.model_kinematics import ModelKinematics    # 名称映射运动学探针（TCP 位姿/雅可比）
 ```
 
 ## 模块详解
@@ -56,7 +58,13 @@ from src.utils.mujoco_loader import load_mujoco_model     # 跨平台模型加�
 - `constants.py`：共享常量单一事实来源（DT/INIT_Q/INIT_Q_REAL/INIT_Q_LEFT/SHOULDER_POS/WORKSPACE_RADIUS/KP/KD），仅依赖 numpy
 - `robot_profile.py`：`RobotProfile` 机器人描述加载器（configs/robots/*.yaml → 身份/模型路径/关节语义名称，纯配置层，不加载 MuJoCo/SDK、不含数值参数；校验 model_path 存在性）
 - `model_binding.py`：`ModelBinding` 模型名称绑定器（按名称解析关节/执行器/TCP 的 qpos/qvel 地址，只接受标量关节，校验执行器传动目标与描述维度/重名，只读不修改模型）
+- `runtime_parameters.py`：`RobotRuntimeParameters`/`SceneParameters` 运行参数纯参数层（configs/robots/*_runtime.yaml 严格解析 + 维数/单位/能力校验；未知限值显式 null 不补值，不导入 MuJoCo/real/ilqt）
+- `model_factory.py`：R1D 场景模型工厂（`write_r1d_model_template` 合并裸臂/环境/资产片段生成双侧模板；`load_robot_model` 参数化加载→绑定→校验→jnt_range 回填 q 限位，返回 `RobotModelBundle`；支持集 robot_id=unitree_r1d，模型工具需显式模块导入不进包根 `__init__`）
+- `model_kinematics.py`：`ModelKinematics` 名称映射运动学探针（按 binding 地址读写 [q, qdot] 状态，TCP 位姿/解析雅可比；每实例自有 MjData，无动力学 step/控制器/硬件生命周期）
 - `rm65_model.xml`：MuJoCo XML 模型（双臂 12DOF + 球拍 + 球 freejoint），DOF 和关节顺序的唯一事实来源
+- `r1d_arm_left.xml` / `r1d_arm_right.xml` / `r1d_env.xml` / `r1d_assets.xml`：R1-A7-D 官方整机 URDF 导出片段（`scripts/tools/build_r1d_model.py` 生成，勿手改；环境片段含 bake 的升降 q_L）
+- `r1d_model_left.xml` / `r1d_model_right.xml`：R1D 双侧单臂场景模板（`model_factory.py` 生成，勿手改；nq=nv=nu=7）
+- `d2_arm.xml` / `d2_assets.xml`：D2 历史资产片段（阶段 2 型号更正后保留，不作 R1-A7-D 验收依据）
 - `kinematics.py`：正运动学 / 雅可比矩阵工具函数
 
 ### sim/ — 仿真环境

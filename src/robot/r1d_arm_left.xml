@@ -1,0 +1,69 @@
+<?xml version='1.0' encoding='utf-8'?>
+<mujocoinclude>
+  <!--自动生成文件,勿手改。重建:python scripts/tools/build_r1d_model.py
+来源:https://github.com/unitreerobotics/unitree_ros commit 157ff950351e5f535e03c5d85a16b7d594b3dbcc
+      robots/r1d_description/r1d.urdf(SHA256 39ad1a206c34c3deecd33745ccda0c0c94ece4195f674dfbaf950f567f08809c)
+侧别:side=left(同一工具对同一 URDF 仅以 side 参数区分生成,
+      独立导出,非单侧生成后镜像改名)
+契约(阶段 2 共享约束 N0):
+  1) <mujocoinclude> 片段:仅 compiler + worldbody(根 body=r1d_base),
+     无地面/球拍/执行器/世界位姿;场景组装归 Task 2.5b。
+  2) r1d_base 为 waist_yaw_link 之上的虚拟固定安装点
+     (无质量/无几何);臂片段内第一级 body 的 pos/quat 即 URDF
+     该侧 shoulder_pitch_joint origin(含肩部 ±0.26187 rad 安装 rpy,
+     零位为 Z 形偏置,非垂直下垂)。
+  3) 移除项:dex1 夹爪(prismatic ×2)与腕部相机固定子树,
+     记录见 assets/unitree_r1d/source_manifest.yaml;
+     r1d_flange site 位置 = 该侧 dex1_base_joint origin
+     (工具安装参考,不声称等于实物安装面)。
+  4) 限位单位:compiler angle=degree,URDF rad 已换算写出;
+     逐字采用 URDF 值(含右腕俯仰上界 +0.5326 的官方不对称,
+     不得修正);tests/test_r1d_assets.py 编译后对照 rad 值。
+  5) URDF effort/velocity 非 0(官方声明,未经实机验证):
+     不设 ctrlrange/forcerange/速度限值,不作安全限值(N0-9)。
+  6) 惯量逐字保留 URDF 质量/COM/完整张量,无 balanceinertia 修补。
+  7) 几何仅视觉 geom(contype=0 conaffinity=0,自碰撞关闭约定);
+     URDF collision 与 visual 同网格,碰撞几何由后续场景模型决定。
+  8) URDF 未提供关节阻尼/armature,不虚构数值。-->
+  <compiler angle="degree" />
+  <worldbody>
+    <body name="r1d_base">
+      <body name="left_shoulder_pitch_Link" pos="0 0.085688 0.19749" quat="0.9914402524 0.1305611962 0 0">
+        <joint name="left_shoulder_pitch_joint" type="hinge" axis="0 1 0" range="-180.0004209 120.0002806" />
+        <inertial pos="0.00294386 0.04476868 -0.02286868" mass="0.83794992" fullinertia="0.00066072 0.00060170 0.00057741 -0.00000492 0.00001580 0.00005557" />
+        <geom name="left_shoulder_pitch_Link_visual" type="mesh" mesh="left_shoulder_pitch_Link" contype="0" conaffinity="0" rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+        <body name="left_shoulder_roll_link" pos="0.03445 0.047132 -0.025693" quat="0.9914402524 -0.1305611962 0 0">
+          <joint name="left_shoulder_roll_joint" type="hinge" axis="1 0 0" range="-12.99983941 142.0018599" />
+          <inertial pos="-0.037828 0.003967 -0.066496" mass="0.740212" fullinertia="0.000971 0.001089 0.000573 -0.000004 0.000101 0.000022" />
+          <geom name="left_shoulder_roll_link_visual" type="mesh" mesh="left_shoulder_roll_link" contype="0" conaffinity="0" rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+          <body name="left_shoulder_yaw_link" pos="-0.03445 0.0043 -0.10835">
+            <joint name="left_shoulder_yaw_joint" type="hinge" axis="0 0 1" range="-110.0021671 110.0021671" />
+            <inertial pos="0.013143 -0.004355 -0.072948" mass="0.738441" fullinertia="0.000829 0.000852 0.000469 0.000015 0.000108 -0.000035" />
+            <geom name="left_shoulder_yaw_link_visual" type="mesh" mesh="left_shoulder_yaw_link" contype="0" conaffinity="0" rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+            <body name="left_elbow_link" pos="0.016191 0.026461 -0.082858">
+              <joint name="left_elbow_joint" type="hinge" axis="0 1 0" range="-55.90005432 125.2027374" />
+              <inertial pos="0.072371 -0.024612 -0.011566" mass="0.759419" fullinertia="0.000550 0.000892 0.000936 0.000179 0.000030 -0.000017" />
+              <geom name="left_elbow_link_visual" type="mesh" mesh="left_elbow_link" contype="0" conaffinity="0" rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+              <body name="left_wrist_roll_link" pos="0.11218 -0.03002 -0.011702">
+                <joint name="left_wrist_roll_joint" type="hinge" axis="1 0 0" range="-110.0021671 110.0021671" />
+                <inertial pos="0.0418 -0.0057 0.0003" mass="0.3697" fullinertia="0.0002657969 0.0003512210 0.0003634538 -0.0000004357 -0.0000031025 0.0000008770" />
+                <geom name="left_wrist_roll_link_visual" type="mesh" mesh="left_wrist_roll_link" contype="0" conaffinity="0" rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+                <body name="left_wrist_pitch_link" pos="0.1057 -0.028757 -0.0037491">
+                  <joint name="left_wrist_pitch_joint" type="hinge" axis="0 1 0" range="-30.00007015 30.00007015" />
+                  <inertial pos="0.0078 0.0273 0.0012" mass="0.1066" fullinertia="0.0000592753 0.0000546423 0.0000689985 -0.0000006548 -0.0000001728 0.0000004180" />
+                  <geom name="left_wrist_pitch_link_visual" type="mesh" mesh="left_wrist_pitch_link" contype="0" conaffinity="0" rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+                  <body name="left_wrist_yaw_link" pos="0.009848 0.031494 -0.017245">
+                    <joint name="left_wrist_yaw_joint" type="hinge" axis="0 0 1" range="-90.00021046 90.00021046" />
+                    <inertial pos="0.0016 -0.0163 0.0249" mass="0.1091" fullinertia="0.0001206533 0.0000917159 0.0000717545 -0.0000001684 -0.0000031385 -0.0000026735" />
+                    <geom name="left_wrist_yaw_link_visual" type="mesh" mesh="left_wrist_yaw_link" contype="0" conaffinity="0" rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+                    <site name="r1d_flange" pos="0.0485 -0.003 0.02" size="0.005" />
+                  </body>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+</mujocoinclude>

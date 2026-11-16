@@ -1,0 +1,37 @@
+# D2（unitree_d2）运行参数 — 阶段 2 临时起始配置。
+# 全部数值来自 shared-constraints §2.3 表，属于流程验证用临时值，
+# 不是官方参数；provisional_fields 列出所有临时项。
+# 未知限值显式 null（整组未知）：不从 RM65 补值、不隐式继承默认；
+# 关节位置限位 q_lower/q_upper 由 model_factory 绑定模型后从
+# model.jnt_range 解析填回（当前保持 null，也不列入 provisional_fields）。
+# source 不在此文件声明：由加载路径（load_runtime_parameters）生成。
+schema_version: 1
+robot_id: unitree_d2
+joint_names: [joint_1, joint_2, joint_3, joint_4, joint_5, joint_6, joint_7]
+dt: 0.005                    # 仿真计算步长，非硬件控制周期（临时值）
+init_q: [0.0, 1.2, 0.0, -1.2, 0.0, 0.0, 0.0]  # 临时准备姿态，非实机零位
+held_q: []                   # d2.yaml held_joint_names=[]，保持关节无角度
+kp: null                     # 未配置位置控制（不从 RM65 补值）
+kd: null
+q_lower: null                # 绑定模型后由 jnt_range 解析
+q_upper: null
+qdot_max: null               # URDF velocity=0 → 未知，不作有效零约束
+qddot_max: null
+torque_max: null             # URDF effort=0 → 未知
+max_tcp_speed: null
+scene:
+  base_position: [0.0, 0.0, 1.0]      # 中性侧别，虚拟固定基座（世界系）
+  base_quaternion: [1.0, 0.0, 0.0, 0.0]  # wxyz 单位四元数
+  racket_position: [0.0, 0.0, 0.25]   # 相对 d2_flange（link_7 末端），非实物标定
+  racket_quaternion: [1.0, 0.0, 0.0, 0.0]  # 拍面局部 +Z 为法向
+  racket_radius: 0.12                 # 实心圆盘占位几何（临时值）
+  racket_half_thickness: 0.005
+  racket_mass: 0.30                   # 实心圆盘近似惯量，不宣称实物惯量
+  torso_position: [-0.25, 0.0, -0.30]  # 相对固定基座的简化机身 box 中心
+  torso_half_size: [0.15, 0.20, 0.30]  # 简化 box，不是整机外形
+provisional_fields: [dt, init_q,
+                     base_position, base_quaternion,
+                     racket_position, racket_quaternion,
+                     racket_radius, racket_half_thickness, racket_mass,
+                     torso_position, torso_half_size,
+                     kp, kd, qdot_max, qddot_max, torque_max, max_tcp_speed]

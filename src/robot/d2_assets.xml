@@ -1,0 +1,27 @@
+<?xml version='1.0' encoding='utf-8'?>
+<mujocoinclude>
+  <!--自动生成文件，勿手改。重建：python scripts/tools/build_d2_model.py
+视觉 mesh 声明：package://D2_URDF/meshes/*.STL 映射到本地
+../../assets/unitree_d2/meshes/*.STL（相对片段部署位置 src/robot/，
+沿用 RM65 模型相对路径参照模式）。
+本片段仅含 <asset>，无 compiler（角度敏感内容在 d2_arm.xml）；
+link_8 网格未在派生模型中引用，仅作资产留存（见清单）。-->
+  <asset>
+    <!--package://D2_URDF/meshes/base_link.STL-->
+    <mesh name="base_link" file="../../assets/unitree_d2/meshes/base_link.STL" />
+    <!--package://D2_URDF/meshes/link_1.STL-->
+    <mesh name="link_1" file="../../assets/unitree_d2/meshes/link_1.STL" />
+    <!--package://D2_URDF/meshes/link_2.STL-->
+    <mesh name="link_2" file="../../assets/unitree_d2/meshes/link_2.STL" />
+    <!--package://D2_URDF/meshes/link_3.STL-->
+    <mesh name="link_3" file="../../assets/unitree_d2/meshes/link_3.STL" />
+    <!--package://D2_URDF/meshes/link_4.STL-->
+    <mesh name="link_4" file="../../assets/unitree_d2/meshes/link_4.STL" />
+    <!--package://D2_URDF/meshes/link_5.STL-->
+    <mesh name="link_5" file="../../assets/unitree_d2/meshes/link_5.STL" />
+    <!--package://D2_URDF/meshes/link_6.STL-->
+    <mesh name="link_6" file="../../assets/unitree_d2/meshes/link_6.STL" />
+    <!--package://D2_URDF/meshes/link_7.STL-->
+    <mesh name="link_7" file="../../assets/unitree_d2/meshes/link_7.STL" />
+  </asset>
+</mujocoinclude>

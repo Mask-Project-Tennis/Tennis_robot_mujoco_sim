@@ -18,12 +18,14 @@ import numpy as np
 
 from src.ilqt.planning_env import PlanningEnv
 from src.ilqt.robot_limits import RobotLimits
+from src.ilqt.robot_parameters import symmetric_torque_max
 from src.ilqt.solver import build_solver
 from src.ilqt.tube_types import TubeConfig
 from src.real.config import RealRobotConfig
 from src.robot.constants import (
     DT,
     INIT_Q_LEFT,
+    INIT_Q_REAL,
     INIT_Q_REAL as INIT_Q,
     KD,
     KP,
@@ -32,6 +34,10 @@ from src.robot.constants import (
 )
 from src.robot.model_binding import ModelBinding, bind_robot_model
 from src.robot.robot_profile import RobotProfile
+from src.robot.runtime_parameters import (
+    RobotRuntimeParameters,
+    validate_runtime_parameters,
+)
 from src.utils.mujoco_loader import load_mujoco_model
 
 if TYPE_CHECKING:
@@ -55,6 +61,7 @@ __all__ = [
     "validate_rm65_runtime",
     "load_validated_rm65_binding",
     "build_robot_arm",
+    "resolve_rm65_real_parameters",
 ]
 
 # ── RM65 运行能力常量（与 src/robot/rm65_model.xml、configs/robots/rm65.yaml 对齐）──
@@ -68,6 +75,12 @@ _RM65_TCP_SITE = "racket_center"
 _RM65_MODEL_PATH = (
     Path(__file__).resolve().parent.parent / "robot" / "rm65_model.xml"
 ).resolve()
+
+# 真机适配器参数来源说明（source 仅作溯源，不作为安全授权）
+_RM65_REAL_SOURCE = (
+    "RM65 真机旧参数（constants.INIT_Q_REAL + RealRobotConfig"
+    " + build_robot_limits(env, config)）"
+)
 
 
 def validate_rm65_profile(profile: RobotProfile) -> None:
@@ -241,6 +254,77 @@ def build_robot_limits(env: PlanningEnv, config: RealRobotConfig) -> RobotLimits
     return RobotLimits.from_config(
         rl_cfg, dt=config.dt, ctrlrange=env.model.actuator_ctrlrange[: env.NU]
     )
+
+
+def resolve_rm65_real_parameters(
+    env: PlanningEnv,
+    config: RealRobotConfig,
+) -> RobotRuntimeParameters:
+    """把 RM65 真机旧参数来源映射为 RobotRuntimeParameters（阶段 2 Task 2.3）。
+
+    仅新增显式调用接口，不接入生产入口（阶段 3 才迁移实际入口）。
+    逐项来源：
+      - init_q/held_q：constants.INIT_Q_REAL / constants.INIT_Q_LEFT
+        （真机姿势 J2=1.40，与仿真 INIT_Q J2=1.57 保持区别，不互相顶替）；
+      - dt/kp/kd：传入 config（RealRobotConfig）；
+      - q_lower/q_upper/qdot_max/qddot_max/max_tcp_speed/u 界：原
+        build_robot_limits(env, config) 结果（唯一安全规则来源，不另写一份，
+        含 margin 后的规划限位）；
+      - torque_max：u_min/u_max 对称折算（来自模型 ctrlrange）。
+    注意 config.torque_limit 是控制器固件安全设置（Layer 1），
+    不能误替换当前规划力矩界限；不对称的力矩上下限明确拒绝折算。
+
+    Args:
+        env: 规划环境（提供模型 ctrlrange，且模型须为 RM65 原布局）。
+        config: 真机配置（dt/PD/关节限位/TCP 限速来源）。
+
+    Returns:
+        通过 kinematics 级校验的 RobotRuntimeParameters
+        （init_q=INIT_Q_REAL、held_q=INIT_Q_LEFT、scene=None、无临时字段）。
+
+    Raises:
+        ValueError: env 的模型不是 RM65 原布局（绑定/布局校验失败）、
+            力矩界限不对称或任一 kinematics 级校验失败。
+    """
+    # RM65 规范描述（本适配器只服务 RM65；名称期望与 configs/robots/rm65.yaml
+    # 一致），绑定 env 的模型并校验原布局（主动/执行器 0..5、保持 6..11），
+    # 非 RM65 模型在此被拒绝。
+    profile = RobotProfile(
+        schema_version=1,
+        robot_id=_RM65_ROBOT_ID,
+        model_path=_RM65_MODEL_PATH,
+        active_joint_names=_RM65_ACTIVE_JOINTS,
+        actuator_names=_RM65_ACTUATORS,
+        held_joint_names=_RM65_HELD_JOINTS,
+        tcp_site_name=_RM65_TCP_SITE,
+    )
+    binding = bind_robot_model(profile, env.model)
+    validate_rm65_runtime(profile, binding)
+
+    # 界限取原 build_robot_limits 结果（复用既有工厂，不增加另一份安全规则）
+    limits = build_robot_limits(env, config)
+    torque_max = symmetric_torque_max(limits.u_min, limits.u_max)
+
+    params = RobotRuntimeParameters(
+        robot_id=_RM65_ROBOT_ID,
+        joint_names=_RM65_ACTIVE_JOINTS,
+        dt=config.dt,
+        init_q=INIT_Q_REAL,
+        held_q=INIT_Q_LEFT,
+        kp=np.asarray(config.kp, dtype=np.float64),
+        kd=np.asarray(config.kd, dtype=np.float64),
+        q_lower=limits.q_lower,
+        q_upper=limits.q_upper,
+        qdot_max=limits.qdot_max,
+        qddot_max=limits.qddot_max,
+        torque_max=torque_max,
+        max_tcp_speed=float(limits.max_tcp_speed),
+        scene=None,
+        provisional_fields=(),
+        source=_RM65_REAL_SOURCE,
+    )
+    validate_runtime_parameters(params, profile, purpose="kinematics")
+    return params
 
 
 def build_real_robot_mpc_config(config: RealRobotConfig) -> "MPCConfig":

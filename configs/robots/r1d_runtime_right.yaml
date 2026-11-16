@@ -1,0 +1,47 @@
+# R1D 右臂（unitree_r1d）运行参数 — 阶段 2 临时起始配置。
+# 全部起始数值属流程验证用临时值（沿用 D2 先例尺寸，见 shared-constraints
+# §2.3 表），不是官方参数；provisional_fields 列出所有临时项。
+# 未知限值显式 null（整组未知）：不从 RM65 补值、不隐式继承默认。
+# R1D URDF 的 effort/velocity 声明值非 0（官方声明，未经实机验证），
+# 依 N0-9 不自动成为运行限值——安全限值来源留待阶段 3/4 真机辨识。
+# 关节位置限位 q_lower/q_upper 由 model_factory 绑定模型后从
+# model.jnt_range 解析填回（当前保持 null，也不列入 provisional_fields）；
+# 右侧含腕俯仰上界 +0.5326 的官方不对称（不修正，审计 §5）。
+# 升降高度只由 r1d_env.xml 的 q_L bake 表达（当前 q_L=0），
+# 本 scene 不提供第二套升降偏移字段（仿真与规划一致约束的落点）。
+# source 不在此文件声明：由加载路径（load_runtime_parameters）生成。
+# joint_names 与 r1d_right.yaml 的 active_joint_names 同序（URDF 原名）。
+# init_q 与左侧同构轴向（左右 axis 相同，见审计 §3），数值一致。
+schema_version: 1
+robot_id: unitree_r1d
+joint_names: [right_shoulder_pitch_joint, right_shoulder_roll_joint,
+              right_shoulder_yaw_joint, right_elbow_joint,
+              right_wrist_roll_joint, right_wrist_pitch_joint,
+              right_wrist_yaw_joint]
+dt: 0.005                    # 仿真计算步长，非硬件控制周期（临时值）
+init_q: [0.0, 0.2, 0.0, -0.6, 0.0, 0.0, 0.0]  # 临时准备姿态（双侧同构轴向），非实机零位；肩侧摆取 0.2：右肩侧摆 URDF 上界 0.2268（区间与左侧翻转，审计 §2），0.3 超界已调整并记录
+held_q: []                   # r1d_right.yaml held_joint_names=[]，保持关节无角度
+kp: null                     # 未配置位置控制（不从 RM65 补值）
+kd: null
+q_lower: null                # 绑定模型后由 jnt_range 解析
+q_upper: null
+qdot_max: null               # URDF velocity 非 0 但未经实机验证，不作运行限值（N0-9）
+qddot_max: null
+torque_max: null             # URDF effort 非 0 但未经实机验证，不作运行限值（N0-9）
+max_tcp_speed: null
+scene:
+  base_position: [0.0, 0.0, 1.0]      # 虚拟固定基座（环境链 base_link 原点，世界系）
+  base_quaternion: [1.0, 0.0, 0.0, 0.0]  # wxyz 单位四元数
+  racket_position: [0.0, 0.0, 0.25]   # 相对 r1d_flange（该侧 dex1_base_joint origin），非实物标定
+  racket_quaternion: [1.0, 0.0, 0.0, 0.0]  # 拍面局部 +Z 为法向
+  racket_radius: 0.12                 # 实心圆盘占位几何（临时值）
+  racket_half_thickness: 0.005
+  racket_mass: 0.30                   # 实心圆盘近似惯量，不宣称实物惯量
+  torso_position: [-0.25, 0.0, -0.30]  # 相对固定基座的简化机身 box 中心（临时值）
+  torso_half_size: [0.15, 0.20, 0.30]  # 简化 box，不是整机外形
+provisional_fields: [dt, init_q,
+                     base_position, base_quaternion,
+                     racket_position, racket_quaternion,
+                     racket_radius, racket_half_thickness, racket_mass,
+                     torso_position, torso_half_size,
+                     kp, kd, qdot_max, qddot_max, torque_max, max_tcp_speed]

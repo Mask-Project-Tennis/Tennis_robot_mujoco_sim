@@ -113,6 +113,66 @@ class TestBadProfileRejected:
         assert fake_calls["thread_started"] == 0
 
 
+class TestR1dProfileRejected:
+    """阶段 2 交付的真实 R1D profile 仍被真机入口拒绝（阶段 3 前不支持）。
+
+    与 TestBadProfileRejected（虚构 robot_id）、TestMainCli（手写 YAML）不同，
+    本组测试使用仓库中真实存在的 configs/robots/r1d_{left,right}.yaml 走
+    main() 完整解析路径：证明的是"真实交付 profile 无法经现有入口启动
+    运行组件"，而非仅校验逻辑分支。
+    """
+
+    @pytest.mark.parametrize("profile_name", ["r1d_left", "r1d_right"])
+    def test_r1d_profile_still_rejected_by_real_entrypoint(
+        self, monkeypatch: pytest.MonkeyPatch, profile_name: str
+    ) -> None:
+        """真实 r1d profile 调 main() → 退出码 2，运行组件调用次数为零。
+
+        断言三重隔离：create_runner（组装层）、RobotInterface.connect
+        （SDK 连接层）、AsyncReplanner.start（后台线程层）均未被调用。
+        """
+        import src.ilqt.async_replanner as replanner_mod
+        import src.real.robot_interface as robot_interface_mod
+
+        calls = {"create_runner": 0, "sdk_connect": 0, "replanner_start": 0}
+
+        def _fake_create_runner(*args: object, **kwargs: object) -> None:
+            calls["create_runner"] += 1
+
+        def _spy_sdk_connect(self: object, *args: object, **kwargs: object) -> None:
+            calls["sdk_connect"] += 1
+
+        def _spy_replanner_start(self: object, *args: object, **kwargs: object) -> None:
+            calls["replanner_start"] += 1
+
+        monkeypatch.setattr(run_real_robot, "create_runner", _fake_create_runner)
+        monkeypatch.setattr(
+            robot_interface_mod.RobotInterface, "connect", _spy_sdk_connect
+        )
+        monkeypatch.setattr(
+            replanner_mod.AsyncReplanner, "start", _spy_replanner_start
+        )
+
+        # 真实仓库 profile（非临时构造）：路径存在性是测试前提，不是被测行为
+        profile_path = REPO_ROOT / "configs" / "robots" / f"{profile_name}.yaml"
+        assert profile_path.is_file(), f"缺少真实 profile: {profile_path}"
+
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            ["run_real_robot.py", "--mock", "--robot-config", str(profile_path)],
+        )
+        with pytest.raises(SystemExit) as exc_info:
+            run_real_robot.main()
+
+        # 配置类错误以退出码 2 呈现（与阶段 1 CLI 契约一致）
+        assert int(exc_info.value.code) == 2
+        # 任何运行组件（组装/SDK 连接/后台线程）都未被触碰
+        assert calls["create_runner"] == 0
+        assert calls["sdk_connect"] == 0
+        assert calls["replanner_start"] == 0
+
+
 class TestYamlOverridePreserved:
     """旧 YAML 覆盖行为保持不变（新配置不遮蔽旧值）。"""
 

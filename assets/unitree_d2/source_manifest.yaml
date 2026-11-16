@@ -1,0 +1,138 @@
+# D2 官方资产来源清单（阶段 2 · Task 2.1 交付物，勿手改；哈希由交付文件逐字节计算）
+#
+# 用途：固定上游来源、审计交付资源、记录派生模型的移除项与未知能力。
+# 哈希校验测试：tests/test_d2_assets.py::test_source_manifest_hashes
+source:
+  repository: https://github.com/unitreerobotics/D2-Arm
+  commit: 8d505a8c511f2a8dd401bd4c410e37121b1bfd17
+  commit_url: https://github.com/unitreerobotics/D2-Arm/blob/8d505a8c511f2a8dd401bd4c410e37121b1bfd17
+  retrieval:
+    date: "2026-11-15"
+    method: >-
+      git clone 全仓库后，文本文件（URDF/package.xml）用 git show 取固定
+      commit 的 blob 原始字节（LF 行尾，避免 Windows autocrlf 检出改写）；
+      网格为二进制，直接拷贝（已验证与 blob 逐字节一致）。
+  cross_check:
+    stage0_evidence: >-
+      C:/Users/Nothing/Documents/Codex/2026-11-14/new-chat/outputs/
+      stage0-evidence/D2_URDF.urdf（阶段 0 核对件，只读；其 SHA256 与本清单
+      D2_URDF.urdf 条目一致，即 6f508a49719d8f7f02af284f7ecf4d6312c9cca17fd8251a8bba232cbec73）
+
+license:
+  status: unverified
+  declaration:
+    file: urdf/package.xml
+    xpath: <license>BSD</license>
+  notes: >-
+    仓库内无 LICENSE 全文文件；package.xml 的 author/maintainer 均为 TODO 占位，
+    BSD 变体（2-clause/3-clause）与版权人无法从交付物确定。禁止自行声明 MIT/
+    可再分发。本地研究验证可继续；对外发布或再分发前需向宇树科技取得书面授权，
+    并同步更新本节与 README.md。
+
+files:
+  - path: D2_URDF.urdf
+    role: 原始 URDF（与固定 commit blob 逐字节一致，LF 行尾）
+    upstream_path: urdf/urdf/D2_URDF.urdf
+    url: https://github.com/unitreerobotics/D2-Arm/blob/8d505a8c511f2a8dd401bd4c410e37121b1bfd17/urdf/urdf/D2_URDF.urdf
+    raw_url: https://raw.githubusercontent.com/unitreerobotics/D2-Arm/8d505a8c511f2a8dd401bd4c410e37121b1bfd17/urdf/urdf/D2_URDF.urdf
+    sha256: 6f508a49719d8f7f02af284f7ecf4d6312c9cca17fd8251951a8bba232cbec73
+  - path: package.xml
+    role: 许可/来源声明拷贝（ROS 包清单，含 license 声明；LF 行尾）
+    upstream_path: urdf/package.xml
+    url: https://github.com/unitreerobotics/D2-Arm/blob/8d505a8c511f2a8dd401bd4c410e37121b1bfd17/urdf/package.xml
+    raw_url: https://raw.githubusercontent.com/unitreerobotics/D2-Arm/8d505a8c511f2a8dd401bd4c410e37121b1bfd17/urdf/package.xml
+    sha256: 59deb8f4567f9a02ec694df4c7ae8e2225779f16ea299ffc2e2d0db7ea51ff8c
+  - path: meshes/base_link.STL
+    role: URDF 引用网格（base_link visual/collision 网格）
+    upstream_path: urdf/meshes/base_link.STL
+    url: https://github.com/unitreerobotics/D2-Arm/blob/8d505a8c511f2a8dd401bd4c410e37121b1bfd17/urdf/meshes/base_link.STL
+    raw_url: https://raw.githubusercontent.com/unitreerobotics/D2-Arm/8d505a8c511f2a8dd401bd4c410e37121b1bfd17/urdf/meshes/base_link.STL
+    sha256: 7b7be4479903a7fc05bf3118f5492322d7e7914aa5ba64368ff862e32caeb58f
+  - path: meshes/link_1.STL
+    role: URDF 引用网格（link_1 visual/collision 网格）
+    upstream_path: urdf/meshes/link_1.STL
+    url: https://github.com/unitreerobotics/D2-Arm/blob/8d505a8c511f2a8dd401bd4c410e37121b1bfd17/urdf/meshes/link_1.STL
+    raw_url: https://raw.githubusercontent.com/unitreerobotics/D2-Arm/8d505a8c511f2a8dd401bd4c410e37121b1bfd17/urdf/meshes/link_1.STL
+    sha256: 1b4780b81cf279f3b39ac5939ec05ed532e6c3fc189a80e8d72fbec90d7d7509
+  - path: meshes/link_2.STL
+    role: URDF 引用网格（link_2 visual/collision 网格）
+    upstream_path: urdf/meshes/link_2.STL
+    url: https://github.com/unitreerobotics/D2-Arm/blob/8d505a8c511f2a8dd401bd4c410e37121b1bfd17/urdf/meshes/link_2.STL
+    raw_url: https://raw.githubusercontent.com/unitreerobotics/D2-Arm/8d505a8c511f2a8dd401bd4c410e37121b1bfd17/urdf/meshes/link_2.STL
+    sha256: 1370640751be5a9a90707531856570b68940934226f068808fa394d0b2850ea6
+  - path: meshes/link_3.STL
+    role: URDF 引用网格（link_3 visual/collision 网格）
+    upstream_path: urdf/meshes/link_3.STL
+    url: https://github.com/unitreerobotics/D2-Arm/blob/8d505a8c511f2a8dd401bd4c410e37121b1bfd17/urdf/meshes/link_3.STL
+    raw_url: https://raw.githubusercontent.com/unitreerobotics/D2-Arm/8d505a8c511f2a8dd401bd4c410e37121b1bfd17/urdf/meshes/link_3.STL
+    sha256: 022aee9bcca767dbcb30786051a6ef1296f87e96643a24a53684908440db0158
+  - path: meshes/link_4.STL
+    role: URDF 引用网格（link_4 visual/collision 网格）
+    upstream_path: urdf/meshes/link_4.STL
+    url: https://github.com/unitreerobotics/D2-Arm/blob/8d505a8c511f2a8dd401bd4c410e37121b1bfd17/urdf/meshes/link_4.STL
+    raw_url: https://raw.githubusercontent.com/unitreerobotics/D2-Arm/8d505a8c511f2a8dd401bd4c410e37121b1bfd17/urdf/meshes/link_4.STL
+    sha256: 4ee2ee01c163286b5ddb4dec22d979dcb2a8b7818729a37cd9a8c68f267acd38
+  - path: meshes/link_5.STL
+    role: URDF 引用网格（link_5 visual/collision 网格）
+    upstream_path: urdf/meshes/link_5.STL
+    url: https://github.com/unitreerobotics/D2-Arm/blob/8d505a8c511f2a8dd401bd4c410e37121b1bfd17/urdf/meshes/link_5.STL
+    raw_url: https://raw.githubusercontent.com/unitreerobotics/D2-Arm/8d505a8c511f2a8dd401bd4c410e37121b1bfd17/urdf/meshes/link_5.STL
+    sha256: 38f81faa9bc7a279ffd20737486b9e4ea4ff2eda2f83cf1977d7181ca8106192
+  - path: meshes/link_6.STL
+    role: URDF 引用网格（link_6 visual/collision 网格）
+    upstream_path: urdf/meshes/link_6.STL
+    url: https://github.com/unitreerobotics/D2-Arm/blob/8d505a8c511f2a8dd401bd4c410e37121b1bfd17/urdf/meshes/link_6.STL
+    raw_url: https://raw.githubusercontent.com/unitreerobotics/D2-Arm/8d505a8c511f2a8dd401bd4c410e37121b1bfd17/urdf/meshes/link_6.STL
+    sha256: c86b7779cb95fbc2e65e3829bef3519d5de77e3db5909375b6348f92bc5c3366
+  - path: meshes/link_7.STL
+    role: URDF 引用网格（link_7 visual/collision 网格）
+    upstream_path: urdf/meshes/link_7.STL
+    url: https://github.com/unitreerobotics/D2-Arm/blob/8d505a8c511f2a8dd401bd4c410e37121b1bfd17/urdf/meshes/link_7.STL
+    raw_url: https://raw.githubusercontent.com/unitreerobotics/D2-Arm/8d505a8c511f2a8dd401bd4c410e37121b1bfd17/urdf/meshes/link_7.STL
+    sha256: ca0939584eeb013907f4e3302d0a5afe875040f8df0db4eab6bffb20b241aedf
+  - path: meshes/link_8.STL
+    role: URDF 引用网格（link_8 visual/collision 网格）
+    upstream_path: urdf/meshes/link_8.STL
+    url: https://github.com/unitreerobotics/D2-Arm/blob/8d505a8c511f2a8dd401bd4c410e37121b1bfd17/urdf/meshes/link_8.STL
+    raw_url: https://raw.githubusercontent.com/unitreerobotics/D2-Arm/8d505a8c511f2a8dd401bd4c410e37121b1bfd17/urdf/meshes/link_8.STL
+    sha256: 5707a27de65500b9a58ea2d0cf796169de3ba59a3d281129de327c8241edc65f
+
+derived_model:
+  description: >-
+    由本目录原始 URDF 经 scripts/tools/build_d2_model.py 生成的裸臂 MJCF
+    片段（<mujocoinclude>，生成过程字节确定，测试防漂移）。
+  fragments:
+    - src/robot/d2_arm.xml
+    - src/robot/d2_assets.xml
+  rebuild_command: python scripts/tools/build_d2_model.py
+  removed_from_urdf:
+    - type: fixed_joint
+      name: joint_8
+      origin_xyz_m: [0.1888, 0, 0.024]
+      parent: link_7
+      child: link_8
+    - type: link
+      name: link_8
+      mass_kg: 0.01
+  removal_rationale: >-
+    joint_8 为零轴固定关节，仅表达 link_8（0.01 kg 末端附件）的刚性安装；
+    派生模型移除该固定段，原始 URDF 原样保留。工具安装面即被移除 joint_8
+    的 origin（link_7 系 xyz=0.1888 0 0.024），后续 d2_flange site 与球拍
+    由场景组装（Task 2.5）在该安装面挂接。
+  collision_note: >-
+    URDF collision 与 visual 引用同网格；生产裸臂遵循自碰撞关闭约定仅保留
+    视觉 geom（contype=0/conaffinity=0），碰撞几何由后续场景/诊断模型决定。
+  inertia_note: >-
+    质量/COM/完整惯量张量逐字保留，未使用 balanceinertia 等修补；
+    官方 URDF 惯量满足 MuJoCo 编译要求（编译实测通过）。
+
+unknown_capabilities:
+  joint_velocity_limits: >-
+    未知。URDF 全部 <limit velocity="0">：按 0=官方未提供可用能力值解析，
+    禁止写成有效零约束、无穷大或 RM65 默认值；派生 MJCF 不含速度限值。
+  joint_effort_limits: >-
+    未知。URDF 全部 <limit effort="0">：解析规则同上；派生 MJCF 及其测试
+    场景的 motor 不设 ctrlrange/forcerange。
+  implication: >-
+    上述能力值待官方补充或真机辨识后，由运行参数层（runtime_parameters/
+    model_factory，Task 2.2/2.5）以显式配置接入，不在模型侧虚构。

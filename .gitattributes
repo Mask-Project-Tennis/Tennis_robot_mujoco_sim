@@ -1,2 +1,11 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# D2 官方资产与生成片段：字节级 SHA256/确定性重建测试依赖原始字节，禁用行尾转换（主代理依 Task 2.1 交付 concern 添加，随 2.1 评审）
+assets/unitree_d2/** -text
+src/robot/d2_arm.xml -text
+src/robot/d2_assets.xml -text
+src/robot/d2_model.xml -text
+# R1D 官方资产与生成片段（阶段 2 N0-5，随 Task 2.5a 评审包添加）
+assets/unitree_r1d/** -text
+src/robot/r1d_*.xml -text

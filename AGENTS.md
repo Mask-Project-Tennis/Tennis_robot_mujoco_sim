@@ -90,12 +90,18 @@ mujoco_sim/
 ├── src/
 │   ├── __init__.py
 │   ├── README.md                     # 源代码模块索引与依赖说明
-│   ├── robot/                         # 机器人模型定义
-│   │   ├── __init__.py
+│   ├── robot/                         # 机器人模型定义（多机器人描述/参数/绑定/模型工厂）
+│   │   ├── __init__.py                # 纯类型/解析函数重导出（RobotProfile/RuntimeParameters eager + ModelBinding 延迟；import src.robot 不加载 mujoco）
 │   │   ├── constants.py               # 共享常量（DT/INIT_Q/SHOULDER_POS/WORKSPACE_RADIUS/KP/KD，单一事实来源）
 │   │   ├── robot_profile.py           # RobotProfile 机器人描述加载器（configs/robots/*.yaml，纯配置层，不含数值参数）
 │   │   ├── model_binding.py           # ModelBinding 模型名称绑定器（名称→qpos/qvel/执行器地址，只接受标量关节）
+│   │   ├── runtime_parameters.py      # RobotRuntimeParameters/SceneParameters 运行参数纯参数层（YAML 解析+维数/单位/能力校验，阶段 2）
+│   │   ├── model_factory.py           # R1D 场景模型工厂（load_robot_model→RobotModelBundle，模板生成+参数化加载+jnt_range 回填，阶段 2）
+│   │   ├── model_kinematics.py        # ModelKinematics 名称映射运动学探针（TCP 位姿/雅可比，无动力学 step，阶段 2）
 │   │   ├── rm65_model.xml             # MuJoCo XML 模型（双臂12DOF + 球拍 + 球）
+│   │   ├── r1d_arm_left.xml / r1d_arm_right.xml / r1d_env.xml / r1d_assets.xml  # R1D 官方 URDF 导出片段（build_r1d_model.py 生成，勿手改，阶段 2）
+│   │   ├── r1d_model_left.xml / r1d_model_right.xml  # R1D 双侧场景模板（model_factory 生成，勿手改，阶段 2）
+│   │   ├── d2_arm.xml / d2_assets.xml # D2 历史资产片段（保留，不作 R1-A7-D 验收依据，阶段 2）
 │   │   ├── model.xml                  # 旧版单臂模型（左臂装在右侧桩柱）
 │   │   ├── tennis_rbt.xml             # 自制网球机器人模型
 │   │   └── kinematics.py              # 正运动学 / 雅可比矩阵工具
@@ -189,6 +195,9 @@ mujoco_sim/
 ├── configs/
 │   ├── default.yaml                   # 默认超参数（时间步长、iLQR 参数、关节约束）
 │   ├── robots/rm65.yaml               # RM65 机器人描述（身份+模型路径+关节语义名称，无数值参数；阶段 1）
+│   ├── robots/r1d_left.yaml / r1d_right.yaml                # R1-A7-D 双侧描述（侧别经路径显式表达，阶段 2）
+│   ├── robots/r1d_runtime_left.yaml / r1d_runtime_right.yaml # R1D 双侧运行参数（未知限值显式 null，阶段 2）
+│   ├── robots/d2_runtime.yaml         # D2 运行参数（历史资产，不作 R1-A7-D 配置，阶段 2）
 │   ├── mpc.yaml                       # MPC 专用参数
 │   ├── v4_follow_through.yaml         # V4 随挥策略配置
 │   ├── v5_active_hit.yaml             # V5 主动击球配置
@@ -209,7 +218,7 @@ mujoco_sim/
 │   ├── test/           # 快速验证 10 个
 │   ├── archive/        # ★ 已归档脚本（V6-V10 + tube + 旧实验，详见 archive/README.md）
 │   └── README.md       # 完整清单与说明
-├── tests/                             # 单元测试（702 tests，69 个文件；2 个 C++ 测试文件因扩展 ABI 不匹配暂无法收集，见 docs/experiments/reports/）
+├── tests/                             # 单元测试（848 collect = 846 passed + 2 skipped，78 个文件；2 个 C++ 测试文件因扩展 ABI 不匹配暂无法收集，见 docs/experiments/reports/）
 │   ├── test_kinematics.py
 │   ├── test_linearize.py
 │   ├── test_mpc.py
@@ -238,7 +247,16 @@ mujoco_sim/
 │   ├── test_robot_profile.py               # RobotProfile 描述加载器测试（22 tests，阶段 1）
 │   ├── test_model_binding.py               # ModelBinding 名称绑定器测试（14 tests，阶段 1）
 │   ├── test_robot_factory.py               # 驱动工厂/运行能力校验测试（16 tests，阶段 1）
-│   ├── test_robot_profile_entrypoint.py    # run_real_robot --robot-config 入口测试（6 tests，阶段 1）
+│   ├── test_robot_profile_entrypoint.py    # run_real_robot --robot-config 入口测试（8 tests，阶段 1 + 阶段 2 R1D 入口隔离）
+│   ├── test_runtime_parameters.py          # RobotRuntimeParameters 参数结构测试（66 tests，阶段 2）
+│   ├── test_rm65_runtime_parameters.py     # RM65 旧参数来源适配器测试（6 tests，阶段 2）
+│   ├── test_d2_assets.py                   # D2 资产可复建测试（3 tests，阶段 2 历史资产）
+│   ├── test_r1d_assets.py                  # R1D 官方资产/关节契约/bake 测试（5 tests，阶段 2）
+│   ├── test_r1d_model.py                   # R1D 场景组装/限位回填/穿透诊断/跨盘 mesh 重定位导出测试（25 tests，阶段 2）
+│   ├── test_model_kinematics.py            # ModelKinematics FK/雅可比独立 URDF 对照测试（12 tests，阶段 2）
+│   ├── test_inspect_robot_model.py         # inspect_robot_model 预览导出测试（14 tests，含 SDK 对照按名跟随，阶段 2）
+│   ├── test_robot_package_init.py          # src.robot 包导出纯度测试（4 tests，阶段 2）
+│   ├── r1d_reference.py                    # R1D 独立 URDF FK 对照器（测试辅助模块，非测试文件，阶段 2）
 │   ├── test_safety_monitor.py              # SafetyMonitor 测试
 │   ├── test_fake_robot.py                  # FakeRobot Mock 测试
 │   ├── test_torque_to_position.py          # 力矩→位置积分器测试

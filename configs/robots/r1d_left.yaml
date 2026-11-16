@@ -1,0 +1,22 @@
+# R1-A7-D 左臂机器人描述 — 仅身份与模型语义名称（schema v1，对齐 rm65.yaml 风格）。
+# 侧别只经本文件路径显式表达（r1d_left.yaml），无隐式默认侧；
+# 击球侧未确认（审计报告 §7-2），阶段 2 对称交付左右两套派生产物。
+# 数值参数（dt/init_q/场景几何/限位等）不入此文件：
+# 见 configs/robots/r1d_runtime_left.yaml（须显式传路径给 load_runtime_parameters，
+# 不自动查找 sidecar）。
+# r1d_model_left.xml 由 src/robot/model_factory.py::write_r1d_model_template 生成，勿手改。
+# active_joint_names 为该侧 7 个 URDF 原名（审计报告 §2 表顺序：
+# 肩俯仰/肩侧摆/肩偏航/肘/腕滚转/腕俯仰/腕偏航）。
+schema_version: 1
+robot_id: unitree_r1d
+model_path: ../../src/robot/r1d_model_left.xml
+active_joint_names: [left_shoulder_pitch_joint, left_shoulder_roll_joint,
+                     left_shoulder_yaw_joint, left_elbow_joint,
+                     left_wrist_roll_joint, left_wrist_pitch_joint,
+                     left_wrist_yaw_joint]
+actuator_names: [torque_left_shoulder_pitch_joint, torque_left_shoulder_roll_joint,
+                 torque_left_shoulder_yaw_joint, torque_left_elbow_joint,
+                 torque_left_wrist_roll_joint, torque_left_wrist_pitch_joint,
+                 torque_left_wrist_yaw_joint]
+held_joint_names: []
+tcp_site_name: racket_center

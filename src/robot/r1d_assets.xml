@@ -1,0 +1,53 @@
+<?xml version='1.0' encoding='utf-8'?>
+<mujocoinclude>
+  <!--自动生成文件,勿手改。重建:python scripts/tools/build_r1d_model.py
+mesh 声明:URDF 相对引用 meshes/*.STL 映射到本地
+../../assets/unitree_r1d/meshes/*.STL(相对片段部署位置 src/robot/,
+沿用 RM65/D2 模型相对路径参照模式)。
+覆盖:双侧臂(7×2)+ 环境(6)共 20 个 mesh,支持任一侧场景组装;
+其余官方网格(夹爪/相机/轮/脚轮/头)未在派生模型中引用,
+仅作资产留存(见 assets/unitree_r1d/source_manifest.yaml)。
+本片段仅含 <asset>,无 compiler(角度敏感内容在臂/环境片段)。-->
+  <asset>
+    <!--meshes/base_link.STL-->
+    <mesh name="base_link" file="../../assets/unitree_r1d/meshes/base_link.STL" />
+    <!--meshes/left_elbow_link.STL-->
+    <mesh name="left_elbow_link" file="../../assets/unitree_r1d/meshes/left_elbow_link.STL" />
+    <!--meshes/left_shoulder_pitch_Link.STL-->
+    <mesh name="left_shoulder_pitch_Link" file="../../assets/unitree_r1d/meshes/left_shoulder_pitch_Link.STL" />
+    <!--meshes/left_shoulder_roll_link.STL-->
+    <mesh name="left_shoulder_roll_link" file="../../assets/unitree_r1d/meshes/left_shoulder_roll_link.STL" />
+    <!--meshes/left_shoulder_yaw_link.STL-->
+    <mesh name="left_shoulder_yaw_link" file="../../assets/unitree_r1d/meshes/left_shoulder_yaw_link.STL" />
+    <!--meshes/left_wrist_pitch_link.STL-->
+    <mesh name="left_wrist_pitch_link" file="../../assets/unitree_r1d/meshes/left_wrist_pitch_link.STL" />
+    <!--meshes/left_wrist_roll_link.STL-->
+    <mesh name="left_wrist_roll_link" file="../../assets/unitree_r1d/meshes/left_wrist_roll_link.STL" />
+    <!--meshes/left_wrist_yaw_link.STL-->
+    <mesh name="left_wrist_yaw_link" file="../../assets/unitree_r1d/meshes/left_wrist_yaw_link.STL" />
+    <!--meshes/lift_mount_link.STL-->
+    <mesh name="lift_mount_link" file="../../assets/unitree_r1d/meshes/lift_mount_link.STL" />
+    <!--meshes/lift_stage1_link.STL-->
+    <mesh name="lift_stage1_link" file="../../assets/unitree_r1d/meshes/lift_stage1_link.STL" />
+    <!--meshes/lift_stage2_link.STL-->
+    <mesh name="lift_stage2_link" file="../../assets/unitree_r1d/meshes/lift_stage2_link.STL" />
+    <!--meshes/pelvis_link.STL-->
+    <mesh name="pelvis_link" file="../../assets/unitree_r1d/meshes/pelvis_link.STL" />
+    <!--meshes/right_elbow_link.STL-->
+    <mesh name="right_elbow_link" file="../../assets/unitree_r1d/meshes/right_elbow_link.STL" />
+    <!--meshes/right_shoulder_pitch_Link.STL-->
+    <mesh name="right_shoulder_pitch_Link" file="../../assets/unitree_r1d/meshes/right_shoulder_pitch_Link.STL" />
+    <!--meshes/right_shoulder_roll_link.STL-->
+    <mesh name="right_shoulder_roll_link" file="../../assets/unitree_r1d/meshes/right_shoulder_roll_link.STL" />
+    <!--meshes/right_shoulder_yaw_link.STL-->
+    <mesh name="right_shoulder_yaw_link" file="../../assets/unitree_r1d/meshes/right_shoulder_yaw_link.STL" />
+    <!--meshes/right_wrist_pitch_link.STL-->
+    <mesh name="right_wrist_pitch_link" file="../../assets/unitree_r1d/meshes/right_wrist_pitch_link.STL" />
+    <!--meshes/right_wrist_roll_link.STL-->
+    <mesh name="right_wrist_roll_link" file="../../assets/unitree_r1d/meshes/right_wrist_roll_link.STL" />
+    <!--meshes/right_wrist_yaw_link.STL-->
+    <mesh name="right_wrist_yaw_link" file="../../assets/unitree_r1d/meshes/right_wrist_yaw_link.STL" />
+    <!--meshes/waist_yaw_link.STL-->
+    <mesh name="waist_yaw_link" file="../../assets/unitree_r1d/meshes/waist_yaw_link.STL" />
+  </asset>
+</mujocoinclude>

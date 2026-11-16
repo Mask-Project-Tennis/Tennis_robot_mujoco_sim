@@ -15,7 +15,7 @@
 | `exp/` | ~20 | 活跃实验基础设施（exp9-15） | `python scripts/exp/xxx.py --args` |
 | `extract/` | 9 | 结果提取：日志 → CSV | `python scripts/extract/xxx.py` |
 | `plot/` | 14 | 论文图表生成 | `python scripts/plot/xxx.py` |
-| `tools/` | 14 | 独立工具（查看器·扫描·诊断·可视化·轨迹残影渲染） | `python scripts/tools/xxx.py` |
+| `tools/` | 20 | 独立工具（查看器·扫描·诊断·可视化·轨迹残影渲染·R1D 模型构建与预览） | `python scripts/tools/xxx.py` |
 | `test/` | 10 | 快速验证脚本 | `python scripts/test/xxx.py` |
 | `archive/` | 59 | 已归档（V6-V10 + tube + 旧实验 + 旧 sim 脚本） | 详见 `archive/README.md` |
 
@@ -49,6 +49,16 @@
 
 活跃实验脚本（引用 V11/V12 或独立的批量运行器/提取器）。
 完整清单见 `scripts/exp/` 目录。
+
+## tools/ — 独立工具（阶段 2 新增 3 个）
+
+| 文件 | 用途 |
+|------|------|
+| `inspect_robot_model.py` | R1D 模型预览与可追溯参数导出（`--robot-config` r1d_left/right.yaml + `--runtime-config` 必传，输出 JSON 报告 + front/side/oblique 三视图，`--render` 可选；异常配置退出 2） |
+| `build_r1d_model.py` | R1D 官方整机 URDF → 双侧裸臂/环境/资产片段导出（字节确定，勿手改产物） |
+| `build_d2_model.py` | D2 历史资产构建（型号更正后保留，不作 R1-A7-D 验收） |
+
+其余 17 个既有工具（查看器·扫描·诊断·可视化·轨迹残影渲染）完整清单见 `scripts/tools/` 目录。
 
 ## archive/ — 已归档（59 个）
 

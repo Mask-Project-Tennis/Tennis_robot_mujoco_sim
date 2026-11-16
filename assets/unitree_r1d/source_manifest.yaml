@@ -1,0 +1,345 @@
+# R1D 官方资产来源清单(阶段 2 · Task 2.5a 交付物,勿手改;哈希由交付文件逐字节计算)
+#
+# 用途:固定上游来源、审计交付资源、记录派生模型的移除项与环境排除项。
+# 哈希校验测试:tests/test_r1d_assets.py::test_source_manifest_hashes
+# 事实唯一来源:docs/experiments/reports/2026-11-15-r1a7d-model-interface-audit.md(§1 文件清单)
+source:
+  repository: https://github.com/unitreerobotics/unitree_ros
+  commit: 157ff950351e5f535e03c5d85a16b7d594b3dbcc
+  commit_url: https://github.com/unitreerobotics/unitree_ros/tree/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description
+  retrieval:
+    date: "2026-11-15"
+    method: >-
+      Task 2.0 从 raw.githubusercontent.com 固定 commit 逐文件下载
+      (r1d.urdf + 36 STL + 仓库根 LICENSE),暂存于
+      .superpowers/sdd/2026-11-15-unitree-stage2-construction/r1d-src/
+      (git-ignored,不作为仓库运行依赖);Task 2.5a 对暂存件逐文件 SHA256
+      复核(与审计报告 §1 全部一致)后字节拷贝入本目录。
+  cross_check:
+    audit_report: >-
+      docs/experiments/reports/2026-11-15-r1a7d-model-interface-audit.md §1
+      (每文件 SHA256 与 GitHub API git blob SHA 双重校验;下载完整可信)。
+
+license:
+  status: bsd-3-clause(仓库根,子目录无独立声明)
+  declaration:
+    file: LICENSE
+    upstream_path: LICENSE(unitree_ros 仓库根)
+    sha256: 84aac59fd3246e3ddc49d1387644e8fcf43b0def4f0b9fe687f372e90446df2d
+  notes: >-
+    仓库根 LICENSE 为 BSD-3-Clause 全文(版权人 HangZhou YuShu TECHNOLOGY
+    CO.,LTD,2016-2022);r1d_description 子目录无包级 package.xml,根许可
+    按仓库惯例覆盖子目录属合理推断。BSD-3 允许再分发但须保留版权与免责
+    声明;本地研究验证可继续。对外再分发前需复核并随附版权与免责声明,
+    并由主代理/用户确认。
+
+files:
+  - path: r1d.urdf
+    role: 原始整机 URDF(与固定 commit blob 逐字节一致)
+    upstream_path: robots/r1d_description/r1d.urdf
+    url: https://github.com/unitreerobotics/unitree_ros/blob/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/r1d.urdf
+    raw_url: https://raw.githubusercontent.com/unitreerobotics/unitree_ros/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/r1d.urdf
+    sha256: 39ad1a206c34c3deecd33745ccda0c0c94ece4195f674dfbaf950f567f08809c
+  - path: LICENSE
+    role: 仓库根许可全文拷贝(BSD-3-Clause)
+    upstream_path: LICENSE
+    url: https://github.com/unitreerobotics/unitree_ros/blob/157ff950351e5f535e03c5d85a16b7d594b3dbcc/LICENSE
+    raw_url: https://raw.githubusercontent.com/unitreerobotics/unitree_ros/157ff950351e5f535e03c5d85a16b7d594b3dbcc/LICENSE
+    sha256: 84aac59fd3246e3ddc49d1387644e8fcf43b0def4f0b9fe687f372e90446df2d
+  - path: meshes/base_link.STL
+    role: URDF 引用网格(环境冻结链 base_link;4.18 MB 未简化,保留官方原网格)
+    upstream_path: robots/r1d_description/meshes/base_link.STL
+    url: https://github.com/unitreerobotics/unitree_ros/blob/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/base_link.STL
+    raw_url: https://raw.githubusercontent.com/unitreerobotics/unitree_ros/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/base_link.STL
+    sha256: a9e6b7fd0a8c2c852ca3552bfa68097d46311f32896a9c7e2d17761467d9b98e
+  - path: meshes/Camera.STL
+    role: URDF 引用网格(腕部相机,左右共用;派生模型移除,仅资产留存)
+    upstream_path: robots/r1d_description/meshes/Camera.STL
+    url: https://github.com/unitreerobotics/unitree_ros/blob/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/Camera.STL
+    raw_url: https://raw.githubusercontent.com/unitreerobotics/unitree_ros/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/Camera.STL
+    sha256: 9ac57a9bc1fe9f8a1aff2b679626f61bbb3a8e7c789cb330a07ae000be8a66b3
+  - path: meshes/Dex1_base_link.STL
+    role: URDF 引用网格(dex1 夹爪基座,左右共用;派生模型移除,仅资产留存)
+    upstream_path: robots/r1d_description/meshes/Dex1_base_link.STL
+    url: https://github.com/unitreerobotics/unitree_ros/blob/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/Dex1_base_link.STL
+    raw_url: https://raw.githubusercontent.com/unitreerobotics/unitree_ros/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/Dex1_base_link.STL
+    sha256: a4e95f91e1b3a349580080bf01d34307221c6be1462c01900392e677dbf668e5
+  - path: meshes/Dex1_finger_link_1.STL
+    role: URDF 引用网格(dex1 手指 1,左右共用;派生模型移除,仅资产留存)
+    upstream_path: robots/r1d_description/meshes/Dex1_finger_link_1.STL
+    url: https://github.com/unitreerobotics/unitree_ros/blob/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/Dex1_finger_link_1.STL
+    raw_url: https://raw.githubusercontent.com/unitreerobotics/unitree_ros/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/Dex1_finger_link_1.STL
+    sha256: f34639c388f4a0b14670b7076307c76aae927dd076b426887d4677adf82790a8
+  - path: meshes/Dex1_finger_link_2.STL
+    role: URDF 引用网格(dex1 手指 2,左右共用;派生模型移除,仅资产留存)
+    upstream_path: robots/r1d_description/meshes/Dex1_finger_link_2.STL
+    url: https://github.com/unitreerobotics/unitree_ros/blob/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/Dex1_finger_link_2.STL
+    raw_url: https://raw.githubusercontent.com/unitreerobotics/unitree_ros/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/Dex1_finger_link_2.STL
+    sha256: ee154ad8f5209d23387d85bed5622319151615e31bec0bd12fc44eccfa29603d
+  - path: meshes/front_left_caster_Roll_link.STL
+    role: URDF 引用网格(被动脚轮,环境排除,仅资产留存)
+    upstream_path: robots/r1d_description/meshes/front_left_caster_Roll_link.STL
+    url: https://github.com/unitreerobotics/unitree_ros/blob/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/front_left_caster_Roll_link.STL
+    raw_url: https://raw.githubusercontent.com/unitreerobotics/unitree_ros/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/front_left_caster_Roll_link.STL
+    sha256: 8b6d7fd800039387dadbbe905f21b856a014641e304269d352531177e68e46d7
+  - path: meshes/front_left_caster_Yaw_link.STL
+    role: URDF 引用网格(被动脚轮,环境排除,仅资产留存)
+    upstream_path: robots/r1d_description/meshes/front_left_caster_Yaw_link.STL
+    url: https://github.com/unitreerobotics/unitree_ros/blob/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/front_left_caster_Yaw_link.STL
+    raw_url: https://raw.githubusercontent.com/unitreerobotics/unitree_ros/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/front_left_caster_Yaw_link.STL
+    sha256: 91c3190b59e945a40b0cddbbf721b6162d7443ae6b8b023a2c913fdc8f845661
+  - path: meshes/front_right_caster_Roll_link.STL
+    role: URDF 引用网格(被动脚轮,环境排除,仅资产留存)
+    upstream_path: robots/r1d_description/meshes/front_right_caster_Roll_link.STL
+    url: https://github.com/unitreerobotics/unitree_ros/blob/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/front_right_caster_Roll_link.STL
+    raw_url: https://raw.githubusercontent.com/unitreerobotics/unitree_ros/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/front_right_caster_Roll_link.STL
+    sha256: 241853e788c8cfb09c6e02fc06b90c26caa000d734342f1b7715f8ad15e4f43b
+  - path: meshes/front_right_caster_Yaw_link.STL
+    role: URDF 引用网格(被动脚轮,环境排除,仅资产留存)
+    upstream_path: robots/r1d_description/meshes/front_right_caster_Yaw_link.STL
+    url: https://github.com/unitreerobotics/unitree_ros/blob/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/front_right_caster_Yaw_link.STL
+    raw_url: https://raw.githubusercontent.com/unitreerobotics/unitree_ros/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/front_right_caster_Yaw_link.STL
+    sha256: e64c58331b721062fe119ef622ae975fe1b23e150d35b1f02fda114e752280c3
+  - path: meshes/head_pitch_Link.STL
+    role: URDF 引用网格(头部,环境排除,仅资产留存)
+    upstream_path: robots/r1d_description/meshes/head_pitch_Link.STL
+    url: https://github.com/unitreerobotics/unitree_ros/blob/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/head_pitch_Link.STL
+    raw_url: https://raw.githubusercontent.com/unitreerobotics/unitree_ros/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/head_pitch_Link.STL
+    sha256: f2c64723273d93c2da9d5e204f27cd569f8fda0477dc0595760ce09d9d7f9db9
+  - path: meshes/head_yaw_Link.STL
+    role: URDF 引用网格(头部,环境排除,仅资产留存)
+    upstream_path: robots/r1d_description/meshes/head_yaw_Link.STL
+    url: https://github.com/unitreerobotics/unitree_ros/blob/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/head_yaw_Link.STL
+    raw_url: https://raw.githubusercontent.com/unitreerobotics/unitree_ros/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/head_yaw_Link.STL
+    sha256: 2ba30deb440e2584b7595d619ed3829c4ec52ae5c78a2e929b8be70577ceadf3
+  - path: meshes/left_elbow_link.STL
+    role: URDF 引用网格(左臂肘连杆)
+    upstream_path: robots/r1d_description/meshes/left_elbow_link.STL
+    url: https://github.com/unitreerobotics/unitree_ros/blob/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/left_elbow_link.STL
+    raw_url: https://raw.githubusercontent.com/unitreerobotics/unitree_ros/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/left_elbow_link.STL
+    sha256: e6b6584de6ec6c629da24fbebdc7b88cccd7ed24ad0d7547fa2d871fce4faa7c
+  - path: meshes/left_shoulder_pitch_Link.STL
+    role: URDF 引用网格(左臂肩俯仰连杆)
+    upstream_path: robots/r1d_description/meshes/left_shoulder_pitch_Link.STL
+    url: https://github.com/unitreerobotics/unitree_ros/blob/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/left_shoulder_pitch_Link.STL
+    raw_url: https://raw.githubusercontent.com/unitreerobotics/unitree_ros/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/left_shoulder_pitch_Link.STL
+    sha256: df713bd42d5349868befd618a7e571815677c7f39d026f716a56c366a9521a00
+  - path: meshes/left_shoulder_roll_link.STL
+    role: URDF 引用网格(左臂肩侧摆连杆)
+    upstream_path: robots/r1d_description/meshes/left_shoulder_roll_link.STL
+    url: https://github.com/unitreerobotics/unitree_ros/blob/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/left_shoulder_roll_link.STL
+    raw_url: https://raw.githubusercontent.com/unitreerobotics/unitree_ros/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/left_shoulder_roll_link.STL
+    sha256: 7fcfd330aa78b58a9f2dcbf6f87d62b6314eae3678d36abbbc1632a29cf9d7b9
+  - path: meshes/left_shoulder_yaw_link.STL
+    role: URDF 引用网格(左臂肩偏航连杆)
+    upstream_path: robots/r1d_description/meshes/left_shoulder_yaw_link.STL
+    url: https://github.com/unitreerobotics/unitree_ros/blob/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/left_shoulder_yaw_link.STL
+    raw_url: https://raw.githubusercontent.com/unitreerobotics/unitree_ros/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/left_shoulder_yaw_link.STL
+    sha256: 6b09a1c14f9ef1a38fe4d658b4e51586f972b0bace28cd90caada7d80db50fb0
+  - path: meshes/left_wrist_pitch_link.STL
+    role: URDF 引用网格(左臂腕俯仰连杆)
+    upstream_path: robots/r1d_description/meshes/left_wrist_pitch_link.STL
+    url: https://github.com/unitreerobotics/unitree_ros/blob/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/left_wrist_pitch_link.STL
+    raw_url: https://raw.githubusercontent.com/unitreerobotics/unitree_ros/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/left_wrist_pitch_link.STL
+    sha256: 7b3c0568ebd0c864e2401d80436cb6ea0fdc4b83ac0892311d734e33b35a7bff
+  - path: meshes/left_wrist_roll_link.STL
+    role: URDF 引用网格(左臂腕滚转连杆)
+    upstream_path: robots/r1d_description/meshes/left_wrist_roll_link.STL
+    url: https://github.com/unitreerobotics/unitree_ros/blob/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/left_wrist_roll_link.STL
+    raw_url: https://raw.githubusercontent.com/unitreerobotics/unitree_ros/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/left_wrist_roll_link.STL
+    sha256: 1cab8b3cf32fd7423b663d600dbc2666f5bcb3c78998c701335111bc8b96848b
+  - path: meshes/left_wrist_yaw_link.STL
+    role: URDF 引用网格(左臂腕偏航连杆,r1d_flange site 所在连杆)
+    upstream_path: robots/r1d_description/meshes/left_wrist_yaw_link.STL
+    url: https://github.com/unitreerobotics/unitree_ros/blob/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/left_wrist_yaw_link.STL
+    raw_url: https://raw.githubusercontent.com/unitreerobotics/unitree_ros/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/left_wrist_yaw_link.STL
+    sha256: e490c5848bfab23e4780789cb65e98fa1788f104e759c5647caa0b2eee10f8e2
+  - path: meshes/Left_Wheel_link.STL
+    role: URDF 引用网格(左驱动轮,环境排除,仅资产留存)
+    upstream_path: robots/r1d_description/meshes/Left_Wheel_link.STL
+    url: https://github.com/unitreerobotics/unitree_ros/blob/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/Left_Wheel_link.STL
+    raw_url: https://raw.githubusercontent.com/unitreerobotics/unitree_ros/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/Left_Wheel_link.STL
+    sha256: 09c88e244da0d5087d3313d5ed7f5b06162c98126a0383cc5e8e6d34579b4386
+  - path: meshes/lift_mount_link.STL
+    role: URDF 引用网格(环境冻结链 lift_mount)
+    upstream_path: robots/r1d_description/meshes/lift_mount_link.STL
+    url: https://github.com/unitreerobotics/unitree_ros/blob/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/lift_mount_link.STL
+    raw_url: https://raw.githubusercontent.com/unitreerobotics/unitree_ros/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/lift_mount_link.STL
+    sha256: 1bd33bf5a12005f2c7f4f0e580fc40b0ac6242898077afa8621429bce34b512c
+  - path: meshes/lift_stage1_link.STL
+    role: URDF 引用网格(环境冻结链 lift_stage1,q_L bake)
+    upstream_path: robots/r1d_description/meshes/lift_stage1_link.STL
+    url: https://github.com/unitreerobotics/unitree_ros/blob/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/lift_stage1_link.STL
+    raw_url: https://raw.githubusercontent.com/unitreerobotics/unitree_ros/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/lift_stage1_link.STL
+    sha256: 63368dd170c97a4a4c8ee6fbd331352687aee04e129ca49e5bf187ddf82729bd
+  - path: meshes/lift_stage2_link.STL
+    role: URDF 引用网格(环境冻结链 lift_stage2,q_L bake)
+    upstream_path: robots/r1d_description/meshes/lift_stage2_link.STL
+    url: https://github.com/unitreerobotics/unitree_ros/blob/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/lift_stage2_link.STL
+    raw_url: https://raw.githubusercontent.com/unitreerobotics/unitree_ros/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/lift_stage2_link.STL
+    sha256: dccf3ebd7390c90548cdb07e1acb0b3198a67f6351e3b3432a7b8f6971f3cd7e
+  - path: meshes/pelvis_link.STL
+    role: URDF 引用网格(环境冻结链 pelvis)
+    upstream_path: robots/r1d_description/meshes/pelvis_link.STL
+    url: https://github.com/unitreerobotics/unitree_ros/blob/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/pelvis_link.STL
+    raw_url: https://raw.githubusercontent.com/unitreerobotics/unitree_ros/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/pelvis_link.STL
+    sha256: 17486b5bb0ee7b24608a87983a45bd690b87515345ebd20161a8d0287b45bfe6
+  - path: meshes/rear_left_caster_Roll_link.STL
+    role: URDF 引用网格(被动脚轮,环境排除,仅资产留存)
+    upstream_path: robots/r1d_description/meshes/rear_left_caster_Roll_link.STL
+    url: https://github.com/unitreerobotics/unitree_ros/blob/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/rear_left_caster_Roll_link.STL
+    raw_url: https://raw.githubusercontent.com/unitreerobotics/unitree_ros/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/rear_left_caster_Roll_link.STL
+    sha256: 75c1d1bb63ebc022a1f9f96ddf639d9773d7d731f8720880887dd0e5011dcc16
+  - path: meshes/rear_left_caster_Yaw_link.STL
+    role: URDF 引用网格(被动脚轮,环境排除,仅资产留存)
+    upstream_path: robots/r1d_description/meshes/rear_left_caster_Yaw_link.STL
+    url: https://github.com/unitreerobotics/unitree_ros/blob/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/rear_left_caster_Yaw_link.STL
+    raw_url: https://raw.githubusercontent.com/unitreerobotics/unitree_ros/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/rear_left_caster_Yaw_link.STL
+    sha256: 04b8d6ae703f0bd3a051b99fd498e0350f2ac17367f9b1f3dc50ae68e9438dc6
+  - path: meshes/rear_right_caster_Roll_link.STL
+    role: URDF 引用网格(被动脚轮,环境排除,仅资产留存)
+    upstream_path: robots/r1d_description/meshes/rear_right_caster_Roll_link.STL
+    url: https://github.com/unitreerobotics/unitree_ros/blob/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/rear_right_caster_Roll_link.STL
+    raw_url: https://raw.githubusercontent.com/unitreerobotics/unitree_ros/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/rear_right_caster_Roll_link.STL
+    sha256: 40cc63c5af5a8b0c28c269c2fec5da81353e846edbf48b0f17b2b072a827f427
+  - path: meshes/rear_right_caster_Yaw_link.STL
+    role: URDF 引用网格(被动脚轮,环境排除,仅资产留存)
+    upstream_path: robots/r1d_description/meshes/rear_right_caster_Yaw_link.STL
+    url: https://github.com/unitreerobotics/unitree_ros/blob/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/rear_right_caster_Yaw_link.STL
+    raw_url: https://raw.githubusercontent.com/unitreerobotics/unitree_ros/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/rear_right_caster_Yaw_link.STL
+    sha256: 9450b99657a58470d2989921c79fc21f098e457e492c37fa11d4f32063fb67d1
+  - path: meshes/right_elbow_link.STL
+    role: URDF 引用网格(右臂肘连杆)
+    upstream_path: robots/r1d_description/meshes/right_elbow_link.STL
+    url: https://github.com/unitreerobotics/unitree_ros/blob/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/right_elbow_link.STL
+    raw_url: https://raw.githubusercontent.com/unitreerobotics/unitree_ros/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/right_elbow_link.STL
+    sha256: 1bd3a60789fe4b35ce399d6134e53fa84010f2c6c3e3d888c5cfd91b095ae37e
+  - path: meshes/right_shoulder_pitch_Link.STL
+    role: URDF 引用网格(右臂肩俯仰连杆)
+    upstream_path: robots/r1d_description/meshes/right_shoulder_pitch_Link.STL
+    url: https://github.com/unitreerobotics/unitree_ros/blob/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/right_shoulder_pitch_Link.STL
+    raw_url: https://raw.githubusercontent.com/unitreerobotics/unitree_ros/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/right_shoulder_pitch_Link.STL
+    sha256: beba627f582135b63c05d71e410d6bd5510f313d6fa0229aca67d06c05b92216
+  - path: meshes/right_shoulder_roll_link.STL
+    role: URDF 引用网格(右臂肩侧摆连杆)
+    upstream_path: robots/r1d_description/meshes/right_shoulder_roll_link.STL
+    url: https://github.com/unitreerobotics/unitree_ros/blob/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/right_shoulder_roll_link.STL
+    raw_url: https://raw.githubusercontent.com/unitreerobotics/unitree_ros/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/right_shoulder_roll_link.STL
+    sha256: 97e41a1b567ffda5019cdefe9bfe6b0c637b589d07ccaaece5aa4e6ed2b31d15
+  - path: meshes/right_shoulder_yaw_link.STL
+    role: URDF 引用网格(右臂肩偏航连杆)
+    upstream_path: robots/r1d_description/meshes/right_shoulder_yaw_link.STL
+    url: https://github.com/unitreerobotics/unitree_ros/blob/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/right_shoulder_yaw_link.STL
+    raw_url: https://raw.githubusercontent.com/unitreerobotics/unitree_ros/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/right_shoulder_yaw_link.STL
+    sha256: 37f814647983716e1049c18815a6d6f45eb616b9db1958469b4eb21914fc7e05
+  - path: meshes/right_wrist_pitch_link.STL
+    role: URDF 引用网格(右臂腕俯仰连杆)
+    upstream_path: robots/r1d_description/meshes/right_wrist_pitch_link.STL
+    url: https://github.com/unitreerobotics/unitree_ros/blob/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/right_wrist_pitch_link.STL
+    raw_url: https://raw.githubusercontent.com/unitreerobotics/unitree_ros/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/right_wrist_pitch_link.STL
+    sha256: 74974a903dd795cf43d19dd67d0e8b455433d38eeeab016b2873da35882160a9
+  - path: meshes/right_wrist_roll_link.STL
+    role: URDF 引用网格(右臂腕滚转连杆)
+    upstream_path: robots/r1d_description/meshes/right_wrist_roll_link.STL
+    url: https://github.com/unitreerobotics/unitree_ros/blob/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/right_wrist_roll_link.STL
+    raw_url: https://raw.githubusercontent.com/unitreerobotics/unitree_ros/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/right_wrist_roll_link.STL
+    sha256: c4f86872bfa9f72a19e331b7c3b2fb5bf1282e2b6b88b60642abfe3cb8ae4a7d
+  - path: meshes/right_wrist_yaw_link.STL
+    role: URDF 引用网格(右臂腕偏航连杆,r1d_flange site 所在连杆)
+    upstream_path: robots/r1d_description/meshes/right_wrist_yaw_link.STL
+    url: https://github.com/unitreerobotics/unitree_ros/blob/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/right_wrist_yaw_link.STL
+    raw_url: https://raw.githubusercontent.com/unitreerobotics/unitree_ros/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/right_wrist_yaw_link.STL
+    sha256: 87f1fcfa6bfbffb8478b7164652f6c9067f56ea47b52859b718d48b59b214050
+  - path: meshes/Right_Wheel_link.STL
+    role: URDF 引用网格(右驱动轮,环境排除,仅资产留存)
+    upstream_path: robots/r1d_description/meshes/Right_Wheel_link.STL
+    url: https://github.com/unitreerobotics/unitree_ros/blob/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/Right_Wheel_link.STL
+    raw_url: https://raw.githubusercontent.com/unitreerobotics/unitree_ros/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/Right_Wheel_link.STL
+    sha256: 3341865c7d2bc7f494b1037631443b7ffe550e49ec0abad5348b292d29c17ccb
+  - path: meshes/waist_yaw_link.STL
+    role: URDF 引用网格(环境冻结链 waist_yaw_link,臂挂接点,几何必须保留)
+    upstream_path: robots/r1d_description/meshes/waist_yaw_link.STL
+    url: https://github.com/unitreerobotics/unitree_ros/blob/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/waist_yaw_link.STL
+    raw_url: https://raw.githubusercontent.com/unitreerobotics/unitree_ros/157ff950351e5f535e03c5d85a16b7d594b3dbcc/robots/r1d_description/meshes/waist_yaw_link.STL
+    sha256: 54b7f815c79e0b085e783286fdaa64796f0e0ce00e13410b100921390b4c1135
+
+derived_model:
+  description: >-
+    由本目录整机 URDF 经 scripts/tools/build_r1d_model.py 生成的
+    MJCF 片段(<mujocoinclude>,生成过程字节确定,测试防漂移)。
+    双侧裸臂由同一工具对同一 URDF 仅以 side 参数区分生成(独立导出,
+    非单侧生成后镜像改名);臂片段根 body r1d_base 为 waist_yaw_link
+    之上的虚拟固定安装点,完整模型维数不得等于规划维数——场景模板
+    仅含选定臂 7 个铰链(nq=nv=nu=7),冻结环境段一律无关节。
+  fragments:
+    - src/robot/r1d_arm_left.xml
+    - src/robot/r1d_arm_right.xml
+    - src/robot/r1d_env.xml
+    - src/robot/r1d_assets.xml
+  rebuild_command: python scripts/tools/build_r1d_model.py
+  removed_from_urdf:
+    - {type: fixed_joint, name: left_dex1_base_joint, side: left, parent: left_wrist_yaw_link, child: left_dex1_base_link, note: 工具安装参考保留为 r1d_flange site}
+    - {type: prismatic_joint, name: left_dex1_finger_joint_1, side: left, parent: left_dex1_base_link, child: left_dex1_finger_link_1}
+    - {type: prismatic_joint, name: left_dex1_finger_joint_2, side: left, parent: left_dex1_base_link, child: left_dex1_finger_link_2}
+    - {type: fixed_joint, name: left_dex1_camera_joint, side: left, parent: left_dex1_base_link, child: left_dex1_camera_link}
+    - {type: link, name: left_dex1_base_link, side: left, mass_kg: 0.3649}
+    - {type: link, name: left_dex1_finger_link_1, side: left, mass_kg: 0.092189}
+    - {type: link, name: left_dex1_finger_link_2, side: left, mass_kg: 0.092189}
+    - {type: link, name: left_dex1_camera_link, side: left, mass_kg: 0.021494}
+    - {type: fixed_joint, name: right_dex1_base_joint, side: right, parent: right_wrist_yaw_link, child: right_dex1_base_link, note: 工具安装参考保留为 r1d_flange site}
+    - {type: prismatic_joint, name: right_dex1_finger_joint_1, side: right, parent: right_dex1_base_link, child: right_dex1_finger_link_1}
+    - {type: prismatic_joint, name: right_dex1_finger_joint_2, side: right, parent: right_dex1_base_link, child: right_dex1_finger_link_2}
+    - {type: fixed_joint, name: right_dex1_camera_joint, side: right, parent: right_dex1_base_link, child: right_dex1_camera_link}
+    - {type: link, name: right_dex1_base_link, side: right, mass_kg: 0.3649}
+    - {type: link, name: right_dex1_finger_link_1, side: right, mass_kg: 0.092189}
+    - {type: link, name: right_dex1_finger_link_2, side: right, mass_kg: 0.092189}
+    - {type: link, name: right_dex1_camera_link, side: right, mass_kg: 0.021494}
+  removal_rationale: >-
+    阶段 2 单臂击球无灵巧手/视觉需求(N0-3(a)):dex1 夹爪(二指
+    prismatic)与腕部相机固定子树从臂链移除;原始 URDF 原样保留。
+    工具安装参考为被移除 {side}_dex1_base_joint 的 origin(左
+    (0.0485, -0.003, 0.02)、右 (0.0485, 0.003, 0.02)),以 r1d_flange
+    site 表达(不声称等于实物安装面);球拍由场景组装(Task 2.5b)在该
+    site 挂接。
+  env_excluded:
+    wheels: [Left_Wheel_joint, Right_Wheel_joint]
+    casters: [front_left_caster_Yaw_joint, front_left_caster_Roll_joint,
+              front_right_caster_Yaw_joint, front_right_caster_Roll_joint,
+              rear_left_caster_Yaw_joint, rear_left_caster_Roll_joint,
+              rear_right_caster_Yaw_joint, rear_right_caster_Roll_joint]
+    head: [head_pitch_joint, head_yaw_joint]
+    waist_yaw_frozen_at: 0.0
+    note: >-
+      环境片段只到 waist_yaw_link 挂接点(N0-3(b));轮/脚轮/头不进
+      场景模板;对侧臂不进入(每个场景仅选定侧);腰冻结 0(两套限位
+      冲突集的公共值,审计报告 §5,不选边)。
+  simplifications:
+    mesh_simplification: none
+    note: >-
+      未做网格简化或包络替代:全部链上几何(含 4.18 MB 的
+      base_link.STL 与 2.07 MB 的 waist_yaw_link.STL)保留官方 STL
+      原样引用。未引用网格(夹爪/相机/轮/脚轮/头共 16 个)仅作资产
+      留存于本目录,不进派生片段。
+  lift_bake:
+    mimic: lift_stage2_joint mimic lift_stage1_joint multiplier=1 offset=0
+    travel_per_stage_m: [0.0, 0.425]
+    total_travel_m: 0.85
+    default_q_lift_m: 0.0
+    rebuild_flag: --qL
+    note: >-
+      两级 prismatic 按同一 q_L bake 为固定 pos 偏移(stage1 z=0.0427+q_L,
+      stage2 z=-0.2115+q_L);MuJoCo 的 URDF 导入不保留 mimic,升降冻结
+      故无运行时等式约束。升降高度只由此 bake 表达,runtime 场景不提供
+      第二套升降偏移。
+  collision_note: >-
+    URDF collision 与 visual 引用同网格(逐连杆校验);生产片段遵循
+    自碰撞关闭约定仅保留视觉 geom(contype=0/conaffinity=0),碰撞几何
+    由后续场景/诊断模型决定。
+  inertia_note: >-
+    质量/COM/完整惯量张量逐字保留,未使用 balanceinertia 等修补;
+    官方 URDF 惯量满足 MuJoCo 编译要求(编译实测一次通过)。
+  capability_note: >-
+    URDF 的臂关节 effort/velocity 非 0(如肩 60 N·m / 18.8 rad/s,
+    审计报告 §2 表),为官方声明值——不同于 D2 的"0=未知"规则;
+    但未经实机验证,运行参数层不得直接写成安全限值(N0-9),
+    派生片段不设 ctrlrange/forcerange/速度限值。
