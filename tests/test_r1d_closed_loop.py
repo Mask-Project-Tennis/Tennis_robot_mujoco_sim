@@ -4,15 +4,15 @@
 docs/experiments/reports/2026-11-16-unitree-stage3.md）：
 
 1. 固定案例契约：``configs/scenarios/r1d_stage3_reachable.yaml`` 冻结
-   左臂可达来球 + 固定 seed 42，且案例引用的生产 task 保留 3.11 调参值。
-2. 左固定案例闭环：用真实 ``run_r1d_episode`` 驱动生产调用链（解析输入 →
+   右臂可达来球 + 固定 seed 42，且案例引用的生产 task 保留 3.11 调参值。
+2. 右固定案例闭环：用真实 ``run_r1d_episode`` 驱动生产调用链（解析输入 →
    构建带球执行/规划环境 → MPCController（iLQR/Tube）→ PredictiveSafetyFilter
    → SimComponent 接触判定），断言 active 命中、真实球—拍接触、接触拍速
    > `ACTIVE_HIT_FACE_SPEED_THRESHOLD`（0.3 m/s）、X/U/ball 序列有限且形状正确、
    无禁止机身接触；同 seed/同配置
    连续 3 次逐位一致。
-3. 右固定环境短回合：右生产配置真实跑通（环境/求解器/安全链被调用），
-   允许未命中，不宣称右侧命中。
+3. 左固定环境短回合：左生产配置真实跑通（环境/求解器/安全链被调用），
+   左臂仅作渲染侧验证，允许未命中。
 4. RM65 seed 42 兼容回归：与 3.0 基线 NPZ 逐键/逐形状/逐 dtype/逐位对照
    （基线不存在时 skip 并注明原因——results/ 为 git-ignored 产物目录）。
 
@@ -43,10 +43,10 @@ from src.sim.sim_config import load_sim_task_config
 ROOT = Path(__file__).resolve().parents[1]
 SCENARIO_PATH = ROOT / "configs" / "scenarios" / "r1d_stage3_reachable.yaml"
 
-# 右臂生产配置（固定案例只覆盖左侧；右侧做同等级环境/求解器/短回合验证）
-RIGHT_PROFILE_PATH = ROOT / "configs" / "robots" / "r1d_right.yaml"
-RIGHT_RUNTIME_PATH = ROOT / "configs" / "robots" / "r1d_sim_runtime_right.yaml"
-RIGHT_TASK_PATH = ROOT / "configs" / "r1d_sim_right.yaml"
+# 左臂生产配置（固定案例已改为右臂；左侧做同等级环境/求解器/短回合验证）
+LEFT_PROFILE_PATH = ROOT / "configs" / "robots" / "r1d_left.yaml"
+LEFT_RUNTIME_PATH = ROOT / "configs" / "robots" / "r1d_sim_runtime_left.yaml"
+LEFT_TASK_PATH = ROOT / "configs" / "r1d_sim_left.yaml"
 
 # RM65 seed 42 兼容回归（3.0 基线与 3.11 重跑产物，均位于 git-ignored results/）
 RM65_BASELINE_PATH = ROOT / "results" / "unitree_stage3" / "rm65_seed42.npz"
@@ -238,6 +238,11 @@ def test_fixed_scenario_contract() -> None:
     assert scenario["schema_version"] == 1
     assert scenario["seed"] == 42, "固定案例必须固定 seed=42（不扫描/不挑选）"
     assert scenario["expected_hit_type"] == "active"
+    assert scenario["profile_path"].name == "r1d_right.yaml", (
+        "固定案例必须指向右臂 profile（右臂验收契约）"
+    )
+    assert scenario["runtime_path"].name == "r1d_sim_runtime_right.yaml"
+    assert scenario["task_path"].name == "r1d_sim_right.yaml"
 
     task_raw = yaml.safe_load(scenario["task_path"].read_text(encoding="utf-8"))
     mpc_cfg = task_raw["mpc_config"]
@@ -248,7 +253,7 @@ def test_fixed_scenario_contract() -> None:
     assert float(cost_cfg["Q_p"]) == 50000.0, "3.11 调参：Q_p=50000"
     assert float(cost_cfg["Q_v"]) == 200.0, "3.11 调参：Q_v=200"
 
-    # 来球几何与固定重力抛物线一致：t=0.45s 到达 [0.25, 0.315, 1.357] m
+    # 来球几何与固定重力抛物线一致：t=0.45s 到达 [0.25, -0.16, 1.357] m
     p0 = np.asarray(task_raw["initial_ball_position"], dtype=np.float64)
     v0 = np.asarray(task_raw["initial_ball_velocity"], dtype=np.float64)
     center = np.asarray(task_raw["workspace_center"], dtype=np.float64)
@@ -261,27 +266,27 @@ def test_fixed_scenario_contract() -> None:
             p0[2] + v0[2] * t_hit - 0.5 * 9.81 * t_hit * t_hit,
         ]
     )
-    assert np.allclose(p_analytic, [0.25, 0.315, 1.357], atol=1e-3), (
-        f"固定案例来球在 t=0.45s 应到达 [0.25,0.315,1.357]±1mm，实际 {p_analytic}"
+    assert np.allclose(p_analytic, [0.25, -0.16, 1.357], atol=1e-3), (
+        f"固定案例来球在 t=0.45s 应到达 [0.25,-0.16,1.357]±1mm，实际 {p_analytic}"
     )
     assert float(np.linalg.norm(p_analytic - center)) < radius, (
         "固定案例的击球点必须落在 task 声明的击球工作区内"
     )
-    # 肩—击球点距离 < R1D 臂展 0.35m（阶段 2 FK 实测左肩 [0.059,0.086,1.358]）
-    shoulder = np.array([0.059, 0.086, 1.358])
+    # 肩—击球点距离 < R1D 臂展 0.35m（阶段 2 FK 实测右肩 [0.059,-0.086,1.358]）
+    shoulder = np.array([0.059, -0.086, 1.358])
     assert float(np.linalg.norm(p_analytic - shoulder)) < 0.35
 
 
 # ---------------------------------------------------------------------------
-# 2. 左固定案例：active 命中 + 连续 3 次逐位一致
+# 2. 右固定案例：active 命中 + 连续 3 次逐位一致
 # ---------------------------------------------------------------------------
 
 
-def test_left_fixed_case_active_hit_and_deterministic(tmp_path: Path) -> None:
-    """左固定案例闭环：真实调用链 active 命中，且 3 次逐位一致。
+def test_right_fixed_case_active_hit_and_deterministic(tmp_path: Path) -> None:
+    """右固定案例闭环：真实调用链 active 命中，且 3 次逐位一致。
 
     链路证据：``backend.effective == "python-fd"`` 说明规划由真实 FD
-    iLQR 求解器产生；``hit.step == 90 > replan_interval(20)`` 说明命中前
+    iLQR 求解器产生；``hit.step`` 远大于 ``replan_interval(20)`` 说明命中前
     至少发生过多次重规划（预测—重规划链被真实调用）；``active_contact``
     只能由接触窗口内的真实球—拍 geom 接触（dist<=0）置位。
 
@@ -291,7 +296,7 @@ def test_left_fixed_case_active_hit_and_deterministic(tmp_path: Path) -> None:
     scenario = _load_scenario()
     runs = []
     for index in range(3):
-        output_dir = tmp_path / f"left_run{index + 1}"
+        output_dir = tmp_path / f"right_run{index + 1}"
         summary, arrays = _run_episode(
             scenario["profile_path"],
             scenario["runtime_path"],
@@ -300,7 +305,7 @@ def test_left_fixed_case_active_hit_and_deterministic(tmp_path: Path) -> None:
             scenario["seed"],
         )
         _assert_arrays_valid(summary, arrays)
-        assert summary["side"] == "left"
+        assert summary["side"] == "right"
         assert summary["robot_id"] == "unitree_r1d"
         assert summary["simulation_only"] is True
         assert summary["backend"]["effective"] == "python-fd", (
@@ -341,7 +346,7 @@ def test_left_fixed_case_active_hit_and_deterministic(tmp_path: Path) -> None:
             scenario["task_path"],
             output_dir / "r1d_episode.npz",
         )
-        assert pairs == 8, f"左生产场景保护对应为 8，实际 {pairs}"
+        assert pairs == 8, f"右生产场景保护对应为 8，实际 {pairs}"
         runs.append((summary, arrays))
 
     # 同一固定案例 + 同 seed 的确定性：轨迹逐位一致、命中结论一致
@@ -374,47 +379,46 @@ def epilogue_ok(episode: dict[str, Any]) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# 3. 右侧生产配置：同等级环境/求解器/短回合（允许 miss，不宣称命中）
+# 3. 左侧生产配置：同等级环境/求解器/短回合（允许 miss，不宣称命中）
 # ---------------------------------------------------------------------------
 
 
-def test_right_production_short_episode(tmp_path: Path) -> None:
-    """右生产配置真实跑通：环境构建、iLQR 规划、安全滤波、接触判定均被调用。
+def test_left_production_short_episode(tmp_path: Path) -> None:
+    """左生产配置真实跑通：环境构建、iLQR 规划、安全滤波、接触判定均被调用。
 
-    右侧不宣称命中：右臂肩部侧摆限位较窄（3.10 已记录镜像击球点 refiner
-    的 j1 裕度为负），本测试只要求链路真实运行并产出合法产物（允许 miss /
-    safety_filter_stop）。
+    左侧仅作渲染侧验证：固定案例已改为右臂，本测试只要求链路真实运行并
+    产出合法产物（允许 miss / passive / safety_filter_stop）。
 
     Args:
         tmp_path: pytest 提供的临时产物目录。
     """
-    assert RIGHT_PROFILE_PATH.is_file()
-    assert RIGHT_RUNTIME_PATH.is_file()
-    assert RIGHT_TASK_PATH.is_file()
-    output_dir = tmp_path / "right_run"
+    assert LEFT_PROFILE_PATH.is_file()
+    assert LEFT_RUNTIME_PATH.is_file()
+    assert LEFT_TASK_PATH.is_file()
+    output_dir = tmp_path / "left_run"
     summary, arrays = _run_episode(
-        RIGHT_PROFILE_PATH,
-        RIGHT_RUNTIME_PATH,
-        RIGHT_TASK_PATH,
+        LEFT_PROFILE_PATH,
+        LEFT_RUNTIME_PATH,
+        LEFT_TASK_PATH,
         output_dir,
         seed=42,
     )
     _assert_arrays_valid(summary, arrays)
-    assert summary["side"] == "right"
+    assert summary["side"] == "left"
     assert summary["backend"]["effective"] == "python-fd"
     assert int(summary["episode"]["total_steps"]) > 0
     assert int(summary["metrics"]["n_mpc_steps"]) > 0
     assert summary["hit"]["type"] in ("active", "passive", "miss")
-    # 右侧链路的合法终止原因（不允许异常/NaN 逃逸）
+    # 左侧链路的合法终止原因（不允许异常/NaN 逃逸）
     assert summary["episode"]["failure_reason"] in (
         None,
         "safety_filter_stop",
         "ball_unreachable",
-    ), f"右侧回合意外终止原因: {summary['episode']['failure_reason']}"
+    ), f"左侧回合意外终止原因: {summary['episode']['failure_reason']}"
     _assert_no_forbidden_contact(
-        RIGHT_PROFILE_PATH,
-        RIGHT_RUNTIME_PATH,
-        RIGHT_TASK_PATH,
+        LEFT_PROFILE_PATH,
+        LEFT_RUNTIME_PATH,
+        LEFT_TASK_PATH,
         output_dir / "r1d_episode.npz",
     )
 
@@ -477,6 +481,10 @@ def test_rm65_seed42_regression(tmp_path: Path) -> None:
         "--seed",
         "42",
         "--no-plot",
+        # 基线 NPZ 在 C++ 扩展不可用时由 Python FD 生成；显式钉住同一后端，
+        # 避免本机编译 C++ 后 auto 切到 C++ 导致逐位回归失真。
+        "--solver-backend",
+        "python",
         "--dump-trajectory",
         str(candidate_path),
     ]

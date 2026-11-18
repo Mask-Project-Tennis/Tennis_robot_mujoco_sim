@@ -138,7 +138,7 @@ def _import_v11_visuals():
 # 不能接受后忽略 —— R1D 的来球/步数/权重等全部来自 --sim-task-config YAML）
 _R1D_SHARED_FLAGS = frozenset({
     "robot_config", "runtime_config", "sim_task_config", "output",
-    "seed", "no_plot", "log_level",
+    "seed", "no_plot", "viewer", "log_level",
 })
 
 # 最近一次 R1D 分派拒绝的 RM65 专属参数清单（供测试断言；非生产 API）
@@ -148,9 +148,15 @@ _last_r1d_rejected_flags: list[str] = []
 def _build_parser() -> argparse.ArgumentParser:
     """构造 V12 参数解析器（RM65 参数面与 V11 一致 + 4 个多机器人新参数）。"""
     parser = argparse.ArgumentParser(description="RM-65 V12 EpisodeRunner 管线架构")
-    parser.add_argument("--viewer", action="store_true", help="计算完成后以真实速度回放")
+    parser.add_argument(
+        "--viewer", action="store_true",
+        help="计算完成后回放（RM65 按真实速度；R1D 以 0.2× 慢放循环）"
+    )
     parser.add_argument("--seed", type=int, default=None, help="随机种子")
     parser.add_argument("--fd", action="store_true", help="使用有限差分线性化")
+    parser.add_argument("--solver-backend", choices=["auto", "python", "cpp"], default="auto",
+                        help="iLQR 求解器后端（默认 auto：C++ 扩展可用则用 C++；"
+                             "复现 Python FD 基线时显式传 python）")
     parser.add_argument("--horizon", type=int, default=None, help="短地平线步数")
     parser.add_argument("--iter", type=int, default=None, help="每次重规划迭代数")
     parser.add_argument("--fix-joint5", action="store_true", help="固定第 6 关节")
@@ -398,7 +404,7 @@ def _dispatch_robot_selection(
             f"R1D 仿真路径不支持 RM65 专属参数（不能接受后忽略）: "
             f"{', '.join(rejected)}；R1D 的来球/步数/权重/球速等全部来自 "
             f"--sim-task-config YAML，共享基础参数仅 "
-            f"seed/no-plot/output/log-level"
+            f"seed/no-plot/viewer/output/log-level"
         )
 
     output_dir = (
@@ -409,7 +415,7 @@ def _dispatch_robot_selection(
     try:
         result = run_r1d_episode(
             args.robot_config, args.runtime_config, args.sim_task_config,
-            output_dir, seed=args.seed,
+            output_dir, seed=args.seed, viewer=args.viewer,
         )
     except (ValueError, FileNotFoundError) as exc:
         parser.error(f"R1D 仿真回合失败（配置错误，未构造 runner）: {exc}")
@@ -845,6 +851,7 @@ def main() -> None:
 
     mpc_config = MPCConfig(
         version="v12",
+        solver_backend=args.solver_backend,
         is_position_mode=is_position_mode,
         ablation_mode=ablation_mode,
         dt=dt,

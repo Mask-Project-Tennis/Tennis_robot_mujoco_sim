@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import copy
 import logging
+import math
 import os
 import shutil
 import xml.etree.ElementTree as ET
@@ -78,6 +79,66 @@ _TORSO_GEOM = "torso_box"
 _TCP_SITE = "racket_center"
 _GROUND_GEOM = "ground"
 
+# RM65 球场资产的逐字复制（用户要求“场地直接照搬 RM65”）
+_COURT_TEXTURE = "court_grid"
+_COURT_MATERIAL = "court_floor"
+_COURT_TEXTURE_ATTRS = {
+    "name": _COURT_TEXTURE,
+    "type": "2d",
+    "builtin": "checker",
+    "rgb1": "0.28 0.42 0.22",
+    "rgb2": "0.24 0.38 0.20",
+    "width": "512",
+    "height": "512",
+    "mark": "edge",
+    "markrgb": "0.9 0.95 0.85",
+}
+_COURT_MATERIAL_ATTRS = {
+    "name": _COURT_MATERIAL,
+    "texture": _COURT_TEXTURE,
+    "texrepeat": "8 8",
+    "reflectance": "0.15",
+    "rgba": "0.28 0.42 0.22 1",
+}
+# RM65 球场白线（视觉装饰，不参与碰撞）
+_COURT_LINE_GEOMS: tuple[dict[str, str], ...] = (
+    {"size": "12 0.05 0.001"},
+    {"size": "0.05 12 0.001"},
+    {"size": "0.05 6 0.001", "pos": "-6 0 0.001"},
+    {"size": "0.05 6 0.001", "pos": "6 0 0.001"},
+    {"size": "0.05 5 0.001", "pos": "-3 0 0.001"},
+    {"size": "0.05 5 0.001", "pos": "3 0 0.001"},
+    {"size": "3 0.05 0.001", "pos": "-4.5 0 0.001"},
+    {"size": "3 0.05 0.001", "pos": "4.5 0 0.001"},
+    {"size": "0.05 12 0.001", "pos": "0 -5 0.001"},
+    {"size": "0.05 12 0.001", "pos": "0 5 0.001"},
+)
+
+# 落地支撑：固定基座在世界 z=base_z，立柱从地面托到基座底面
+_PEDESTAL_BODY = "r1d_pedestal"
+_PEDESTAL_GEOM = "r1d_pedestal_column"
+_PEDESTAL_BASE_GEOM = "r1d_pedestal_base"
+_PEDESTAL_HALF_WIDTH = 0.16
+_PEDESTAL_BASE_HALF = 0.26
+_PEDESTAL_BASE_HEIGHT = 0.04
+
+# 球拍视觉：保留 racket_face 作为唯一碰撞几何；另加不参与碰撞的
+# 拍面椭球与拍柄，避免“悬空黄盘”的观感（RM65 为拍柄+椭球拍面）。
+_RACKET_FACE_VISUAL_GEOM = "racket_face_visual"
+_RACKET_HANDLE_GEOM = "racket_handle"
+_RACKET_HANDLE_RADIUS = 0.012
+# 被动臂的静态“待机姿态”（度）：不引入关节，只把角度烘进 body quat，
+# 避免对侧臂零位时折进躯干、在查看器里几乎看不见。
+_PASSIVE_ARM_POSE_DEG = {
+    "shoulder_pitch": 10.0,
+    "shoulder_roll": 30.0,
+    "shoulder_yaw": 0.0,
+    "elbow": 50.0,
+    "wrist_roll": 0.0,
+    "wrist_pitch": -10.0,
+    "wrist_yaw": 0.0,
+}
+
 # 冻结环境链的 body 序列（相邻对排除表静态部分，顺序=父子链）
 _ENV_CHAIN_BODIES: tuple[str, ...] = (
     "base_link",
@@ -103,6 +164,116 @@ def _side_chain_bodies(side: str) -> tuple[str, ...]:
         f"{side}_wrist_pitch_link",
         f"{side}_wrist_yaw_link",
     )
+
+
+def _passive_side(side: str) -> str:
+    """返回对侧名称（用于把对侧臂作为静态视觉挂件）。"""
+    return "right" if side == "left" else "left"
+
+
+def _quat_to_matrix(quat: Any) -> np.ndarray:
+    """把 wxyz 四元数转换为旋转矩阵（仅用于视觉几何定位）。
+
+    Args:
+        quat: 长度为 4 的 wxyz 四元数。
+
+    Returns:
+        3×3 旋转矩阵；输入会先归一化（零四元数退化为单位阵）。
+    """
+    w, x, y, z = (float(value) for value in quat)
+    norm = math.sqrt(w * w + x * x + y * y + z * z)
+    if norm < 1e-12:
+        return np.eye(3, dtype=np.float64)
+    w, x, y, z = w / norm, x / norm, y / norm, z / norm
+    return np.array(
+        [
+            [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+            [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+            [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)],
+        ],
+        dtype=np.float64,
+    )
+
+
+def _quat_mul(left: Any, right: Any) -> tuple[float, float, float, float]:
+    """按 Hamilton 约定相乘两个 wxyz 四元数。"""
+    w1, x1, y1, z1 = (float(value) for value in left)
+    w2, x2, y2, z2 = (float(value) for value in right)
+    return (
+        w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
+        w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
+        w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
+        w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2,
+    )
+
+
+def _axis_angle_quat(axis: Any, angle_rad: float) -> tuple[float, float, float, float]:
+    """把轴角转换为 wxyz 四元数（轴自动归一化）。"""
+    ax, ay, az = (float(value) for value in axis)
+    norm = math.sqrt(ax * ax + ay * ay + az * az)
+    if norm < 1e-12:
+        return (1.0, 0.0, 0.0, 0.0)
+    half = 0.5 * angle_rad
+    scale = math.sin(half) / norm
+    return (math.cos(half), ax * scale, ay * scale, az * scale)
+
+
+def _passive_joint_angle(joint_name: str, side: str) -> float:
+    """按关节名返回被动臂烘入姿态角（弧度）；右侧 roll 镜像。"""
+    for suffix, degrees in _PASSIVE_ARM_POSE_DEG.items():
+        if suffix in joint_name:
+            if suffix == "shoulder_roll" and side == "right":
+                degrees = -degrees
+            return math.radians(degrees)
+    return 0.0
+
+
+def _static_arm_copy(root_body: ET.Element, side: str) -> ET.Element:
+    """把对侧裸臂复制成无关节静态视觉链。
+
+    仅用于“双臂一起渲染、只控制右臂”：先把待机姿态角烘进各级 body 的
+    ``quat``，再删除全部 joint/freejoint 与法兰 site，根 body 改唯一名；
+    保留官方 mesh/惯量，不添加 actuator。因无关节，模型的
+    njnt/nq/nv/nu 不变，场景形状校验仍按单臂通过。
+
+    Args:
+        root_body: 对侧 ``r1d_arm_{side}.xml`` 的根 body 元素。
+        side: 该被动臂的侧别（用于唯一命名与诊断）。
+
+    Returns:
+        可直接挂到 ``waist_yaw_link`` 下的静态 body 元素。
+    """
+    passive = copy.deepcopy(root_body)
+    passive.set("name", f"{_ARM_ROOT_BODY}_{side}_passive")
+    # 先把每个关节的待机角烘进 body quat；关节轴在 body 局部系。
+    for body in passive.iter("body"):
+        joint = next((child for child in body if child.tag == "joint"), None)
+        if joint is None:
+            continue
+        axis = joint.attrib.get("axis", "0 0 1").split()
+        angle = _passive_joint_angle(joint.attrib.get("name", ""), side)
+        old_quat = body.attrib.get("quat", "1 0 0 0").split()
+        new_quat = _quat_mul(old_quat, _axis_angle_quat(axis, angle))
+        body.set("quat", " ".join(f"{value:.12g}" for value in new_quat))
+    # 删除所有关节（含 freejoint）；静态视觉链不参与动力学
+    for parent in list(passive.iter()):
+        for child in list(parent):
+            if child.tag in ("joint", "freejoint"):
+                parent.remove(child)
+    # 对侧法兰 site 与主动臂同名，必须删除以免 MuJoCo 重名
+    for parent in list(passive.iter()):
+        for child in list(parent):
+            if child.tag == "site" and child.attrib.get("name") == _FLANGE_SITE:
+                parent.remove(child)
+    return passive
+
+
+def _find_geom(root: ET.Element, name: str) -> ET.Element:
+    """按名称查找 geom；缺失即视为模板漂移。"""
+    for geom in root.iter("geom"):
+        if geom.attrib.get("name") == name:
+            return geom
+    raise ValueError(f"模板中缺少 geom {name}（模板漂移）")
 
 
 def _connected_excludes(side: str) -> tuple[tuple[str, str], ...]:
@@ -165,7 +336,10 @@ def write_r1d_model_template(
     env_path: Path,
     assets_path: Path,
 ) -> None:
-    """合并 2.5a 三份片段生成完整 R1D 单臂场景模板（字节确定输出）。
+    """合并 2.5a 三份片段生成 R1D 单侧主动臂 + 对侧静态渲染臂模板。
+
+    对侧臂只保留 mesh/惯量、删除全部关节与法兰 site，因此模板的
+    njnt/nq/nv/nu 仍为单臂 7 维；它仅用于查看器里“两条手臂一起渲染”。
 
     mesh 引用重写为相对 output_path.parent 的路径；相对化失败（跨盘符）
     时把全部 mesh 文件重定位复制到 output_path.parent/meshes/，导出的
@@ -207,7 +381,7 @@ def write_r1d_model_template(
 def load_robot_model(
     profile: RobotProfile, parameters: RobotRuntimeParameters
 ) -> RobotModelBundle:
-    """组装并加载 R1D 单臂场景模型，返回同源的 RobotModelBundle。
+    """组装并加载 R1D 单侧主动臂 + 对侧静态渲染臂模型。
 
     流程：校验身份/维数/初态（复用 2.2 的 kinematics 级校验）→ 读取磁盘
     模板 → 仅在模板副本（xml_text）上应用本次参数 → 经 load_mujoco_model
@@ -436,6 +610,9 @@ def _build_template_element(
     asset_src = next((el for el in assets_root if el.tag == "asset"), None)
     if asset_src is None or not asset_src.findall("mesh"):
         raise ValueError(f"资产片段缺少含 mesh 的 <asset>（片段: {assets_path}）")
+    # 球场纹理/材质：逐字照搬 RM65（用户要求直接复用其场地配置）
+    ET.SubElement(asset_src, "texture", _COURT_TEXTURE_ATTRS)
+    ET.SubElement(asset_src, "material", _COURT_MATERIAL_ATTRS)
 
     # 关节名按片段层级逐级读取（motor 命名不硬编码，防与片段漂移）
     joint_names = _read_arm_chain(arm_root_body, side, arm_path)
@@ -462,18 +639,78 @@ def _build_template_element(
         "geom",
         name=_GROUND_GEOM,
         type="plane",
-        size="4 4 0.1",
-        rgba="0.45 0.5 0.45 1",
+        size="25 25 0.1",
+        rgba="0.28 0.42 0.22 1",
+        material=_COURT_MATERIAL,
         contype="0",
         conaffinity="0",
     )
+    # 白线：与 RM65 逐条一致，纯视觉、不参与碰撞
+    for line in _COURT_LINE_GEOMS:
+        attrs = {
+            "type": "plane",
+            "size": line["size"],
+            "rgba": "1 1 1 1",
+            "contype": "0",
+            "conaffinity": "0",
+        }
+        if "pos" in line:
+            attrs["pos"] = line["pos"]
+        ET.SubElement(worldbody, "geom", attrs)
     mount = ET.SubElement(
         worldbody, "body", name=_MOUNT_BODY, pos="0 0 0", quat="1 0 0 0"
+    )
+    # 落地支撑：立柱 + 底盘，挂在固定基座下；尺寸随 base z 调整
+    pedestal = ET.SubElement(
+        mount, "body", name=_PEDESTAL_BODY, pos="0 0 -0.5", quat="1 0 0 0"
+    )
+    ET.SubElement(
+        pedestal,
+        "geom",
+        name=_PEDESTAL_GEOM,
+        type="box",
+        size=f"{_PEDESTAL_HALF_WIDTH} {_PEDESTAL_HALF_WIDTH} 0.5",
+        rgba="0.20 0.22 0.26 1",
+        contype="0",
+        conaffinity="0",
+    )
+    ET.SubElement(
+        pedestal,
+        "geom",
+        name=_PEDESTAL_BASE_GEOM,
+        type="box",
+        size=f"{_PEDESTAL_BASE_HALF} {_PEDESTAL_BASE_HALF} {_PEDESTAL_BASE_HEIGHT}",
+        pos=f"0 0 {-0.5 + _PEDESTAL_BASE_HEIGHT}",
+        rgba="0.12 0.13 0.16 1",
+        contype="0",
+        conaffinity="0",
     )
     # 环境链挂在固定基座下（含已 bake 的 q_L；升降高度唯一表达处）
     mount.append(copy.deepcopy(env_root_body))
     # 选定侧裸臂锚在环境链顶部 waist_yaw_link（虚拟固定安装点）
     env_tip = _find_body(mount, _ENV_TIP_BODY)
+    # 对侧臂作为无关节静态视觉挂件：只渲染、不参与控制/物理。
+    # 这样 njnt/nq/nv/nu 仍为 7/7/7/7，带球场景形状校验保持单臂契约。
+    passive_side = _passive_side(side)
+    passive_path = arm_path.parent / f"r1d_arm_{passive_side}.xml"
+    if not passive_path.is_file():
+        raise FileNotFoundError(
+            f"对侧臂片段缺失，无法组装双臂渲染场景: {passive_path}"
+        )
+    passive_root = _parse_fragment(passive_path, "mujocoinclude")
+    passive_worldbody = _fragment_worldbody(passive_root, passive_path)
+    passive_root_body = next(
+        (el for el in passive_worldbody if el.tag == "body"), None
+    )
+    if (
+        passive_root_body is None
+        or passive_root_body.attrib.get("name") != _ARM_ROOT_BODY
+    ):
+        raise ValueError(
+            f"对侧裸臂片段 worldbody 下唯一根 body 应为 {_ARM_ROOT_BODY}"
+            f"（片段: {passive_path}）"
+        )
+    env_tip.append(_static_arm_copy(passive_root_body, passive_side))
     arm_copy = copy.deepcopy(arm_root_body)
     env_tip.append(arm_copy)
 
@@ -485,7 +722,7 @@ def _build_template_element(
     racket = ET.SubElement(
         arm_tip, "body", name=_RACKET_BODY, pos=_fmt_vec(flange_pos), quat="1 0 0 0"
     )
-    # 单一几何（视觉即碰撞形状）+ 显式惯量：避免视觉/碰撞双重计质量
+    # 拍面碰撞几何保持第一个 geom（测试契约：racket.find("geom") 是拍面）
     ET.SubElement(
         racket, "inertial", pos="0 0 0", mass="0.3", diaginertia="0 0 0"
     )
@@ -499,9 +736,32 @@ def _build_template_element(
         contype="0",
         conaffinity="0",
     )
+    # 视觉拍面：椭球面，不参与碰撞（碰撞仍由 racket_face 代理）
+    ET.SubElement(
+        racket,
+        "geom",
+        name=_RACKET_FACE_VISUAL_GEOM,
+        type="ellipsoid",
+        size="0 0 0",
+        rgba="0.92 0.88 0.30 1",
+        contype="0",
+        conaffinity="0",
+    )
+    # 拍柄：从腕部指向拍面，补上 RM65 的“拍柄 + 拍面 + TCP”组合
+    ET.SubElement(
+        racket,
+        "geom",
+        name=_RACKET_HANDLE_GEOM,
+        type="capsule",
+        fromto="0 0 0 0 0 0",
+        size="0.012",
+        rgba="0.16 0.17 0.20 1",
+        contype="0",
+        conaffinity="0",
+    )
     ET.SubElement(racket, "site", name=_TCP_SITE, pos="0 0 0", size="0.005")
 
-    # 简化机身 box：挂在固定基座（r1d_mount）下，相对基座定位
+    # 简化机身 box：保留为保护几何，但视觉透明，露出真实 waist 网格
     torso = ET.SubElement(mount, "body", name=_TORSO_BODY, pos="0 0 0")
     ET.SubElement(
         torso,
@@ -509,7 +769,7 @@ def _build_template_element(
         name=_TORSO_GEOM,
         type="box",
         size="0 0 0",
-        rgba="0.55 0.57 0.6 1",
+        rgba="0.55 0.57 0.6 0",
         contype="0",
         conaffinity="0",
     )
@@ -580,6 +840,32 @@ def _apply_scene_parameters(
     mount.set("pos", _fmt_vec(scene.base_position))
     mount.set("quat", _fmt_vec(scene.base_quaternion))
 
+    # 落地支撑：基座在 z=base_z，立柱从地面托到基座底面，底盘落在地面。
+    # 合成/旧模板可能没有该 body（仅为向后兼容测试夹具），缺失时跳过。
+    pedestal = next(
+        (body for body in root.iter("body") if body.get("name") == _PEDESTAL_BODY),
+        None,
+    )
+    if pedestal is not None:
+        base_z = max(float(scene.base_position[2]), 0.05)
+        pedestal.set("pos", _fmt_vec((0.0, 0.0, -0.5 * base_z)))
+        pedestal_column = _find_geom(root, _PEDESTAL_GEOM)
+        pedestal_column.set(
+            "size",
+            _fmt_vec(
+                (
+                    _PEDESTAL_HALF_WIDTH,
+                    _PEDESTAL_HALF_WIDTH,
+                    0.5 * base_z,
+                )
+            ),
+        )
+        pedestal_base = _find_geom(root, _PEDESTAL_BASE_GEOM)
+        pedestal_base.set(
+            "pos",
+            _fmt_vec((0.0, 0.0, -0.5 * base_z + _PEDESTAL_BASE_HEIGHT)),
+        )
+
     # 球拍挂接点 = 法兰安装参考 + 拍面中心偏移（均在末端连杆参考系）
     racket = _find_body(root, _RACKET_BODY)
     racket_pos = _flange_position(root) + scene.racket_position
@@ -599,6 +885,47 @@ def _apply_scene_parameters(
     racket_geom.set(
         "size", _fmt_vec((scene.racket_radius, scene.racket_half_thickness))
     )
+
+    # 视觉拍面（椭球）与拍柄（capsule）：只改视觉，不动碰撞面/惯量。
+    # 合成/旧模板可能没有这两个 geom（仅为向后兼容测试夹具），缺失时跳过。
+    face_visual = next(
+        (
+            geom
+            for geom in root.iter("geom")
+            if geom.get("name") == _RACKET_FACE_VISUAL_GEOM
+        ),
+        None,
+    )
+    if face_visual is not None:
+        face_visual.set(
+            "size",
+            _fmt_vec(
+                (scene.racket_radius, scene.racket_radius, scene.racket_half_thickness)
+            ),
+        )
+    handle = next(
+        (
+            geom
+            for geom in root.iter("geom")
+            if geom.get("name") == _RACKET_HANDLE_GEOM
+        ),
+        None,
+    )
+    if handle is not None:
+        rotation = _quat_to_matrix(scene.racket_quaternion)
+        offset = np.asarray(scene.racket_position, dtype=np.float64)
+        handle_start = -rotation.T @ offset
+        handle_length = float(np.linalg.norm(handle_start))
+        if handle_length < 1e-6:
+            handle_start = np.zeros(3, dtype=np.float64)
+            handle_end = np.zeros(3, dtype=np.float64)
+        else:
+            handle_end = handle_start * (0.03 / handle_length)
+        handle.set(
+            "fromto",
+            _fmt_vec((*handle_start.tolist(), *handle_end.tolist())),
+        )
+        handle.set("size", _fmt_float(_RACKET_HANDLE_RADIUS))
 
     torso = _find_body(root, _TORSO_BODY)
     torso_geom = torso.find("geom")

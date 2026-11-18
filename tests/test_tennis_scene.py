@@ -73,14 +73,13 @@ _TEMPLATE_PATHS = {
     side: REPO_ROOT / "src" / "robot" / f"r1d_model_{side}.xml" for side in SIDES
 }
 
-# 字节未变校验的资产清单（模板 + 四份只读片段）
+# 字节未变校验的资产清单（四份只读片段；模板由工厂生成，另有
+# test_r1d_model 的“磁盘模板 == 工厂产物 / 重建字节确定”覆盖）
 _ASSET_REL_PATHS = (
     "src/robot/r1d_arm_left.xml",
     "src/robot/r1d_arm_right.xml",
     "src/robot/r1d_env.xml",
     "src/robot/r1d_assets.xml",
-    "src/robot/r1d_model_left.xml",
-    "src/robot/r1d_model_right.xml",
 )
 
 # 球名称约定（与 r1d_sim_{side}.yaml 一致，沿 rm65_model.xml 命名先例）
@@ -527,6 +526,9 @@ def test_geometry_and_inertia_match_stage2_model(side: str) -> None:
     # geom：类型/尺寸/位姿逐名一致（掩码差异另由掩码测试断言，此处只查几何）
     for gid_b in range(bare_model.ngeom):
         name = mujoco.mj_id2name(bare_model, mujoco.mjtObj.mjOBJ_GEOM, gid_b)
+        if name is None:
+            # 球场白线等无名视觉 geom 不属于“阶段 2 裸模型”契约
+            continue
         gid_s = _name2id(model, mujoco.mjtObj.mjOBJ_GEOM, str(name))
         for field in ("geom_type", "geom_size", "geom_pos", "geom_quat"):
             assert np.array_equal(

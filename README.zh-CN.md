@@ -55,6 +55,25 @@ python scripts/rm65_mpc_v12.py --serve-box --ball-speed 9 --no-plot
 python scripts/tools/rm65_joint_viewer.py
 ```
 
+### Unitree R1-A7-D（工程扩展）
+
+论文与论文统计仍只使用 **RM-65B**；R1-A7-D 是工程扩展：单侧 7 自由度主动臂
++ 对侧无关节静态渲染臂、RM65 风格球场/落地支撑、右臂固定案例验收。它不改变
+论文中的任何结果。
+
+```bash
+# 右臂固定可达案例，双侧查看器（0.2 倍慢放循环）
+python scripts/rm65_mpc_v12.py \
+  --robot-config configs/robots/r1d_right.yaml \
+  --runtime-config configs/robots/r1d_sim_runtime_right.yaml \
+  --sim-task-config configs/r1d_sim_right.yaml \
+  --output results/r1d_episode_right --seed 42 --viewer
+```
+
+预期：`hit_type=active`（step 89），随后打开标题为
+`MuJoCo : r1d_right_tennis_scene` 的窗口；关闭窗口即退出。对侧左臂无关节/
+执行器，因此 `nq/nv/nu` 仍为 7，规划契约不变。
+
 ### 真机部署
 
 ```bash
@@ -71,7 +90,7 @@ python scripts/tools/test_real_robot/04_send_zero_pose.py        # 回零位
 ### 测试
 
 ```bash
-# 运行全部测试（662 tests）
+# 运行全部测试（1271 tests）
 pytest tests/
 
 # 代码检查
@@ -399,7 +418,7 @@ mujoco_sim/
 │   ├── cpp/                              # C++ 加速（pybind11）
 │   └── utils/                            # 工具（模型加载/噪声注入/数学）
 │
-├── tests/                                # 单元测试（662 tests）
+├── tests/                                # 单元测试（1271 tests）
 ├── experiment_data/                      # 逐 episode 结果/日志/图表资产（跟踪子集）
 ├── docs/                                 # 技术文档
 └── paper/                                # 论文 LaTeX 工程（本地，不入库）

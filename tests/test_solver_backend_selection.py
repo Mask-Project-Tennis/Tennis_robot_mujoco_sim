@@ -18,8 +18,8 @@
 模拟 C++ 可导入的方式：向 ``sys.modules`` 注入伪造 ``src.cpp.iLQR_Core``
 （三个内核函数为哨兵——一旦被真实调用即 ``AssertionError``），随后
 reload ``src.cpp.solver_cpp`` 使其 ``_CPP_AVAILABLE=True``；测试结束后
-移除伪造模块并再次 reload 还原。本机真实 C++ 扩展为 cp313 ABI，在
-py3.11 下永远 ImportError，因此"可导入"条件只能如此模拟。
+移除伪造模块并再次 reload 还原。即使本机已编译真实 C++ 扩展，也先
+暂存并替换为伪造模块，确保测试只验证后端选择、不调用真实六维内核。
 """
 
 from __future__ import annotations
@@ -240,14 +240,25 @@ def _make_fake_core_module() -> types.ModuleType:
 
 @contextlib.contextmanager
 def cpp_importable() -> Iterator[types.ModuleType]:
-    """模拟 C++ 扩展可导入：注入伪造内核模块并 reload solver_cpp。
+    """模拟 C++ 扩展可导入：替换为伪造内核模块并 reload solver_cpp。
+
+    若本机已编译真实扩展，``src.cpp.solver_cpp`` 在导入时就会注册
+    ``src.cpp.iLQR_Core``；本上下文先暂存并移除真实模块（含包属性），
+    再注入伪造模块，退出时恢复真实模块并 reload。这样无论扩展是否
+    编译，测试都只走伪造哨兵、不会调用真实六维内核。
 
     Yields:
         reload 后的 ``src.cpp.solver_cpp`` 模块（``_CPP_AVAILABLE=True``）。
     """
-    prev_core = sys.modules.get("src.cpp.iLQR_Core")
-    assert prev_core is None, "测试前提：真实/伪造 iLQR_Core 未注册"
-    sys.modules["src.cpp.iLQR_Core"] = _make_fake_core_module()
+    import src.cpp as cpp_pkg
+
+    core_name = "src.cpp.iLQR_Core"
+    prev_core = sys.modules.pop(core_name, None)
+    prev_attr = getattr(cpp_pkg, "iLQR_Core", None)
+    if prev_attr is not None:
+        delattr(cpp_pkg, "iLQR_Core")
+
+    sys.modules[core_name] = _make_fake_core_module()
     try:
         import src.cpp.solver_cpp as solver_cpp
 
@@ -255,19 +266,50 @@ def cpp_importable() -> Iterator[types.ModuleType]:
         assert solver_cpp._CPP_AVAILABLE is True, "模拟注入后应判定 C++ 可用"
         yield solver_cpp
     finally:
-        sys.modules.pop("src.cpp.iLQR_Core", None)
+        sys.modules.pop(core_name, None)
+        if prev_core is not None:
+            sys.modules[core_name] = prev_core
+            setattr(cpp_pkg, "iLQR_Core", prev_core)
         import src.cpp.solver_cpp as solver_cpp_restore
 
         importlib.reload(solver_cpp_restore)
 
 
-def _real_cpp_available() -> bool:
-    """检查真实（非模拟）C++ 扩展是否可导入。"""
+@contextlib.contextmanager
+def cpp_unavailable() -> Iterator[None]:
+    """模拟 C++ 扩展不可导入：移除真实内核模块并 reload solver_cpp。
+
+    本机编译 C++ 扩展后，``solver_cpp`` 在导入时已置
+    ``_CPP_AVAILABLE=True``，回退分支无法直接观测；本上下文暂存并移除
+    真实 ``src.cpp.iLQR_Core``（含包属性），reload 后强制走 ImportError
+    分支，退出时恢复真实模块并再次 reload。
+    """
+    import src.cpp as cpp_pkg
+
+    core_name = "src.cpp.iLQR_Core"
+    prev_core = sys.modules.pop(core_name, None)
+    prev_attr = getattr(cpp_pkg, "iLQR_Core", None)
+    if prev_attr is not None:
+        delattr(cpp_pkg, "iLQR_Core")
+    # None 是 Python 导入系统的哨兵：命中时 import 直接抛 ImportError，
+    # 避免 reload 时又从磁盘把真实 .pyd 重新导入。
+    sys.modules[core_name] = None
+
     try:
         import src.cpp.solver_cpp as solver_cpp
-    except ImportError:
-        return False
-    return bool(getattr(solver_cpp, "_CPP_AVAILABLE", False))
+
+        importlib.reload(solver_cpp)
+        assert solver_cpp._CPP_AVAILABLE is False, "模拟移除后应判定 C++ 不可用"
+        yield
+    finally:
+        if prev_core is not None:
+            sys.modules[core_name] = prev_core
+            setattr(cpp_pkg, "iLQR_Core", prev_core)
+        else:
+            sys.modules.pop(core_name, None)
+        import src.cpp.solver_cpp as solver_cpp_restore
+
+        importlib.reload(solver_cpp_restore)
 
 
 # ---------- 1. build_solver() 无参缺省行为保持 ----------
@@ -326,7 +368,7 @@ def test_r1d_never_enters_cpp_kernel_even_when_importable(
 
 @pytest.mark.parametrize("side", SIDES)
 def test_r1d_python_backend_without_simulation(side: str) -> None:
-    """不模拟（本机 C++ 永远不可导入）时，python 后端同样给出 FD 求解器。"""
+    """不注入伪造模块时，python 后端同样给出 FD 求解器。"""
     solver = build_solver(env=_r1d_env(side), backend="python")
     assert type(solver) is PythonILQTSolver
     assert solver.use_analytical is False
@@ -399,25 +441,23 @@ def test_compatible_env_auto_prefers_cpp_when_importable() -> None:
 
 
 def test_compatible_env_auto_falls_back_to_python_analytical() -> None:
-    """C++ 不可导入（本机真实状态）时，兼容环境 auto → Python 解析线性化。"""
-    if _real_cpp_available():
-        pytest.skip("本机真实 C++ 扩展可导入，回退路径无法在本机观测")
+    """C++ 不可导入时，兼容环境 auto → Python 解析线性化。"""
     from src.ilqt.planning_env import PlanningEnv
 
-    solver = build_solver(env=PlanningEnv(), backend="auto")
-    assert type(solver) is PythonILQTSolver
-    # 旧 Python 缺省：use_analytical=True
-    assert solver.use_analytical is True
+    with cpp_unavailable():
+        solver = build_solver(env=PlanningEnv(), backend="auto")
+        assert type(solver) is PythonILQTSolver
+        # 旧 Python 缺省：use_analytical=True
+        assert solver.use_analytical is True
 
 
 def test_compatible_env_explicit_cpp_unavailable_raises() -> None:
     """显式 cpp 但扩展不可导入 → ValueError（不静默回退）。"""
-    if _real_cpp_available():
-        pytest.skip("本机真实 C++ 扩展可导入，不可用路径无法在本机观测")
     from src.ilqt.planning_env import PlanningEnv
 
-    with pytest.raises(ValueError, match="不可用"):
-        build_solver(env=PlanningEnv(), backend="cpp")
+    with cpp_unavailable():
+        with pytest.raises(ValueError, match="不可用"):
+            build_solver(env=PlanningEnv(), backend="cpp")
 
 
 # ---------- 5. C++ 求解器 Python 入口能力拒绝 ----------

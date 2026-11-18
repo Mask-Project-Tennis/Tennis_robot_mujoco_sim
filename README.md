@@ -63,6 +63,26 @@ python scripts/rm65_mpc_v12.py --serve-box --ball-speed 9 --no-plot
 python scripts/tools/rm65_joint_viewer.py
 ```
 
+### Unitree R1-A7-D (Engineering Extension)
+
+The paper and its statistics remain **RM-65B only**. The R1-A7-D entry is an
+engineering extension: a single active 7-DoF arm plus a static opposite arm for
+bilateral rendering, an RM65-style court/pedestal, and right-arm fixed-case
+acceptance. It does not change any paper result.
+
+```bash
+# Right-arm fixed reachable case, bilateral viewer (0.2x slow-motion replay)
+python scripts/rm65_mpc_v12.py \
+  --robot-config configs/robots/r1d_right.yaml \
+  --runtime-config configs/robots/r1d_sim_runtime_right.yaml \
+  --sim-task-config configs/r1d_sim_right.yaml \
+  --output results/r1d_episode_right --seed 42 --viewer
+```
+
+Expected: `hit_type=active` at step 89, then a MuJoCo window titled
+`MuJoCo : r1d_right_tennis_scene`; close it to exit. The passive left arm has no
+joints/actuators, so `nq/nv/nu` stay 7 and the planner contract is unchanged.
+
 ### Real-Robot Deployment
 
 ```bash
@@ -79,7 +99,7 @@ python scripts/tools/test_real_robot/04_send_zero_pose.py        # move to zero 
 ### Tests
 
 ```bash
-# Run the full test suite (662 tests)
+# Run the full test suite (1271 tests)
 pytest tests/
 
 # Linting
@@ -413,7 +433,7 @@ consumption.
 │   ├── cpp/                              # C++ acceleration (pybind11)
 │   └── utils/                            # shared utilities (model loading / noise / math)
 │
-├── tests/                                # unit tests (662)
+├── tests/                                # unit tests (1271)
 ├── experiment_data/                      # per-episode results, logs, figure assets (tracked subset)
 ├── docs/                                 # technical documentation (Chinese)
 └── paper/                                # manuscript LaTeX project (local only, not tracked)

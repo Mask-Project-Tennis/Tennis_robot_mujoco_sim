@@ -24,6 +24,8 @@
     <mesh name="right_wrist_roll_link" file="../../assets/unitree_r1d/meshes/right_wrist_roll_link.STL" />
     <mesh name="right_wrist_yaw_link" file="../../assets/unitree_r1d/meshes/right_wrist_yaw_link.STL" />
     <mesh name="waist_yaw_link" file="../../assets/unitree_r1d/meshes/waist_yaw_link.STL" />
+    <texture name="court_grid" type="2d" builtin="checker" rgb1="0.28 0.42 0.22" rgb2="0.24 0.38 0.20" width="512" height="512" mark="edge" markrgb="0.9 0.95 0.85" />
+    <material name="court_floor" texture="court_grid" texrepeat="8 8" reflectance="0.15" rgba="0.28 0.42 0.22 1" />
   </asset>
   <contact>
     <exclude body1="r1d_mount" body2="base_link" />
@@ -48,8 +50,22 @@
   </contact>
   <worldbody>
     <light pos="0 0 8" dir="0 0 -1" diffuse="1.2 1.25 1.3" />
-    <geom name="ground" type="plane" size="4 4 0.1" rgba="0.45 0.5 0.45 1" contype="0" conaffinity="0" />
+    <geom name="ground" type="plane" size="25 25 0.1" rgba="0.28 0.42 0.22 1" material="court_floor" contype="0" conaffinity="0" />
+    <geom type="plane" size="12 0.05 0.001" rgba="1 1 1 1" contype="0" conaffinity="0" />
+    <geom type="plane" size="0.05 12 0.001" rgba="1 1 1 1" contype="0" conaffinity="0" />
+    <geom type="plane" size="0.05 6 0.001" rgba="1 1 1 1" contype="0" conaffinity="0" pos="-6 0 0.001" />
+    <geom type="plane" size="0.05 6 0.001" rgba="1 1 1 1" contype="0" conaffinity="0" pos="6 0 0.001" />
+    <geom type="plane" size="0.05 5 0.001" rgba="1 1 1 1" contype="0" conaffinity="0" pos="-3 0 0.001" />
+    <geom type="plane" size="0.05 5 0.001" rgba="1 1 1 1" contype="0" conaffinity="0" pos="3 0 0.001" />
+    <geom type="plane" size="3 0.05 0.001" rgba="1 1 1 1" contype="0" conaffinity="0" pos="-4.5 0 0.001" />
+    <geom type="plane" size="3 0.05 0.001" rgba="1 1 1 1" contype="0" conaffinity="0" pos="4.5 0 0.001" />
+    <geom type="plane" size="0.05 12 0.001" rgba="1 1 1 1" contype="0" conaffinity="0" pos="0 -5 0.001" />
+    <geom type="plane" size="0.05 12 0.001" rgba="1 1 1 1" contype="0" conaffinity="0" pos="0 5 0.001" />
     <body name="r1d_mount" pos="0 0 1" quat="1 0 0 0">
+      <body name="r1d_pedestal" pos="0 0 -0.5" quat="1 0 0 0">
+        <geom name="r1d_pedestal_column" type="box" size="0.16 0.16 0.5" rgba="0.20 0.22 0.26 1" contype="0" conaffinity="0" />
+        <geom name="r1d_pedestal_base" type="box" size="0.26 0.26 0.04" pos="0 0 -0.46" rgba="0.12 0.13 0.16 1" contype="0" conaffinity="0" />
+      </body>
       <body name="base_link">
         <inertial pos="-0.036099 -0.001092 -0.032797" mass="11.100" fullinertia="0.288407 0.347975 0.600225 0.000408 0.001695 0.000111" />
         <geom name="base_link_visual" type="mesh" mesh="base_link" contype="0" conaffinity="0" rgba="0.3098 0.3098 0.3098 1" />
@@ -68,6 +84,36 @@
                 <body name="waist_yaw_link">
                   <inertial pos="-0.000648 -0.000052 0.144497" mass="6.024198" fullinertia="0.060949 0.050645 0.024602 -0.000060 0.001044 -0.000164" />
                   <geom name="waist_yaw_link_visual" type="mesh" mesh="waist_yaw_link" contype="0" conaffinity="0" rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+                  <body name="r1d_base_right_passive">
+                    <body name="right_shoulder_pitch_Link" pos="0 -0.085688 0.19749" quat="0.987667522916 -0.130064371431 0.0864097115878 -0.0113791580288">
+                      <inertial pos="0.00294386 -0.04476868 -0.02286868" mass="0.83794992" fullinertia="0.00066072 0.00060170 0.00057741 0.00000492 0.00001580 -0.00005557" />
+                      <geom name="right_shoulder_pitch_Link_visual" type="mesh" mesh="right_shoulder_pitch_Link" contype="0" conaffinity="0" rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+                      <body name="right_shoulder_roll_link" pos="0.03445 -0.047132 -0.025693" quat="0.991449469144 -0.130491188082 0 0">
+                        <inertial pos="-0.037828 -0.003967 -0.066496" mass="0.740212" fullinertia="0.000971 0.001089 0.000573 0.000004 0.000101 -0.000022" />
+                        <geom name="right_shoulder_roll_link_visual" type="mesh" mesh="right_shoulder_roll_link" contype="0" conaffinity="0" rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+                        <body name="right_shoulder_yaw_link" pos="-0.03445 -0.0043 -0.10835" quat="1 0 0 0">
+                          <inertial pos="0.013143 0.004355 -0.072948" mass="0.738441" fullinertia="0.000829 0.000852 0.000469 -0.000015 0.000108 0.000035" />
+                          <geom name="right_shoulder_yaw_link_visual" type="mesh" mesh="right_shoulder_yaw_link" contype="0" conaffinity="0" rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+                          <body name="right_elbow_link" pos="0.016191 -0.026461 -0.082858" quat="0.906307787037 0 0.422618261741 0">
+                            <inertial pos="0.072371 0.024612 -0.011566" mass="0.759419" fullinertia="0.000550 0.000892 0.000936 -0.000179 0.000030 0.000017" />
+                            <geom name="right_elbow_link_visual" type="mesh" mesh="right_elbow_link" contype="0" conaffinity="0" rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+                            <body name="right_wrist_roll_link" pos="0.11218 0.03002 -0.011702" quat="1 0 0 0">
+                              <inertial pos="0.0418 0.0057 0.0003" mass="0.3697" fullinertia="0.0002657969 0.0003512210 0.0003634538 0.0000004357 -0.0000031025 -0.0000008770" />
+                              <geom name="right_wrist_roll_link_visual" type="mesh" mesh="right_wrist_roll_link" contype="0" conaffinity="0" rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+                              <body name="right_wrist_pitch_link" pos="0.1057 0.028757 -0.0037491" quat="0.996194698092 0 -0.0871557427477 0">
+                                <inertial pos="0.0078 -0.0273 0.0012" mass="0.1066" fullinertia="0.0000592753 0.0000546423 0.0000689985 0.0000006548 -0.0000001728 -0.0000004180" />
+                                <geom name="right_wrist_pitch_link_visual" type="mesh" mesh="right_wrist_pitch_link" contype="0" conaffinity="0" rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+                                <body name="right_wrist_yaw_link" pos="0.009848 -0.031494 -0.017245" quat="1 0 0 0">
+                                  <inertial pos="0.0016 0.0163 0.0249" mass="0.1091" fullinertia="0.0001206533 0.0000917159 0.0000717545 0.0000001684 -0.0000031385 0.0000026735" />
+                                  <geom name="right_wrist_yaw_link_visual" type="mesh" mesh="right_wrist_yaw_link" contype="0" conaffinity="0" rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+                                </body>
+                              </body>
+                            </body>
+                          </body>
+                        </body>
+                      </body>
+                    </body>
+                  </body>
                   <body name="r1d_base">
                     <body name="left_shoulder_pitch_Link" pos="0 0.085688 0.19749" quat="0.9914402524 0.1305611962 0 0">
                       <joint name="left_shoulder_pitch_joint" type="hinge" axis="0 1 0" range="-180.0004209 120.0002806" />
@@ -101,6 +147,8 @@
                                   <body name="r1d_racket" pos="0.0485 -0.003 0.27" quat="1 0 0 0">
                                     <inertial pos="0 0 0" mass="0.3" diaginertia="0.0010825 0.0010825 0.00216" />
                                     <geom name="racket_face" type="cylinder" size="0.12 0.005" rgba="0.9 0.9 0.25 1" contype="0" conaffinity="0" />
+                                    <geom name="racket_face_visual" type="ellipsoid" size="0.12 0.12 0.005" rgba="0.92 0.88 0.30 1" contype="0" conaffinity="0" />
+                                    <geom name="racket_handle" type="capsule" fromto="0 0 -0.25 0 0 -0.03" size="0.012" rgba="0.16 0.17 0.20 1" contype="0" conaffinity="0" />
                                     <site name="racket_center" pos="0 0 0" size="0.005" />
                                   </body>
                                 </body>
@@ -118,7 +166,7 @@
         </body>
       </body>
       <body name="r1d_torso" pos="-0.25 0 -0.3">
-        <geom name="torso_box" type="box" size="0.15 0.2 0.3" rgba="0.55 0.57 0.6 1" contype="0" conaffinity="0" />
+        <geom name="torso_box" type="box" size="0.15 0.2 0.3" rgba="0.55 0.57 0.6 0" contype="0" conaffinity="0" />
       </body>
     </body>
   </worldbody>

@@ -229,7 +229,7 @@ mujoco_sim/
 │   ├── test/           # 快速验证 10 个
 │   ├── archive/        # ★ 已归档脚本（V6-V10 + tube + 旧实验，详见 archive/README.md）
 │   └── README.md       # 完整清单与说明
-├── tests/                             # 单元测试（全量 1240 passed + 2 skipped，89 个测试文件；2 个 C++ 测试文件因扩展 ABI 不匹配不可收集，全量运行用 --ignore 排除，见 docs/experiments/reports/）
+├── tests/                             # 单元测试（全量 1271 passed，0 skipped，89 个测试文件；C++ 扩展已本地编译，直接 pytest tests/ 即可）
 │   ├── test_kinematics.py
 │   ├── test_linearize.py
 │   ├── test_mpc.py
@@ -457,8 +457,8 @@ mujoco_sim/
 - 真机入口机器人描述: 追加 `--robot-config configs/robots/rm65.yaml`（默认即此文件，显式与缺省行为一致；阶段 1 仅支持 RM65）
 - TCP 软惩罚实验: 追加 `--Q-tcp-soft 5000`（默认 0 禁用）
 - 关节安全扫描: `python scripts/scan_joint_safety.py`
-- R1D 单臂闭环仿真（阶段 3，离线）: `python scripts/rm65_mpc_v12.py --robot-config configs/robots/r1d_left.yaml --runtime-config configs/robots/r1d_sim_runtime_left.yaml --sim-task-config configs/r1d_sim_left.yaml --output results/r1d_episode --seed 42 --no-plot`（右臂把 left 换成 right；R1D 路径只接受 --robot-config/--runtime-config/--sim-task-config/--output/--seed/--no-plot/--log-level，其余旧参数退出码 2）
-- R1D 固定可达案例（阶段 3 验收）: `configs/scenarios/r1d_stage3_reachable.yaml`（seed 42、expected_hit_type: active）
+- R1D 右臂闭环仿真（阶段 3，离线，双侧渲染）: `python scripts/rm65_mpc_v12.py --robot-config configs/robots/r1d_right.yaml --runtime-config configs/robots/r1d_sim_runtime_right.yaml --sim-task-config configs/r1d_sim_right.yaml --output results/r1d_episode_right --seed 42 --no-plot`（加 `--viewer` 在产物写完后 0.2× 慢放循环回放；R1D 路径只接受 --robot-config/--runtime-config/--sim-task-config/--output/--seed/--no-plot/--viewer/--log-level，其余旧参数退出码 2；左侧把 right 换成 left，仅作渲染/短回合验证）
+- R1D 固定可达案例（阶段 3 验收，右臂）: `configs/scenarios/r1d_stage3_reachable.yaml`（右臂三路径、seed 42、expected_hit_type: active）
 - 运行测试: `pytest tests/`
 - 代码检查: `ruff check src/ tests/ scripts/`
 - 类型检查: `mypy src/`
@@ -468,12 +468,13 @@ mujoco_sim/
   - 回零位: `python scripts/tools/test_real_robot/04_send_zero_pose.py`
   - 完整清单: `scripts/tools/test_real_robot/README.md`
 
-### R1-A7-D 单臂仿真（阶段 3）
+### R1-A7-D 双侧渲染 / 右臂控制（阶段 3）
 
 - 入口：`scripts/rm65_mpc_v12.py` 在 R1D 模式（`--robot-config` 指向 `configs/robots/r1d_*.yaml`）经 `src/sim/r1d_runner.py::run_r1d_episode` 执行「预测 → MPC/iLQR 重规划 → 安全滤波 → 仿真执行 → 物理接触判定」闭环，产物 `r1d_episode.json`（schema `r1d_sim_episode_v1`）+ `r1d_episode.npz`（`X(N+1,14)`/`U(N,7)`/`ball_pos(N+1,3)`/`ball_vel(N+1,3)`/`t(N+1)`）。
-- 配置分层：描述 `configs/robots/r1d_{left,right}.yaml`（阶段 2，非临时数值）；运行参数 `configs/robots/r1d_sim_runtime_{left,right}.yaml`（仿真临时值，全部 provisional）；仿真任务 `configs/r1d_sim_{left,right}.yaml`（来球/工作区/MPC/代价）；固定可达案例 `configs/scenarios/r1d_stage3_reachable.yaml`（seed 42、expected_hit_type: active）。
-- 本机实测（2026-11-16，Windows/py3.11/CPU）：左侧固定案例 seed 42 真实命中 `hit_type=active`（拍面接触速度 0.72 m/s > 0.3、击球帧球心—拍心距离 5.07 cm（`metrics.min_dist`=击球帧 pos_error；轨迹采样最小 4.58 cm）、111 控制步、`mpc_done=true`、禁止机身接触 0 帧），同配置同 seed 连跑 3 次逐位一致；右侧生产配置可真实跑通短回合但未命中（不宣称右侧命中）。规划耗时属离线仿真量级（生产配置首 plan ≈6.1–6.4 s、整回合 ≈7.9–10.8 s；调参前首 plan ≈11–14 s），**不得称实时**。
-- 验收状态：**阶段 3 已通过（2026-11-16）**——GF①–④ 由主代理在最终提交 `1711cbd` 上亲跑（全量 1240 passed + 2 skipped、闭环 4 passed、RM65 seed42 NPZ 逐字段与整文件 SHA 一致、ruff 仅 6 条基线 E702），GF⑤ 由独立终审 subagent 对 `754ccc0..1711cbd` 全分支包（55 files +14804/−357）裁决 **Approved**（0 Critical / 0 Important / 6 Minor，均非阻断）；证据见 `docs/experiments/reports/2026-11-16-unitree-stage3.md`。
+- 模型：单侧主动臂 + 对侧**无关节静态渲染臂**（对侧臂烘入待机姿态后删除 joint/actuator，`nq/nv/nu=7` 不变）；地面/白线/落地支撑柱按 RM65 配置加入模板。右臂为固定案例主动臂，左臂只作渲染/短回合验证。
+- 配置分层：描述 `configs/robots/r1d_{left,right}.yaml`（阶段 2，非临时数值）；运行参数 `configs/robots/r1d_sim_runtime_{left,right}.yaml`（仿真临时值，全部 provisional）；仿真任务 `configs/r1d_sim_{left,right}.yaml`（来球/工作区/MPC/代价）；固定可达案例 `configs/scenarios/r1d_stage3_reachable.yaml`（右臂三路径、seed 42、expected_hit_type: active）。
+- 本机实测（2026-11-18，Windows/py3.11/CPU）：右固定案例 seed 42 真实命中 `hit_type=active`（step 89、拍面接触速度 0.574 m/s > 0.3、击球帧球心—拍心距离 3.09 cm、111 控制步、`mpc_done=true`、禁止机身接触 0 帧），同配置同 seed 连跑 3 次逐位一致；左侧改为渲染/短回合验证（允许未命中）。规划耗时属离线仿真量级（右固定案例首 plan ≈6.5–8 s、整回合 ≈8–10 s），**不得称实时**。
+- 验收状态：阶段 3 初版于 2026-11-16 以左侧固定案例通过（历史证据见 `docs/experiments/reports/2026-11-16-unitree-stage3.md`）；2026-11-18 按“双侧渲染、右臂验收”重标定后，`tests/test_r1d_closed_loop.py` 4 passed（右固定案例 active + 3 次逐位一致、左短回合、RM65 回归），全量 `pytest tests/` **1271 passed, 0 skipped（148.67 s）**，`--viewer` 真实窗口标题 `MuJoCo : r1d_right_tennis_scene` 已验证；离屏渲染见 `results/r1d_episode_right/scene.png`。
 
 ## 批量实验架构
 

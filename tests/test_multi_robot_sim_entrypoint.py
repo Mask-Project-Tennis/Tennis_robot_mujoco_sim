@@ -25,6 +25,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 # 沿用 tests/test_robot_profile_entrypoint.py 的导入方式（scripts/ 入 sys.path）
@@ -272,7 +273,6 @@ class TestV12R1dExclusiveFlagsRejected:
             ["--async-replan"],
             ["--dump-trajectory", "x.npz"],
             ["--position-mode"],
-            ["--viewer"],
             ["--limits-config", "configs/real_robot.yaml"],
             ["--ablation", "none"],
         ],
@@ -336,7 +336,7 @@ class TestV12R1dExclusiveFlagsRejected:
 
 
 class TestV12SharedFlagsAccepted:
-    """共享基础参数（seed/no-plot/output/log-level）对 R1D 明确支持。"""
+    """共享基础参数（seed/no-plot/viewer/output/log-level）对 R1D 明确支持。"""
 
     def test_shared_flags_reach_runner(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -353,11 +353,13 @@ class TestV12SharedFlagsAccepted:
             output_dir: Path,
             *,
             seed: int | None = None,
+            viewer: bool = False,
         ) -> dict:
             calls["profile"] = profile_path
             calls["runtime"] = runtime_path
             calls["task"] = task_path
             calls["output"] = output_dir
+            calls["viewer"] = viewer
             return {"hit": {"type": "miss"}, "episode": {"total_steps": 0}}
 
         monkeypatch.setattr(v12, "run_r1d_episode", _fake_run)
@@ -367,7 +369,7 @@ class TestV12SharedFlagsAccepted:
             "--robot-config", str(PROFILE_LEFT),
             "--runtime-config", str(RUNTIME_LEFT),
             "--sim-task-config", str(TASK_LEFT),
-            "--seed", "42", "--no-plot", "--log-level", "WARNING",
+            "--seed", "42", "--no-plot", "--viewer", "--log-level", "WARNING",
             "--output", str(out_dir)
         ]
         args = parser.parse_args(argv)
@@ -377,6 +379,7 @@ class TestV12SharedFlagsAccepted:
         assert calls["runtime"] == RUNTIME_LEFT
         assert calls["task"] == TASK_LEFT
         assert calls["output"] == out_dir
+        assert calls["viewer"] is True
 
     def test_default_output_dir_resolved(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -519,7 +522,83 @@ class TestRunR1dEpisodeRejections:
 
 
 # ============================================================================
-#  4. run_r1d_episode：短回合产物（JSON + NPZ）
+#  4. R1D 回放（无显示环境用 fake viewer 验证状态写入）
+# ============================================================================
+
+
+class TestR1dReplay:
+    """R1D --viewer 回放函数：逐帧写状态并同步，不触碰真实窗口。"""
+
+    def test_replay_writes_arm_and_ball_frames(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """fake viewer 下至少写入一帧关节/球状态，并退出循环。"""
+        import mujoco.viewer
+        from src.sim.r1d_runner import _replay_r1d_episode
+
+        class _Cam:
+            def __init__(self) -> None:
+                self.distance = 0.0
+                self.elevation = 0.0
+                self.azimuth = 0.0
+                self.lookat = [0.0, 0.0, 0.0]
+
+        class _Viewer:
+            def __init__(self) -> None:
+                self.cam = _Cam()
+                self.checks = 0
+                self.synced = 0
+
+            def __enter__(self) -> "_Viewer":
+                return self
+
+            def __exit__(self, *args: object) -> bool:
+                return False
+
+            def is_running(self) -> bool:
+                self.checks += 1
+                return self.checks <= 4
+
+            def sync(self) -> None:
+                self.synced += 1
+
+        class _Execution:
+            model = object()
+            data = object()
+
+            def __init__(self) -> None:
+                self.arm: list[np.ndarray] = []
+                self.ball: list[tuple[np.ndarray, np.ndarray]] = []
+
+            def set_arm_state(self, x: np.ndarray) -> None:
+                self.arm.append(np.array(x))
+
+            def set_ball_state(
+                self, pos: np.ndarray, vel: np.ndarray
+            ) -> None:
+                self.ball.append((np.array(pos), np.array(vel)))
+
+        fake_viewer = _Viewer()
+        monkeypatch.setattr(
+            mujoco.viewer, "launch_passive",
+            lambda model, data: fake_viewer,
+        )
+        execution = _Execution()
+        _replay_r1d_episode(
+            execution,
+            np.zeros((3, 14)),
+            np.zeros((3, 3)),
+            np.zeros((3, 3)),
+            0.01,
+            speed=1000.0,
+        )
+        assert execution.arm
+        assert execution.ball
+        assert fake_viewer.synced >= 1
+
+
+# ============================================================================
+#  5. run_r1d_episode：短回合产物（JSON + NPZ）
 # ============================================================================
 
 

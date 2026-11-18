@@ -360,10 +360,12 @@ def _ensure_ball_names_free(
 def _arm_subtree_geoms(
     root: ET.Element, profile: RobotProfile, context: str
 ) -> list[ET.Element]:
-    """收集主动关节承载 body 及其全部后代 body 的 geom（臂链 + 拍）。
+    """收集主动关节承载 body 及其全部后代 body 的 geom（臂链）。
 
-    环境链等无主动关节的 body 不在其中（保持视觉掩码）。承载 body 数
-    必须等于主动关节数（一个 body 承载多个主动关节视为模板漂移）。
+    环境链等无主动关节的 body 不在其中（保持视觉掩码）。拍 body 的 geom
+    由 ``task.racket_geom_names`` 单独配置，这里整体跳过——否则球拍的
+    视觉拍面/拍柄会被误设为碰撞臂，产生非预期接触。承载 body 数必须
+    等于主动关节数（一个 body 承载多个主动关节视为模板漂移）。
 
     Raises:
         ValueError: 承载主动关节的 body 数与 active_joint_names 数不符。
@@ -379,10 +381,23 @@ def _arm_subtree_geoms(
             f"模板中承载主动关节的 body 数 {len(hosting)} 与关节数 "
             f"{len(profile.active_joint_names)} 不符（模板漂移，{context}）"
         )
+    # 拍 body 的 geom 已按 racket_geom_names 配掩码，整棵子树在此跳过；
+    # 否则新增的视觉拍面/拍柄会被当作碰撞臂，产生非预期接触。
+    racket_body = next(
+        (body for body in root.iter("body") if body.get("name") == "r1d_racket"),
+        None,
+    )
+    racket_geom_ids = (
+        {id(geom) for geom in racket_body.iter("geom")}
+        if racket_body is not None
+        else set()
+    )
     geoms: list[ET.Element] = []
     seen: set[int] = set()
     for body in hosting:
         for geom in body.iter("geom"):
+            if id(geom) in racket_geom_ids:
+                continue
             if id(geom) not in seen:  # 臂链嵌套时去重（外层已含后代）
                 seen.add(id(geom))
                 geoms.append(geom)

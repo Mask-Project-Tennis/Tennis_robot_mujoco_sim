@@ -31,23 +31,28 @@
 | `run_real_robot.py` | 真机入口（--robot-config 可选机器人描述，默认 configs/robots/rm65.yaml；描述加载/校验失败以日志+退出码 2 呈现） |
 | `replay_trajectory.py` | 轨迹回放（含 --speed 安全检查） |
 
-## R1D 单臂仿真入口（阶段 3）
+## R1D 单臂控制 + 双侧渲染入口（阶段 3）
 
 `scripts/rm65_mpc_v12.py` 同时是 R1-A7-D 单臂闭环仿真入口（实现委托 `src/sim/r1d_runner.py::run_r1d_episode`）。
-R1D 路径只接受 `--robot-config`/`--runtime-config`/`--sim-task-config`/`--output`/`--seed`/`--no-plot`/`--log-level`（其中 `--seed`/`--no-plot`/`--output`/`--log-level` 为共享基础参数，`--robot-config`/`--runtime-config`/`--sim-task-config` 为 R1D 专属配置项），其余 RM65 旧参数（`--serve-box`/`--position-mode`/`--async-replan`/`--fix-joint5`/`--dump-trajectory` 等）被拒绝（退出码 2）：
+R1D 路径只接受 `--robot-config`/`--runtime-config`/`--sim-task-config`/`--output`/`--seed`/`--no-plot`/`--viewer`/`--log-level`（其中 `--seed`/`--no-plot`/`--viewer`/`--output`/`--log-level` 为共享基础参数，`--robot-config`/`--runtime-config`/`--sim-task-config` 为 R1D 专属配置项），其余 RM65 旧参数（`--serve-box`/`--position-mode`/`--async-replan`/`--fix-joint5`/`--dump-trajectory` 等）被拒绝（退出码 2）：
 
 ```bash
 python scripts/rm65_mpc_v12.py \
-  --robot-config configs/robots/r1d_left.yaml \
-  --runtime-config configs/robots/r1d_sim_runtime_left.yaml \
-  --sim-task-config configs/r1d_sim_left.yaml \
-  --output results/r1d_episode --seed 42 --no-plot
+  --robot-config configs/robots/r1d_right.yaml \
+  --runtime-config configs/robots/r1d_sim_runtime_right.yaml \
+  --sim-task-config configs/r1d_sim_right.yaml \
+  --output results/r1d_episode_right --seed 42 --viewer
 ```
 
+> 批处理/无头环境把 `--viewer` 换成 `--no-plot`（R1D 下仅表示不回放；`--viewer` 会阻塞到窗口关闭）。
+
 - 三份 YAML 必须显式给出，侧别（left/right）与路径一致，否则退出码 2。
+- 模型为“单侧主动臂 + 对侧静态渲染臂”：右臂模板中左臂无关节/无执行器，只作为视觉挂件；`nq/nv/nu=7` 不变。两侧模板都带 RM65 checker 球场/白线与落地支撑柱。
 - 产物：`--output` 目录下 `r1d_episode.json`（schema `r1d_sim_episode_v1`：输入 SHA256、固定场景参数、hit/碰撞/耗时/指标）+ `r1d_episode.npz`（`X`(N+1,14)/`U`(N,7)/`ball_pos`/`ball_vel`(N+1,3)/`t`）。
-- 固定可达案例（阶段 3 验收）：`configs/scenarios/r1d_stage3_reachable.yaml`（`seed 42`，`expected_hit_type: active`；路径相对 scenario 文件解析）。
+- 可视化：加 `--viewer` 会在产物写完后用 MuJoCo 被动查看器循环回放（0.2× 慢放；窗口关闭后进程退出）。无图形环境时只记警告，不影响产物。
+- 固定可达案例（阶段 3 验收）：`configs/scenarios/r1d_stage3_reachable.yaml`（右臂三路径、`seed 42`、`expected_hit_type: active`；路径相对 scenario 文件解析）。
 - 离线仿真口径：单回合首 plan 约 6–14 s、整回合 8–14 s（Python 有限差分后端），非实时。
+- 左侧命令仍可运行（`--robot-config ... r1d_left.yaml` 等三份 left 配置），但左侧现在是渲染/短回合验证，不再承担固定案例验收。
 
 ## sim/ — 独立仿真（5 个）
 

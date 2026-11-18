@@ -48,6 +48,12 @@ docs/experiments/
 | exp17i | 限速×机制消融配对（Q5 主张证伪） | [design](design/exp17i_limits_ablation.md) | [2026-09-12](reports/2026-09-12_exp17i_limits_ablation.md) | ✅ |
 | exp18 | 图资产（计时 + NPZ） | — | [2026-09-11](reports/2026-09-11_exp18_fig_assets.md) | ✅ |
 
+### 工程扩展（非论文实验）
+
+| 编号 | 名称 | 设计 | 报告 | 状态 |
+|------|------|------|------|------|
+| ext-r1d | Unitree R1-A7-D 单臂适配（阶段 3） | [计划](../superpowers/plans/2026-11-14-unitree-adaptation-plan.md) | [2026-11-16](reports/2026-11-16-unitree-stage3.md) | ✅ 工程验收（论文仍 RM-65B） |
+
 ## 文档类型说明
 
 - **设计文档**（`design/expN_*.md`）：实验前编写，包含目的、假设、参数矩阵、脚本路径、对照分析

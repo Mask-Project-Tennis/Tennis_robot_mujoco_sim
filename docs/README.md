@@ -29,6 +29,7 @@ docs/
 | `cpp_acceleration.md` | C++ 扩展：编译、pybind11 绑定、线性化加速 | 性能优化 |
 | `rm65_evaluate_usage.md` | 评估脚本：反弹球模式、图表生成 | 运行评估 |
 | `rm65_mpc_fast_group_report.md` | 快速版方法框架，面向组会汇报 | 组会准备 |
+| `experiments/reports/2026-11-16-unitree-stage3.md` | Unitree R1-A7-D 单臂适配（阶段 3）工程验收：右臂固定案例、双侧渲染、与论文 RM-65B 的边界 | 工程验收 / 后续维护 |
 
 ## 实验文档
 

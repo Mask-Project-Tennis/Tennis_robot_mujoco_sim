@@ -94,6 +94,7 @@ def run_r1d_episode(
     output_dir: Path,
     *,
     seed: int | None = None,
+    viewer: bool = False,
 ) -> dict[str, Any]:
     """运行一个 R1D 仿真击球回合并写 JSON+NPZ 产物。
 
@@ -107,6 +108,8 @@ def run_r1d_episode(
         task_path: 仿真任务 YAML（SimTaskConfig schema v1）。
         output_dir: 产物输出目录（不存在则创建；产物固定命名，重复运行覆盖）。
         seed: 可选随机种子（当前 R1D 仿真无随机源，仅记录进产物供追溯）。
+        viewer: 回合结束后是否用 MuJoCo 被动查看器循环回放（仅可视化，
+            不改变 JSON/NPZ 产物；无图形环境时记录警告后跳过）。
 
     Returns:
         可 JSON 序列化的回合指标 dict（与 JSON 产物同构）。
@@ -229,6 +232,14 @@ def run_r1d_episode(
     _write_outputs(
         Path(output_dir), result, sim_component, ball_vel_history, dt
     )
+    if viewer:
+        _replay_r1d_episode(
+            execution,
+            np.asarray(sim_component.X_history, dtype=np.float64),
+            np.asarray(sim_component.ball_pos_history, dtype=np.float64),
+            np.asarray(ball_vel_history, dtype=np.float64),
+            dt,
+        )
     logger.info(
         "R1D 回合结束: steps=%s safe=%s hit=%s，产物已写入 %s",
         result["episode"]["total_steps"], result["episode"]["safe_steps"],
@@ -538,6 +549,72 @@ def _write_outputs(
     logger.debug(
         "产物写出: %s（X %s, U %s）", output_dir / _NPZ_NAME, X.shape, U.shape
     )
+
+
+def _replay_r1d_episode(
+    execution: Any,
+    X: np.ndarray,
+    ball_pos: np.ndarray,
+    ball_vel: np.ndarray,
+    dt: float,
+    *,
+    speed: float = 0.2,
+) -> None:
+    """用 MuJoCo 被动查看器循环回放 R1D 回合（慢放，仅可视化）。
+
+    Args:
+        execution: ``ProfileSimEnv`` 执行环境（提供 model/data 与
+            ``set_arm_state``/``set_ball_state``）。
+        X: 关节状态序列，形状 ``(N+1, 14)``。
+        ball_pos: 球位置序列，形状 ``(N+1, 3)``。
+        ball_vel: 球速度序列，形状 ``(N+1, 3)``。
+        dt: 物理步长（秒）。
+        speed: 播放倍率（默认 0.2，即 5 倍慢放；R1D 回合物理时长仅
+            约 0.5 s，真实速度会一闪而过）。
+
+    Returns:
+        None。窗口关闭或无法启动查看器时返回（后者只记警告）。
+    """
+    try:
+        import mujoco.viewer
+    except ImportError as exc:  # pragma: no cover - 依赖缺失的防御分支
+        logger.warning("无法导入 mujoco.viewer，跳过 R1D 回放: %s", exc)
+        return
+
+    n = min(len(X), len(ball_pos), len(ball_vel))
+    if n <= 0:
+        logger.warning("R1D 回放无有效帧，跳过")
+        return
+
+    playback_speed = max(float(speed), 1e-3)
+    try:
+        with mujoco.viewer.launch_passive(
+            execution.model, execution.data
+        ) as viewer:
+            viewer.cam.distance = 2.8
+            viewer.cam.elevation = -15.0
+            viewer.cam.azimuth = 135.0
+            viewer.cam.lookat[:] = (0.0, 0.0, 0.8)
+
+            start = time.perf_counter()
+            last_frame = -1
+            while viewer.is_running():
+                frame = int((time.perf_counter() - start) * playback_speed / dt)
+                if frame >= n:
+                    # 末帧停留约 0.8 s，然后从头循环，方便反复观察
+                    if frame >= n + int(0.8 / dt):
+                        start = time.perf_counter()
+                        frame = 0
+                    else:
+                        frame = n - 1
+                if frame != last_frame:
+                    execution.set_arm_state(X[frame])
+                    execution.set_ball_state(ball_pos[frame], ball_vel[frame])
+                    viewer.sync()
+                    last_frame = frame
+                time.sleep(0.005)
+    except Exception as exc:  # pragma: no cover - 无显示/驱动异常时不影响产物
+        logger.warning("R1D 回放窗口启动失败（产物已正常写出）: %s", exc)
 
 
 def _sha256_file(path: Path) -> str:

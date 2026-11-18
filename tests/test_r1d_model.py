@@ -398,7 +398,8 @@ def test_racket_transform_and_inertia(side: str) -> None:
     _, rot2 = _fk_site(tilted.model, tilted.binding, params.init_q, "racket_center")
     np.testing.assert_allclose(rot2, flange_rot @ _RX90, atol=1e-9)
 
-    # 圆盘惯量闭式公式（默认与自定义参数均须满足）；单一 geom 不双重计质量
+    # 圆盘惯量闭式公式（默认与自定义参数均须满足）；显式 inertial 不双重计质量。
+    # 球拍现含 3 个 geom：racket_face 碰撞代理 + 视觉拍面 + 拍柄（后两者 contype=0）
     bundles = [
         default,
         _bundle_with_scene(
@@ -417,7 +418,7 @@ def test_racket_transform_and_inertia(side: str) -> None:
         np.testing.assert_allclose(
             bundle.model.body_inertia[rid], [ixx, ixx, izz], atol=1e-12
         )
-        assert int(bundle.model.body_geomnum[rid]) == 1
+        assert int(bundle.model.body_geomnum[rid]) == 3
 
 
 @pytest.mark.parametrize("side", SIDES)
