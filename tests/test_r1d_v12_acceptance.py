@@ -11,7 +11,7 @@
   且 `distance_m <= 0` 的真实拍面接触事件；
 * 同一物理步 `face_speed_m_s > 0.3`；
 * `episode.failure_reason is None`（触前无 safety_filter_stop / ball_unreachable）；
-* 固定案例确定论：接触步、拍速、距离、回合步数与冻结期望逐位一致；
+* 固定案例确定论：接触步、拍速、距离、回合步数与当前平台的冻结期望逐位一致；
 * 产物 `input_sha256` 与冻结场景文件记录的哈希一致（证明用的就是冻结物理配置）。
 
 本测试只跑固定 seed 42 两回合（约 1.5–2 分钟）；20 回合留出集是
@@ -39,6 +39,7 @@ pytest.importorskip("mujoco")
 import rm65_mpc_v12 as v12  # noqa: E402
 from src.sim.episode_artifacts import write_episode_artifacts  # noqa: E402
 from src.sim.v12_episode import run_v12_episode  # noqa: E402
+from src.utils.platform_tag import platform_tag  # noqa: E402
 
 SCENARIO_PATH = ROOT / "configs" / "scenarios" / "r1d_v12_active.yaml"
 SCENARIO: dict[str, Any] = yaml.safe_load(SCENARIO_PATH.read_text(encoding="utf-8"))
@@ -96,6 +97,31 @@ def _face_contact_events(payload: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
+def _expected_for_platform(mode: str) -> dict[str, Any]:
+    """取当前平台的冻结期望值（未记录的平台显式 skip）。
+
+    逐位冻结值依赖编译器浮点归约顺序（Windows/MSVC 与 Linux/g++ 相差
+    1e-8~1e-5）。仓库只在 ``windows-amd64`` 与 ``linux-x86_64`` 记录过，
+    其它平台必须显式跳过，不得退回 Windows 值造成假失败。
+
+    Args:
+        mode: ``torque`` 或 ``position``。
+
+    Returns:
+        该平台 ``modes.<mode>.expected_by_platform.<tag>`` 的副本。
+    """
+    mode_cfg = SCENARIO["modes"][mode]
+    by_platform = mode_cfg.get("expected_by_platform") or {}
+    tag = platform_tag()
+    if tag in by_platform:
+        return dict(by_platform[tag])
+    if by_platform:
+        pytest.skip(
+            f"未记录平台 {tag} 的冻结期望值（已记录：{sorted(by_platform)}）"
+        )
+    return dict(mode_cfg["expected"])
+
+
 def _run_and_write(mode: str, tmp_path: Path) -> dict[str, Any]:
     """跑固定案例一回合并写 T6 v2 产物，返回 JSON payload。"""
     config = _resolve_mode_config(mode)
@@ -110,7 +136,7 @@ def _run_and_write(mode: str, tmp_path: Path) -> dict[str, Any]:
 def test_frozen_seed42_real_active_face_contact(mode: str, tmp_path: Path) -> None:
     """两模式固定 seed42：真实拍面物理接触 + 同物理步拍速 > 0.3 + 无安全拒绝。"""
     payload = _run_and_write(mode, tmp_path)
-    expected = SCENARIO["modes"][mode]["expected"]
+    expected = _expected_for_platform(mode)
     hit = payload["hit"]
     episode = payload["episode"]
 
@@ -158,18 +184,46 @@ def test_frozen_seed42_real_active_face_contact(mode: str, tmp_path: Path) -> No
 
 
 def test_frozen_scenario_metadata_consistent() -> None:
-    """冻结场景文件自洽性：两模式 expected seed 相同、dev=42、留出集不重叠。"""
+    """冻结场景自洽性：dev/留出集、两模式期望、平台表字段与物理结论一致。"""
+    assert SCENARIO["schema_version"] == 2
     assert SCENARIO["dev_seed"] == 42
     assert SCENARIO["holdout_seeds"] == list(range(10))
     assert SCENARIO["dev_seed"] not in SCENARIO["holdout_seeds"]
     for mode in ("torque", "position"):
-        expected = SCENARIO["modes"][mode]["expected"]
+        mode_cfg = SCENARIO["modes"][mode]
+        expected = mode_cfg["expected"]
         assert int(expected["seed"]) == SCENARIO["dev_seed"]
         assert expected["physical_hit"] is True
         assert expected["physical_hit_type"] == "active"
         assert float(expected["face_speed_m_s"]) > _MIN_ACTIVE_FACE_SPEED_M_S
         assert float(expected["contact_distance_m"]) <= 0.0
         assert expected["failure_reason"] is None
+
+        by_platform = mode_cfg.get("expected_by_platform") or {}
+        # 至少记录 Linux（主平台）与 Windows（源机），且本机必须被覆盖
+        assert {"linux-x86_64", "windows-amd64"} <= set(by_platform)
+        assert platform_tag() in by_platform
+        for tag, entry in by_platform.items():
+            # 字段必须与 expected 完全同构，避免漏填时静默退回 base 值
+            assert set(entry) == set(expected), (
+                f"{mode}/{tag} 字段与 expected 不一致"
+            )
+            assert int(entry["seed"]) == SCENARIO["dev_seed"]
+            assert entry["physical_hit"] is True
+            assert entry["physical_hit_type"] == "active"
+            assert float(entry["face_speed_m_s"]) > _MIN_ACTIVE_FACE_SPEED_M_S
+            assert float(entry["contact_distance_m"]) <= 0.0
+            assert entry["failure_reason"] is None
+            # 跨平台只允许浮点末位差：接触步/回合长度/接触几何名必须一致
+            for key in (
+                "physical_hit_step",
+                "total_steps",
+                "contact_surface_kind",
+                "contact_other_geom_name",
+            ):
+                assert entry[key] == expected[key], (
+                    f"{mode}/{tag}:{key} 跨平台不一致"
+                )
     # 两模式共用同一物理配置文件（不得按模式/seed 换拍或目标区）
     common = SCENARIO["common_physical"]
     assert common["robot_profile"] == "configs/robots/r1d_right.yaml"

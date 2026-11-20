@@ -4,7 +4,7 @@
 
 * RM65 共享管线冒烟（n=6、X/U 形状、hit_type 集合、不依赖 active）；
 * R1D overlay 冒烟（n=7、joint_names 7、球自由关节地址不截断、允许 miss）；
-* RM65 输出保真（``__RESULT__``/打印块 + T0 基线 NPZ 逐位对照）；
+* RM65 输出保真（``__RESULT__``/打印块 + 本平台 T0 基线 NPZ 逐位对照）；
 * 旧 ``run_r1d_episode`` 产物兼容（mappingproxy 回归：``fixed_scene_params``
   可 JSON 序列化且 ``fixed_joint_poses`` 键值保留）；
 * ``SimComponent`` 接近半径参数化（RM65 缺省 0.033/0.12/0.03；R1D 由
@@ -46,12 +46,16 @@ from src.sim.v12_episode import run_v12_episode  # noqa: E402
 from src.sim.v12_robot_adapter import build_v12_robot  # noqa: E402
 from src.robot.robot_profile import load_robot_profile  # noqa: E402
 from src.robot.runtime_parameters import load_runtime_parameters  # noqa: E402
+from src.utils.platform_tag import platform_tag  # noqa: E402
 
 _R1D_RIGHT_PROFILE = ROOT / "configs" / "robots" / "r1d_right.yaml"
 _R1D_RIGHT_RUNTIME = ROOT / "configs" / "robots" / "r1d_v12_runtime_right.yaml"
-_T0_TORQUE_BASELINE = (
-    ROOT / "results" / "r1d_v12_parity" / "baseline" / "rm65_torque_a.npz"
+# T0 逐位基线按平台存放：MSVC 与 g++ 的浮点归约顺序不同，
+# 同一命令在不同平台会有 1e-6~1e-5 级差异（见 baseline/cross_platform_*.json）。
+_PLATFORM_BASELINE_DIR = (
+    ROOT / "results" / "r1d_v12_parity" / "baseline" / "platforms" / platform_tag()
 )
+_T0_TORQUE_BASELINE = _PLATFORM_BASELINE_DIR / "rm65_torque_a.npz"
 
 _RM65_SHORT_ARGV = [
     "--serve-box",
@@ -315,7 +319,7 @@ def test_rm65_torque_matches_t0_baseline(tmp_path: Path) -> None:
     if not _T0_TORQUE_BASELINE.is_file():
         # results/ 被 gitignore：干净 clone 无 T0 基线产物时必须显式 skip，
         # 而不是收集期静默跳过（复审 B2 非阻断项）。
-        pytest.skip("T0 baseline artifacts not present")
+        pytest.skip(f"T0 baseline artifacts not present for {platform_tag()}")
     out = tmp_path / "rm65_torque_new.npz"
     cmd = [
         sys.executable, str(SCRIPTS_DIR / "rm65_mpc_v12.py"),
@@ -345,15 +349,13 @@ def test_rm65_torque_matches_t0_baseline(tmp_path: Path) -> None:
     _compare_npz_bitwise(_T0_TORQUE_BASELINE, out)
 
 
-_T0_POSITION_BASELINE = (
-    ROOT / "results" / "r1d_v12_parity" / "baseline" / "rm65_position_a.npz"
-)
+_T0_POSITION_BASELINE = _PLATFORM_BASELINE_DIR / "rm65_position_a.npz"
 
 
 def test_rm65_position_matches_t0_baseline(tmp_path: Path) -> None:
     """T0 基线命令（position seed42）经新管线复跑后逐位一致。"""
     if not _T0_POSITION_BASELINE.is_file():
-        pytest.skip("T0 baseline artifacts not present")
+        pytest.skip(f"T0 baseline artifacts not present for {platform_tag()}")
     out = tmp_path / "rm65_position_new.npz"
     cmd = [
         sys.executable, str(SCRIPTS_DIR / "rm65_mpc_v12.py"),

@@ -55,13 +55,22 @@ python scripts/rm65_mpc_v12.py --serve-box --ball-speed 7 --viewer --position-mo
 python scripts/rm65_mpc_v12.py --serve-box --ball-speed 9 --no-plot
 ```
 
-T0 基线证据（seed 42，2026-11-19）：
+T0 基线证据（seed 42；2026-11-19 首冻于 Windows，2026-11-20 在 Linux 复现）：
 
-- torque：`hit_type=active, pos_error=0.118449, min_dist=0.108581, v_racket=1.486`；
-- position：`hit_type=active, pos_error=0.149508, min_dist=0.149508, v_racket=1.659`；
-- 两模式重复运行 npz 逐键相同（`all_equal=true`，`max_abs_diff=0.0`）；
-- 证据：`results/r1d_v12_parity/baseline/` 与
-  `experiment_data/r1d_v12_parity/baseline/manifest.json`。
+- 逐位基线按平台存放：`results/r1d_v12_parity/baseline/platforms/<platform_tag>/`
+  （`linux-x86_64` 为主平台，`windows-amd64` 保留源机证据；标签见
+  `src/utils/platform_tag.py`）；
+- 同平台重复运行 npz 逐键相同（两模式 `all_equal=true`，`max_abs_diff=0.0`）；
+- 跨平台只差浮点末位：RM65 torque `u` 最大 1.3e-6、`ball_pos` 2.0e-8；
+  position `q_desired` 9.2e-5、`ball_pos` 1.2e-5；证据
+  `baseline/cross_platform_{torque,position}.json`；
+- `__RESULT__`（Linux 实测，除 `first_plan_ms` 墙钟外与 Windows 一致）：
+  torque `pos_error=0.118449, min_dist=0.108581, v_racket=1.486`；
+  position `pos_error=0.149509, min_dist=0.149509, v_racket=1.659`；
+- R1D 固定案例期望值按平台记录：
+  `configs/scenarios/r1d_v12_active.yaml::modes.*.expected_by_platform`；
+- manifest v2：`experiment_data/r1d_v12_parity/baseline/manifest.json`
+  （`primary_platform=linux-x86_64`，含 `platforms`/`cross_platform` 与 T0 历史快照）。
 
 ## 4. R1D 固定案例（硬验收）
 
@@ -337,7 +346,7 @@ smoke 规模，未跑完整批量。
 | 实施计划 | `docs/superpowers/plans/2026-11-18-r1d-v12-parity-implementation.md` |
 | 施工方案 | `docs/superpowers/plans/2026-11-19-r1d-v12-parity-construction.md` |
 | 论文矩阵 | `docs/experiments/design/r1d_v12_parity_matrix.md` |
-| T0 基线 | `results/r1d_v12_parity/baseline/`、`experiment_data/r1d_v12_parity/baseline/` |
+| T0 基线 | `results/r1d_v12_parity/baseline/`（`platforms/<platform_tag>/` + `manifest.json`）、`experiment_data/r1d_v12_parity/baseline/manifest.json` |
 | T7 报告 | `docs/experiments/reports/2026-11-18-r1d-v12-parity.md` |
 | T7 留出集 | `experiment_data/r1d_v12_parity/validation/` |
 | T8 smoke | `experiment_data/r1d_v12_parity/paper_smoke/`、`results/r1d_v12_parity/paper_smoke/` |

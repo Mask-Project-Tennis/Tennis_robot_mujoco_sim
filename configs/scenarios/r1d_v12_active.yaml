@@ -17,7 +17,11 @@
 #     position 模式用 PD 执行器阻尼，允许默认随挥。
 #   - 本文件不写入 src/；模型 XML/URDF/资产未修改（阻尼/armature 是 V12 R1D
 #     路径的显式估计仿真参数，见 src/sim/v12_robot_adapter.py 中常量注释）。
-schema_version: 1
+#   - schema_version 2（2026-11-20）：新增 expected_by_platform。同一物理配置在
+#     Windows/MSVC 与 Linux/g++ 上存在 1e-8~1e-5 的浮点末位差，逐位冻结值必须按
+#     平台记录；Linux 为本机主平台（primary），Windows 源机值保留用于跨平台对照。
+#     跨平台差异证据：results/r1d_v12_parity/baseline/cross_platform_*.json。
+schema_version: 2
 scenario_id: r1d_v12_active
 frozen_at: "2026-11-19"
 robot_id: unitree_r1d
@@ -69,6 +73,31 @@ modes:
       face_speed_m_s: 1.7893074935443316
       failure_reason: null
       total_steps: 270
+    # 平台特定冻结值（同一命令、同一 seed；仅浮点末位随编译器不同）。
+    # 键必须覆盖 expected 的全部字段；测试按 src/utils/platform_tag.py 选择。
+    expected_by_platform:
+      windows-amd64:
+        seed: 42
+        physical_hit: true
+        physical_hit_type: active
+        physical_hit_step: 259
+        contact_surface_kind: face
+        contact_other_geom_name: racket_face
+        contact_distance_m: -0.007511913687315908
+        face_speed_m_s: 1.7893074935443316
+        failure_reason: null
+        total_steps: 270
+      linux-x86_64:
+        seed: 42
+        physical_hit: true
+        physical_hit_type: active
+        physical_hit_step: 259
+        contact_surface_kind: face
+        contact_other_geom_name: racket_face
+        contact_distance_m: -0.007511915739458842
+        face_speed_m_s: 1.7893074867918355
+        failure_reason: null
+        total_steps: 270
   position:
     actuator_mode: position
     overrides:
@@ -88,6 +117,29 @@ modes:
       face_speed_m_s: 0.8411927736480601
       failure_reason: null
       total_steps: 318
+    expected_by_platform:
+      windows-amd64:
+        seed: 42
+        physical_hit: true
+        physical_hit_type: active
+        physical_hit_step: 255
+        contact_surface_kind: face
+        contact_other_geom_name: racket_face
+        contact_distance_m: -0.00543653547638882
+        face_speed_m_s: 0.8411927736480601
+        failure_reason: null
+        total_steps: 318
+      linux-x86_64:
+        seed: 42
+        physical_hit: true
+        physical_hit_type: active
+        physical_hit_step: 255
+        contact_surface_kind: face
+        contact_other_geom_name: racket_face
+        contact_distance_m: -0.005436535392881758
+        face_speed_m_s: 0.8411927735828576
+        failure_reason: null
+        total_steps: 318
 
 # 冻结运行产物中的输入配置哈希（T6 产物 input_sha256；同一组文件两模式一致）
 input_sha256:
