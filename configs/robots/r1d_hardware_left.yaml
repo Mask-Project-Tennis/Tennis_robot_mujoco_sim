@@ -1,0 +1,74 @@
+# =====================================================================
+# R1-A7-D 左臂硬件配置模板 — 阶段 4 Task 4.2
+# ---------------------------------------------------------------------
+# 用途：真机部署侧硬件参数的唯一来源（与仿真运行参数
+#       configs/robots/r1d_sim_runtime_left.yaml 严格分开）。
+# 规则（施工计划 Global Constraints）：
+#   - 实物校准（sign/offset）与实机限值初始 null，null 禁止用猜测值、
+#     示例值或仿真 provisional 数值代填；待 4.9 现场只读核对后回填。
+#   - purpose 门槛（src/real/r1d_config.py::validate_r1d_hardware_config）：
+#       offline   模板即可通过（结构可解析）；
+#       read_only 需 network_interface 非 null 且 layout_verified: true；
+#       motion    另需校准/限值 verified 且非 null、timing 三项正有限。
+# 协议事实来源：configs/robots/r1d_protocol_manifest.yaml（Task 4.1 冻结，
+# 证据链见 docs/experiments/reports/2026-11-16-r1d-sdk-control-contract.md）。
+# =====================================================================
+
+schema_version: 1
+robot_id: unitree_r1d
+side: left                     # 侧别经文件路径显式表达，无隐式默认侧
+
+# ---------------------------------------------------------------------
+# DDS 通信参数（manifest dds 节）
+# ---------------------------------------------------------------------
+communication:
+  dds_domain: 0                # 双侧官方示例固定 domain 0 [公开示例]
+  network_interface: null      # 待确认：现场实际网卡名（示例为命令行参数，如 enp2s0）
+  lowcmd_topic: "rt/lowcmd"    # 协议冻结（hg LowCmd_，35 槽）
+  lowstate_topic: "rt/lowstate"  # 协议冻结（hg LowState_，35 槽）
+
+# ---------------------------------------------------------------------
+# 整机槽位布局：模型关节名 -> SDK 槽位（按名称寻址，不依赖前缀/顺序）
+# 槽位值 = 官方双侧 A7 示例 joint_idx_in_idl（左臂 15-21）[公开示例] 级证据；
+# layout_verified 置 true 须待 4.9 现场逐关节只读核对。
+# ---------------------------------------------------------------------
+layout:
+  layout_verified: false       # 待 4.9 现场核对后置 true
+  joint_slots:
+    left_shoulder_pitch_joint: 15
+    left_shoulder_roll_joint: 16
+    left_shoulder_yaw_joint: 17
+    left_elbow_joint: 18
+    left_wrist_roll_joint: 19
+    left_wrist_pitch_joint: 20
+    left_wrist_yaw_joint: 21
+
+# ---------------------------------------------------------------------
+# 实物校准（模型 <-> SDK 坐标换算：q_sdk = sign*q_model + offset；
+#           dq_model = sign*dq_sdk，速度不加偏置）
+# sign 仅 ±1；offset 单位 rad。两者必须同时提供或同时为 null。
+# ---------------------------------------------------------------------
+calibration:
+  verified: false              # 待实测/核验后置 true（provisional 不得置 true）
+  joint_signs: null            # 待确认：每关节 {name: +1/-1}，实机方向核对（4.9）
+  joint_offsets_rad: null      # 待确认：每关节 {name: rad}，实测零位偏移（4.9）
+
+# ---------------------------------------------------------------------
+# 实机限值（每关节 {name: value}，未知为 null；不得复制仿真 provisional 数值）
+# ---------------------------------------------------------------------
+limits:
+  verified: false              # 待现场核验后置 true
+  q_lower_rad: null            # 待确认：每关节位置下限 rad（实机来源）
+  q_upper_rad: null            # 待确认：每关节位置上限 rad（实机来源）
+  dq_limit_rad_s: null         # 待确认：每关节速度限值 rad/s
+  tau_limit_nm: null           # 待确认：每关节力矩限值 N·m
+  kp_nm_per_rad: null          # 待确认：每关节位置增益 N·m/rad（lowcmd kp）
+  kd_nms_per_rad: null         # 待确认：每关节速度增益 N·m·s/rad（lowcmd kd）
+
+# ---------------------------------------------------------------------
+# 时间参数（null = 待现场冻结；非 null 只接受正有限值）
+# ---------------------------------------------------------------------
+timing:
+  control_period_s: null       # 待确认：官方示例 0.002（500 Hz）仅示例事实，非本项目承诺
+  state_timeout_s: null        # 待确认：状态新鲜度超时（4.4 缓存/4.6 看门狗）
+  diagnostic_duration_s: null  # 待确认：诊断工具单次时长（4.8）

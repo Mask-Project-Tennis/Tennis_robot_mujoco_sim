@@ -43,3 +43,17 @@ docs/
 
 - **设计文档**（`experiments/design/`）：实验前编写，含目的、假设、参数矩阵
 - **实验报告**（`experiments/reports/`）：实验后生成，含结果统计与分析结论
+
+### Unitree R1-A7-D 阶段报告
+
+| 报告 | 内容 |
+|------|------|
+| `experiments/reports/2026-11-14-unitree-stage1.md` | 阶段 1 验收报告：多机器人描述加载层（RobotProfile/ModelBinding/入口隔离；含评审勘误后状态） |
+| `experiments/reports/2026-11-16-unitree-stage2.md` | 阶段 2 验收报告：R1-A7-D 模型与运动学链（参数层/安全加载器/双侧场景/运动学/预览 CLI） |
+| `experiments/reports/2026-11-16-unitree-stage3.md` | 阶段 3 验收报告：R1D 七维仿真管线与多机器人入口（含 baseline 数据报告与固定可达案例） |
+| `experiments/reports/2026-11-16-r1d-sdk-control-contract.md` | R1D SDK 控制契约调研报告（G1 决策表：话题/IDL 布局/CRC/控制权生命周期证据链） |
+| `experiments/reports/2026-11-17-unitree-stage4.md` | 阶段 4 报告：R1-A7-D 单臂驱动软件层（G0-G5 门槛状态、十二切片明细、回归/ruff 实测、阶段 5 交接；评审后状态=实现完成、验收评审已裁决并修复、待实机验收） |
+| `experiments/reports/2026-11-17-stage4-review.md` | 阶段 4 团队评审裁决（5 只读 reviewer + Lead 复验：0 Critical / 10 Important / 36 Minor 与修复处置） |
+| `experiments/reports/2026-11-18-stage4-acceptance-review.md` | 阶段 4 复审裁决（R1–R6：2 P1 + 4 P2 与修复轮处置、红线验证；§6 第二轮复验 2 Blocking 与处置） |
+| `experiments/reports/2026-11-18-stage4-p1-fixes.md` | 阶段 4 三项 P1 修复实施报告（传输会话隔离 / 停止收尾合并异步故障 / 跟踪验收运动证据；红线、发布基准、1675+3 回归与终审） |
+| `experiments/reports/2026-11-17-r1d-field-standby-protocol.md` | R1D 现场待命规程：4.9 只读核对 / 4.10 低速跟踪的 G3/G4 前置与现场步骤（不构成实机授权） |

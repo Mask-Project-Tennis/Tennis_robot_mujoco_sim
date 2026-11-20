@@ -11,7 +11,7 @@
 | `cpp/` | C++ 加速模块（pybind11：线性化、前向传递、约束检查） | `solver_cpp.py`, `mujoco_utils.h`, `cost_params.h` | 91 |
 | `perception/` | 球状态估计（6D 卡尔曼滤波 + 观测门控） | `ball_estimator.py`, `ball_obs_gate.py` | 31 |
 | `tennis/` | 网球抛物线预测 + 击打点计算 + 球拍接触判断 | `ball.py`, `hitting.py` | 24 |
-| `real/` | 真机部署模块（SDK 封装、安全监控、球感知，不接触 MuJoCo） | `robot_interface.py`, `config.py`, `safety_monitor.py`, `ball_sensor.py` | 35 |
+| `real/` | 真机部署模块（SDK 封装、安全监控、球感知 + R1-A7-D 单臂驱动栈，不接触 MuJoCo） | `robot_interface.py`, `config.py`, `safety_monitor.py`, `ball_sensor.py`, `r1d_types.py`, `unitree_r1d_interface.py`, `r1d_factory.py` | 35（阶段 4 前口径；新增 9 个 `r1d_*` 驱动模块未计入） |
 | `utils/` | 通用工具（跨平台模型加载、噪声注入、数学） | `mujoco_loader.py`, `noise.py`, `math_utils.py` | 32 |
 
 ## 依赖方向
@@ -58,6 +58,7 @@ from src.sim.v12_robot_adapter import build_v12_robot      # V12RobotBundle/Simu
 from src.sim.v12_episode import run_v12_episode            # V12 共享 Episode 管线（T5）
 from src.sim.episode_artifacts import write_episode_artifacts  # v12_episode_v2 产物/快照/回放（T6）
 from src.ilqt.profile_planning_env import ProfilePlanningEnv  # R1D 规划侧环境（虚拟球，阶段 3）
+from src.real.r1d_factory import build_r1d_arm              # R1D 单臂驱动构造工厂（阶段 4，待实机验收）
 ```
 
 ## 模块详解
@@ -172,6 +173,20 @@ from src.ilqt.profile_planning_env import ProfilePlanningEnv  # R1D 规划侧环
 - `robot_executor.py`：`RobotExecutor` 适配器（RobotArmInterface → ExecutorComponent）
 - `perception_adapter.py`：`PerceptionAdapter` 适配器（BallPerceiver → PerceptionComponent）
 - `safety_adapter.py`：`SafetyAdapter` 适配器（SafetyMonitor → SafetyComponent）
+
+#### R1-A7-D 单臂驱动栈（阶段 4，待实机验收——G3-G5 未启动，未实机验证）
+
+协议事实来源 `configs/robots/r1d_protocol_manifest.yaml`（G1 冻结）；硬件数值载体 `configs/robots/r1d_hardware_{left,right}.yaml`（全 null 待 G4 现场冻结）。验收证据见 `docs/experiments/reports/2026-11-17-unitree-stage4.md`。
+
+- `r1d_types.py`（4.2）：R1D 整机协议数据类型——`R1DStateFrame`/`R1DCommandFrame`/`R1DStatus` + Transport Protocol + hg `LowCmd_` 35 槽位常量（纯数据层，import 零副作用）
+- `r1d_mapping.py`（4.2）：`R1DJointMapping` 七关节名称映射——`q_sdk = sign·q_model + offset` 逐关节换算（模型序 = `profile.active_joint_names`，左 15-21/右 22-28），`extract_velocities` 速度换算唯一实现点（速度仅变符号）
+- `r1d_config.py`（4.2）：`R1DHardwareConfig` 硬件配置加载/结构校验/purpose 门槛（offline→read_only→motion 梯度收紧；校准/限值/timing null 禁代填）
+- `r1d_command_policy.py`（4.3）：`R1DCommandPolicy` 全机命令构造——首帧新鲜实测锚定、变化约束过界明确拒绝不静默截断、非目标槽位（对侧臂/头/腰/升降/底盘/夹爪/空槽）保持策略须全 28 槽显式给出（R5 修订，评审 2026-11-17：显式 > 拒绝——manifest 示例数值不作运行时默认，官方示例 q=0 保持自带 2s 插值防跳变，回退会拉非零姿态跳变）
+- `r1d_state_buffer.py`（4.4）：`R1DStateBuffer` 线程安全状态缓存——时效过期 + 会话隔离 + 序号保守语义（重复丢弃/严格递增/≥2^31 回绕/小幅回退丢弃）
+- `r1d_transport.py`（4.5）：`SdkR1DTransport` SDK 传输适配——SDK 懒加载（模块 import 零副作用）、open 只读不 acquire/publish、close 幂等 + 世代门；真实路径 unitree_sdk2py + CycloneDDS（本机 11.1.0 离线验证 / 部署目标 0.10.2 锁定）
+- `unitree_r1d_interface.py`（4.6）：★ `UnitreeR1DInterface` 驱动接口——生命周期状态机（CLOSED→READ_ONLY→ACTIVE→FAULT 终态）、单一发送线程、五类看门狗（命令过期/状态过期/周期超时/控制权丢失/未确认停止）、发布节奏每控制周期至多一帧（期限自实际发布时刻顺延、不追赶）、发布许可与停止登记同锁复查（未发布帧可撤销）、停止 = 有限帧序列 + 反馈确认（未确认 → FAULT 不退权，退权窗口急停升级并入终态）、发布记录与 capability_notes
+- `r1d_factory.py`（4.7）：`build_r1d_arm` 独立构造工厂（R13 冻结签名：必填 `acquire_timeout_s` + `clock` + 驱动 kwargs 透传；构造零传输副作用、失败先于传输创建；RM65 工厂拒绝 R1D profile，FakeRobot 不用于 R1D）
+- `r1d_diagnostics.py`（4.8）：`run_r1d_diagnostic` 只读核对/单关节低速正弦 tracking 诊断——JSON verdict + provenance 可追踪指标（含 `frame_aligned`）、tracking 验收阈值必填（缺失→fail 并注明仅完成采集）、误差按帧身份（`received_at`+`sequence`）消费制配对（同一帧重复采样只为一条命令作证）、发布超期判据 = 间隔 > 1.5×期限（半拍容差吸收发布开销）、非整周期回程受限速多拍、缺共享 clock/非目标状态时降级路径如实记录
 
 ### utils/ — 工具
 

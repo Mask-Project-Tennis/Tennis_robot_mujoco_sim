@@ -48,12 +48,21 @@ docs/experiments/
 | exp17i | 限速×机制消融配对（Q5 主张证伪） | [design](design/exp17i_limits_ablation.md) | [2026-09-12](reports/2026-09-12_exp17i_limits_ablation.md) | ✅ |
 | exp18 | 图资产（计时 + NPZ） | — | [2026-09-11](reports/2026-09-11_exp18_fig_assets.md) | ✅ |
 
+## 工程阶段报告（R1-A7-D）
+
+| 阶段 | 报告 | 状态 |
+|------|------|------|
+| 阶段 1 描述加载层 | [2026-11-14](reports/2026-11-14-unitree-stage1.md) | ✅ |
+| 阶段 2 模型与运动学 | [2026-11-16](reports/2026-11-16-unitree-stage2.md) | ✅ |
+| 阶段 3 七维仿真闭环 | [2026-11-16](reports/2026-11-16-unitree-stage3.md) | ✅ |
+| 阶段 4 单臂驱动（软件层） | [2026-11-17](reports/2026-11-17-unitree-stage4.md) | ✅ 软件层；G3–G5 待实机 |
+| 阶段 4 三项 P1 修复 | [2026-11-18](reports/2026-11-18-stage4-p1-fixes.md) | ✅ 待合并；G3–G5 未启动 |
+
 ### 工程扩展（非论文实验）
 
 | 编号 | 名称 | 设计 | 报告 | 状态 |
 |------|------|------|------|------|
 | ext-r1d-v12-tuning | R1D×V12 多 worker 调参与完整安全恢复 | [设计](design/r1d_v12_parallel_tuning.md)；[前置修复计划](../r1d_v12_parallel_repair_plan.md) | — | 设计存档，未实施 / 未运行 |
-| ext-r1d | Unitree R1-A7-D 单臂适配（阶段 3） | [计划](../superpowers/plans/2026-11-14-unitree-adaptation-plan.md) | [2026-11-16](reports/2026-11-16-unitree-stage3.md) | ✅ 工程验收（论文仍 RM-65B） |
 | ext-r1d-v12 | R1D×V12 parity（T0–T9） | [设计](../superpowers/specs/2026-11-18-r1d-v12-parity-design.md) / [计划](../superpowers/plans/2026-11-18-r1d-v12-parity-implementation.md) | [2026-11-18](reports/2026-11-18-r1d-v12-parity.md) | ✅ 固定案例两模式 active；留出集泛化限制如实报告；论文仍 RM-65B |
 
 ## 文档类型说明

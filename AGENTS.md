@@ -199,7 +199,16 @@ mujoco_sim/
 │   │   ├── trajectory_types.py        # 重演轨迹数据结构（ReplayTrajectory）
 │   │   ├── trajectory_source.py       # 轨迹源接口（TrajectorySource Protocol）
 │   │   ├── trajectory_sink.py         # 命令消费 Sink 链（TeeSink Composite + 责任链）
-│   │   └── trajectory_recorder.py     # 轨迹记录器（仿真侧记录，真机侧重演）
+│   │   ├── trajectory_recorder.py     # 轨迹记录器（仿真侧记录，真机侧重演）
+│   │   ├── r1d_types.py               # R1D 整机协议数据类型（frames/Status/Transport Protocol + 35 槽位常量，阶段 4）
+│   │   ├── r1d_mapping.py             # R1D 七关节名称映射（q_sdk=sign*q_model+offset，模型序↔槽位 15-21/22-28，阶段 4）
+│   │   ├── r1d_config.py              # R1D 硬件配置加载/校验（purpose 梯度 offline→read_only→motion，null 禁代填，阶段 4）
+│   │   ├── r1d_command_policy.py      # R1D 全机命令构造与非目标部件冻结策略（首帧锚定/变化约束拒绝，阶段 4）
+│   │   ├── r1d_state_buffer.py        # R1D 状态缓存（时效+会话隔离+序号保守语义，阶段 4）
+│   │   ├── r1d_transport.py           # R1D SDK 传输适配（懒加载/fake 全覆盖/真实 IDL 序列化对照，阶段 4）
+│   │   ├── unitree_r1d_interface.py   # R1D 驱动接口（生命周期状态机/单一发送器/五类看门狗/发布记录，阶段 4）
+│   │   ├── r1d_factory.py             # R1D 独立构造工厂（build_r1d_arm，RM65 兼容边界，阶段 4）
+│   │   └── r1d_diagnostics.py         # R1D 只读/低速诊断与可追踪指标（JSON verdict+provenance，阶段 4）
 │   └── utils/
 │       ├── __init__.py
 │       ├── math_utils.py              # 通用数学工具
@@ -212,6 +221,8 @@ mujoco_sim/
 │   ├── robots/r1d_runtime_left.yaml / r1d_runtime_right.yaml # R1D 双侧运行参数（未知限值显式 null，阶段 2）
 │   ├── robots/r1d_sim_runtime_left.yaml / r1d_sim_runtime_right.yaml # R1D 仿真运行参数（仿真临时数值，全部 provisional，阶段 3）
 │   ├── r1d_sim_left.yaml / r1d_sim_right.yaml # R1D 仿真任务配置（来球/工作区/MPC/代价，阶段 3；3.11 定稿参数见文件头）
+│   ├── robots/r1d_protocol_manifest.yaml      # R1-A7-D 整机控制协议 manifest（G1 冻结值+null 待确认项，阶段 4；唯一协议事实来源）
+│   ├── robots/r1d_hardware_left.yaml / r1d_hardware_right.yaml  # R1D 硬件配置模板（校准/限值/timing 全 null 待 G4 现场冻结，阶段 4）
 │   ├── scenarios/r1d_stage3_reachable.yaml    # 阶段 3 固定可达来球案例（seed 42，expected_hit_type: active）
 │   ├── r1d_v12.yaml                   # R1D×V12 任务覆盖（target 等稀疏差异，T3/T7）
 │   ├── robots/r1d_v12_runtime_right.yaml  # R1D×V12 运行参数（init_q/PD/限位/底座/升降/躯干；provisional，T2/T7）
@@ -234,11 +245,11 @@ mujoco_sim/
 │   ├── exp/            # 实验设施（活跃: exp9-15 包装·批量·运行器；含 run_r1d_paper_smoke.py）
 │   ├── extract/        # 结果提取（日志/产物→CSV/JSON；含 extract_r1d_smoke_stats.py）
 │   ├── plot/           # 论文图表（含 plot_r1d_smoke_stats.py per-case smoke 图）
-│   ├── tools/          # 独立工具 10 个（查看器·扫描·诊断·可视化）
+│   ├── tools/          # 独立工具 22 个（查看器·扫描·诊断·可视化·R1D 模型构建/预览/R1D 只读低速诊断/R1D 传输发布基准）
 │   ├── test/           # 快速验证 10 个
 │   ├── archive/        # ★ 已归档脚本（V6-V10 + tube + 旧实验，详见 archive/README.md）
 │   └── README.md       # 完整清单与说明
-├── tests/                             # 单元测试（全量 pytest tests/ 当前 12 failed + 3 errors（T0 基线既有）、1579 passed；C++ 扩展已本地编译）
+├── tests/                             # 单元测试（全量结果以合并后实跑为准；2 个 C++ 测试文件因扩展 ABI 不匹配需 --ignore 排除，见 docs/experiments/reports/）
 │   ├── test_kinematics.py
 │   ├── test_linearize.py
 │   ├── test_mpc.py
@@ -289,6 +300,16 @@ mujoco_sim/
 │   ├── test_r1d_sim_pipeline.py            # R1D 仿真闭环管线测试（阶段 3）
 │   ├── test_multi_robot_sim_entrypoint.py  # V12 多机器人 CLI 分派/产物 schema 测试（阶段 3）
 │   ├── test_r1d_closed_loop.py             # ★ R1D 固定可达案例闭环验收 + RM65 seed42 逐位回归（阶段 3.11）
+│   ├── test_r1d_config.py                  # R1D 硬件配置加载/校验测试（54 tests，阶段 4.2）
+│   ├── test_r1d_mapping.py                 # R1D 七关节映射 sign/offset 往返测试（38 tests，阶段 4.2）
+│   ├── test_r1d_command_policy.py          # R1D 全机命令/非目标槽位策略测试（16 tests，阶段 4.3）
+│   ├── test_r1d_state_buffer.py            # R1D 状态缓存时效/会话/序号测试（21 tests，阶段 4.4）
+│   ├── test_r1d_transport.py               # R1D SDK 传输懒加载/fake 全覆盖测试（47 tests，阶段 4.5；P1-1 会话隔离/锁序）
+│   ├── test_r1d_sdk_serialization.py       # R1D 真实 SDK 序列化/CRC 向量测试（8 tests，本机真跑 0 skip，阶段 4.5）
+│   ├── test_unitree_r1d_interface.py       # ★ R1D 驱动生命周期/看门狗/并发测试（82 tests，阶段 4.6；含复审 R1 节奏/R2 发布许可/R3 退权急停/P1-2 停止收尾合并异步故障）
+│   ├── test_r1d_factory.py                 # R1D 构造工厂/RM65 兼容边界测试（12 tests，阶段 4.7）
+│   ├── test_r1d_diagnostics.py             # R1D 诊断 run/降级路径/验收阈值/配对与超期判据测试（77 tests，阶段 4.8；P1-3 波形/发布证据 + 受控时间推进）
+│   ├── test_unitree_r1d_tool.py            # R1D 诊断 CLI 参数纪律测试（40 tests，阶段 4.8；P1-3 接管前拒绝短波）
 │   ├── test_v12_config.py / test_v12_robot_adapter.py / test_v12_shared_pipeline.py  # V12 配置/适配/共享管线（T3–T5）
 │   ├── test_episode_artifacts.py / test_multi_robot_replay.py / test_r1d_paper_pipeline.py  # v2 产物/回放/论文链路（T6/T8c）
 │   ├── test_racket_profile.py / test_r1d_v12_scene.py / test_profile_sim_bounce.py / test_r1d_v12_damping.py / test_r1d_v12_acceptance.py  # R1D×V12 资产/物理/验收（T1/T2/T7）
@@ -752,3 +773,14 @@ Layer 3: 紧急停止（兜底）
 - **动捕系统**：待选定，`BallSensor` 设计为抽象基类
 - **球拍安装**：真机球拍安装方式需测量确认（与仿真中垂直安装是否一致）
 - **底座位姿**：需要实际测量后填入 `real_robot.yaml`
+
+### R1-A7-D 单臂驱动（阶段 4，待实机验收）
+
+- **范围与状态**：Unitree R1-A7-D 整机接口下的单臂 7 关节驱动**软件层**（fake 全覆盖 + 本机真实 SDK 离线序列化/CRC 向量，387 tests / 12 文件）；G2 离线验收已通过（2026-11-17，SDK 序列化为 R4 条件通过——评审后序列化布局证据降级为"偏差已记录"，见 manifest `serialized_length_note`）。团队评审（2026-11-17，`2026-11-17-stage4-review.md`）0C/10I/36M → 同日修复轮全关（Important 修复带判别力红线验证）；复审（2026-11-18，`2026-11-18-stage4-acceptance-review.md`）2 P1 + 4 P2 → 同日全关（发布节奏限频/停止登记撤销未发布帧/退权窗口急停升级/验收阈值必填/同帧配对/受限速回程，均带红线验证）；第二轮复验 2 Blocking（超期判据与驱动节奏互斥、同一反馈帧重复计入）→ 同日全关（判据改"错过半拍以上"、帧身份去重，均带红线验证）。**G3 实机只读 / G4 运动前冻结 / G5 实机验收均未启动——未实机验证，不宣称实机能力**。
+- **入口与工厂**：现场诊断工具 `python scripts/tools/test_unitree_r1d.py`（--mode read_only|tracking，四强制参数，tracking 需 G4 冻结配置否则如实失败）；程序构造 `src/real/r1d_factory.py::build_r1d_arm`（必填 `acquire_timeout_s`，诊断与驱动共享同一 `clock`；RM65 工厂 `build_robot_arm` 拒绝 R1D profile，`run_real_robot.py` 对 R1D 的拒绝未放开）。
+- **协议事实来源**：`configs/robots/r1d_protocol_manifest.yaml`（G1 冻结：hg LowCmd_ 35 槽 rt/lowcmd、左 15-21/右 22-28、非标准 CRC32；实机行为层 null + Q1-Q11 问询清单，G3/G4 前禁代填）。硬件数值载体：`configs/robots/r1d_hardware_{left,right}.yaml`（校准/限值/timing 全 null，待 G4 现场冻结）。
+- **位置语义**：`q_sdk = sign·q_model + offset`（逐关节，模型序 = `profile.active_joint_names`，单位 rad；速度仅变符号）；dq/tau 恒 0（除显式槽位策略），不搬仿真重力补偿。
+- **停止与看门狗**：五类看门狗（命令过期/状态过期/周期超时/控制权丢失/未确认停止）；停止 = 有限停止帧序列 + 反馈确认，未确认 → FAULT 终态不主动退权（机载恢复未公开）；失联/超时无源即禁用并写 capability_notes。发布节奏 = 每控制周期至多一帧（期限自实际发布时刻顺延，不追赶）；停止登记后未发布的运动帧在发布锁内复查并撤销；退权窗口的急停升级并入终态（强制 FAULT 且保留锁存）。
+- **红线重申**：G3 通过前不连接硬件/不上电/不外发 DDS；G4 全部确认项冻结前禁止 tracking 运动；阶段 3 NPZ（`simulation_only=true`）未经阶段 5 转换校验不得直接送真机；SDK 真实路径仅部署主机（官方 Ubuntu + `unitree_sdk2py@814556d1` + cyclonedds 0.10.2 锁定），本机 11.1.0 仅离线向量验证（R4）。
+- **现场规程**：`docs/experiments/reports/2026-11-17-r1d-field-standby-protocol.md`（4.9/4.10 待命规程，不构成实机授权）。
+- **验收状态**：**阶段 4 实现完成、验收评审已裁决并修复（待实机验收）**——三项 P1 修复（传输会话隔离、停止收尾合并异步故障、跟踪验收运动证据）后全量回归 **1675 passed + 3 skipped**（排除 2 个 C++ ABI 文件；诊断测试已改为受控时间推进，时序结论可复现；合并 main 后的全量结果以本次交付实跑为准，既有 V12 基线失败项不计入阶段 4 交付）；证据见 `docs/experiments/reports/2026-11-18-stage4-p1-fixes.md` + `2026-11-17-unitree-stage4.md`（评审勘误与修复轮节 + §6.6/§6.7/§6.8）+ `2026-11-17-stage4-review.md` 与 `2026-11-18-stage4-acceptance-review.md`（两轮裁决全文）。

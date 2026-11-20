@@ -1,0 +1,244 @@
+# =====================================================================
+# R1-A7-D 整机控制协议 manifest（Task 4.1 冻结，G1 输入）
+# ---------------------------------------------------------------------
+# 用途：阶段 4 驱动开发（4.2-4.8）的协议事实来源。每个值必须可回溯到
+#       docs/experiments/reports/2026-11-16-r1d-sdk-control-contract.md
+#       的 G1 决策表条目编号（[G1-xx]）。
+# 规则：
+#   - 本文件只收录"冻结确定值"；未确认字段一律 null + 注释标待确认项。
+#   - null 字段禁止用猜测值、示例值或仿真值代填（施工计划 Global Constraints）。
+#   - 所有"官方示例行为"均属 [公开示例] 级证据：可作实现参考与离线对照基准，
+#     但不等同实机契约，上机前须按报告 §7 问询清单/4.9 只读核对确认。
+#   - 更新本文件必须同步更新报告 G1 决策表，两处冲突时以报告（含证据链）为准。
+# 证据等级缩写（同报告 §1.2）：
+#   [指南]=官方文档中心页面  [公开示例]=官方开源仓库代码  [实机]=本台实物验证
+#   本文件当前不含任何 [实机] 级证据。
+# =====================================================================
+
+meta:
+  robot_id: unitree_r1d                    # 与 configs/robots/r1d_left.yaml 一致
+  task: "stage4 Task 4.1 协议冻结"
+  date_frozen: "2026-11-16"
+  report: "docs/experiments/reports/2026-11-16-r1d-sdk-control-contract.md"
+  evidence_dir: ".superpowers/sdd/2026-11-16-unitree-stage4-construction/evidence-4.1/"  # 主仓库 git-ignored
+  real_machine_validated: false            # 无任何实机证据；G3 前不得改变此值
+
+# ---------------------------------------------------------------------
+# SDK 版本与来源（固定 commit / 包版本 / 安装与检查命令）
+# ---------------------------------------------------------------------
+sdk:
+  cpp_repo: "https://github.com/unitreerobotics/unitree_sdk2"
+  cpp_commit: "aaf69cb56c9d5ed63d8b284008ec3a8ab999bec1"   # main 分支 2026-11-09 提交；无对应 release tag，浮定风险见报告 [G1-01]
+  python_repo: "https://github.com/unitreerobotics/unitree_sdk2_python"   # 仓库名下划线（非连字符）
+  python_commit: "814556d15970dd2ecf1c9984e845ca02ab07e206" # master 分支 2026-09-21 提交"add r1_A5_low_level_example and r1_A7_low_level_example"
+  python_package_name: "unitree_sdk2py"                     # setup.py: name='unitree_sdk2py'（下划线，非 PyPI 连字符名）
+  python_package_version: "1.0.1"                           # 仅 setup.py 声明值；PyPI 上未见同名发布页，以源码 commit 为准 [G1-02]
+  python_requires: ">=3.8"                                  # setup.py python_requires
+  python_dependencies: ["cyclonedds==0.10.2", "numpy", "opencv-python"]  # setup.py install_requires
+  idl_source: >-
+    Python 侧 IDL = 仓库内 unitree_sdk2py/idl/unitree_hg/msg/dds_/*.py（Eclipse Cyclone DDS
+    idlc Python Backend v0.11.0 生成）；C++ 侧 = include/unitree/idl/hg/*.hpp。两侧字段与
+    数组长度 35 经本任务逐字段比对一致 [G1-05]。
+  idl_namespace: "unitree_hg.msg.dds_"
+  supported_os: >-
+    官方支持 Ubuntu（C++ README：Ubuntu 20.04 LTS，gcc 9.4.0；Python 页基于 apt/pi p3 流程）；
+    CPU aarch64 与 x86_64。Windows/macOS 无官方支持声明；Python CRC 快路径仅提供
+    crc_amd64.so / crc_aarch64.so（Linux ELF）[G1-03]
+  python_platform_note: >-
+    Python CRC 类在非 Linux 平台回落纯 Python 逐位实现（crc.py L224-228），功能可用但
+    500 Hz 级实时性未验证；本项目部署主机 OS/架构未定，为待确认项 [G1-03]
+  install_commands: >-
+    git clone https://github.com/unitreerobotics/unitree_sdk2_python.git && cd unitree_sdk2_python &&
+    pip3 install -e .   （cyclonedds==0.10.2 需先可用，必要时源码编译 releases/0.10.x 并设 CYCLONEDDS_HOME）
+  offline_serialization_check: >-
+    在装好 unitree_sdk2py 的主机上（不连机器人）：构造 unitree_hg_msg_dds__LowCmd_()，
+    填入哨兵值后用 CRC().Crc(cmd) 与独立参考实现（报告 §5 冻结算法）互验，再用
+    cyclonedds 序列化/反序列化往返比对全部 35 槽字段。属 W2 时点安装后动作，本片未执行。
+  install_status: "not_installed_on_dev_machine"           # 本机禁止安装（主代理裁定）；安装属 W2 前经用户批准时点
+  local_dev_install_note: >-    # 2026-11-16 主代理 Ruling R4 附注：项目执行环境事实，非厂商协议内容；G1 决策表厂商事实未变
+    Windows 开发机（conda mujoco_tennis, py3.11）离线序列化测试环境（用户 2026-11-16 批准）：
+    unitree_sdk2py 以可编辑方式安装自项目工作区 rev-pin 克隆（python_commit 814556d1，HEAD 已校验）；
+    cyclonedds 因 0.10.x 全系列无 win_amd64 wheel 且本机无 cmake 无法按 setup.py 锁定版本构建，
+    改装官方 11.1.0 win_amd64 wheel。影响：生成 IDL 类在 11.1.0 运行时下要求显式全字段构造
+    （无默认值），适配层须写显式工厂；CRC 模块为纯 Python 实现，确定性与字段敏感性已冒烟验证。
+    仅用于本机离线序列化/CRC 向量对照；部署主机（G3+）仍按官方 Ubuntu 流程安装锁定版本
+    cyclonedds==0.10.2。install_status 行保留 4.1 原文作历史记录，本附注为准。
+
+# ---------------------------------------------------------------------
+# DDS 通信契约（话题 / domain / 网卡 / IDL 布局 / CRC / 校验语义）
+# ---------------------------------------------------------------------
+dds:
+  middleware: "CycloneDDS 0.10.2（cyclonedds Python 绑定；ChannelFactory 内嵌 XML 配置）"
+  domain: 0                                   # 双侧示例 ChannelFactoryInitialize(0, <网卡>)；示例固定 domain 0
+  network_interface: null                     # 待确认：现场实际网卡名（示例为命令行参数传入，如 enp2s0；R1-A-D 外置计算单元场景由现场确认）
+  robot_dev_pc_ip: "192.168.123.164"          # [指南] 外置开发计算单元地址（unitree/123）；用户程序运行位置（机内 or 外部 123 网段主机）待现场确认
+  topics:
+    lowcmd:
+      name: "rt/lowcmd"
+      direction: "publish"
+      idl: "unitree_hg.msg.dds_.LowCmd_"
+    lowstate:
+      name: "rt/lowstate"
+      direction: "subscribe"
+      idl: "unitree_hg.msg.dds_.LowState_"
+    secondary_imu:
+      name: "rt/secondary_imu"
+      direction: "subscribe"
+      idl: "unitree_hg.msg.dds_.IMUState_"
+      note: "仅 C++ A7 示例订阅（躯干第二 IMU）；Python A7 示例未订阅，本项目默认不订阅"
+    arm_sdk:
+      name: "rt/arm_sdk"
+      direction: "publish"
+      idl: "unitree_hg.msg.dds_.LowCmd_（复用）"
+      note: "高层臂 SDK 封装（r1_pub.h ArmSdk）；对 A7 不完整，本项目不采用（见 whole_body.selected_arm.note）"
+  lowcmd_layout:                              # 字段顺序即 CDR 打包顺序（Python _LowCmd_.py L25-29 与 C++ LowCmd_.hpp L26-30 逐字段一致）
+    mode_pr: {type: "uint8", meaning: "高层 arm_sdk 复用时作权重 0-100；低层路径 Python 示例写 0(PR)，语义未完全公开"}
+    mode_machine: {type: "uint8", meaning: "机型/模式标识，须回填自最近一帧 lowstate 的 mode_machine（双侧示例一致）"}
+    motor_cmd: {type: "MotorCmd_[35]", meaning: "整机 35 电机槽位，按 whole_body 索引寻址"}
+    reserve: {type: "uint32[4]", meaning: "保留，示例写 0"}
+    crc: {type: "uint32", meaning: "整包 CRC32（见 crc 节）"}
+    serialized_length_bytes: 1004             # CRC 打包格式 '<2B2x' + 'B3x5fI'*35 + '5I' 实算 = 4 + 35*28 + 20 = 1004，与官方注释一致（evidence-4.1/python/crc.py L22 注释 "#size 1004"、L23 格式串）；以 W2 安装后实测为准 [G1-05]
+    serialized_length_note: >-                # 2026-11-17 I-04 勘误（阶段 4 评审）：1004/2092 是 CRC 打包的结构像长度，不承诺原生 serialize() 字节布局
+      本机 cyclonedds 11.1.0 实测 LowCmd_.serialize() 总长恰为 1004，但 = 4B CDR-LE 头
+      （00 01 00 00）+ 1000B body；body 相对 CRC 参考布局折叠了 motor_cmd[0].mode 后的
+      3B padding（LowState 同理：总长 2092 = 4B 头 + 2088B body，折叠 mode_pr/mode_machine
+      后 2B padding）。两种布局交叉反序列化不互操作（对方 m0.q 读 0.0）。部署机 0.10.2
+      实测布局前，"总长恰等"不得作为布局合规证据——冻结布局对照测试以
+      tests/test_r1d_sdk_serialization.py 双分支断言为准。
+  lowstate_layout:                            # Python _LowState_.py L25-33 与 C++ LowState_.hpp L28-36 一致
+    version: {type: "uint32[2]"}
+    mode_pr: {type: "uint8"}
+    mode_machine: {type: "uint8", meaning: "机型模式回读字段；具体枚举值未公开，A7 实机回读值为待确认项"}
+    tick: {type: "uint32", meaning: "状态帧计数；自增步长/回绕语义未公开，序号语义见 seq_semantics"}
+    imu_state: {type: "IMUState_（quaternion f32[4], gyroscope f32[3], accelerometer f32[3], rpy f32[3], temperature i16）"}
+    motor_state: {type: "MotorState_[35]"}
+    wireless_remote: {type: "uint8[40]", meaning: "遥控器原始帧（gamepad.hpp 解析）"}
+    reserve: {type: "uint32[4]"}
+    crc: {type: "uint32"}
+    serialized_length_bytes: 2092             # CRC 打包格式推算值（crc.py L25 注释 size 2092）；以 W2 实测为准 [G1-05]
+  motor_cmd_layout:                           # Python _MotorCmd_.py L25-31 与 C++ MotorCmd_.hpp L23-29 一致
+    mode: {type: "uint8", meaning: "1=Enable 0=Disable（示例注释）"}
+    q: {type: "float32", unit: "rad"}
+    dq: {type: "float32", unit: "rad/s"}
+    tau: {type: "float32", unit: "N·m（前馈力矩）"}
+    kp: {type: "float32", unit: "N·m/rad"}
+    kd: {type: "float32", unit: "N·m·s/rad"}
+    reserve: {type: "uint32"}
+  motor_state_layout:                         # Python _MotorState_.py L25-34 与 C++ MotorState_.hpp L24-33 一致
+    mode: {type: "uint8"}
+    q: {type: "float32", unit: "rad"}
+    dq: {type: "float32", unit: "rad/s"}
+    ddq: {type: "float32", unit: "rad/s^2"}
+    tau_est: {type: "float32", unit: "N·m（估计力矩）"}
+    temperature: {type: "int16[2]"}
+    vol: {type: "float32", unit: "V"}
+    sensor: {type: "uint32[2]"}
+    motorstate: {type: "uint32", meaning: "非零=电机错误码（C++ 示例打印 [ERROR] motor i with code）"}
+    reserve: {type: "uint32[4]"}
+  crc:
+    algorithm: "CRC32/CASTAGNOLI-LIKE 非标准反射；逐位 MSB-first，多项式 0x04C11DB7，初值 0xFFFFFFFF，无最终异或"
+    coverage: "整包按 4 字节小端字对齐，长度 = (总字节数/4 - 1) 个字（即覆盖除末尾 crc 字段外的全部内容，含各槽 reserve 与对齐填充）"
+    verify_on_receive: "必须：官方双侧示例均在 lowstate 回调校验 CRC，失败丢帧（Python L106-108 / C++ L195-198）[G1-06]"
+    python_impl_note: >-
+      官方 crc.py 手写 struct.pack 布局（hg LowCmd 1004B / hg LowState 2092B，与官方注释 crc.py L22/L24 一致），非 cyclonedds 原生序列化；
+      与 C++ 原生内存布局对齐。风险：SDK 升级改 IDL 时该手工布局可能失配 → W2 必须做官方 crc.py vs
+      C++ 参考/独立实现的向量级对照（离线序列化检查）。
+  mode_machine_validation: null               # 待确认：mode_machine 枚举值未公开（示例仅打印数值）；R1-A7-D 正确值需实机回读后冻结。驱动在冻结前只做"变化检测+记录"，不做相等断言
+  seq_semantics:
+    has_header_seq: false                     # hg LowCmd_/LowState_ 无 go2 式 head/seq 头字段（与 go2 LowCmd 的关键差异）[G1-05]
+    tick_semantics: null                      # 待确认：LowState_.tick 推测为帧计数，但步长、回绕、上电重启行为未公开；在厂家答复/实机观测前只能作"接收新鲜度旁证"，不得作唯一失效判据
+    restart_semantics: null                   # 待确认：机器人控制器重启后 tick/version/mode_machine 的复位行为未公开
+  control_period_example: 0.002               # [公开示例] 双侧 A7 示例 control_dt_=0.002s（500 Hz）+ CreateRecurrentThreadEx 2000us。仅为示例事实，不是本项目频率承诺；实机可达成频率待 G4/G5 [G1-08]
+
+# ---------------------------------------------------------------------
+# 整机 35 槽位：命令所有者与保持/忽略语义
+# 索引证据：官方双侧 A7 示例 joint_idx_in_idl = {左臂15-21, 右臂22-28, 头29,30}；
+# 其余槽位含义 = 指南关节限位表（既有审计 §2）+ defines.h 枚举（带腿 R1 口径，仅参考）。
+# "保持语义"列记录的是官方示例事实，不是厂商承诺；实机行为的最终裁定属 G4 现场确认。
+# ---------------------------------------------------------------------
+whole_body:
+  slot_count: 35
+  selected_arm:                               # 本项目唯一主动控制的部件
+    side: null                                # 待确认：击球侧未定（阶段 2 遗留 #2；不设默认侧）
+    joint_indices_left: [15, 16, 17, 18, 19, 20, 21]    # 肩俯仰/肩侧摆/肩偏航/肘/腕滚转/腕俯仰/腕偏航（指南+双侧示例）
+    joint_indices_right: [22, 23, 24, 25, 26, 27, 28]
+    control_interface: "rt/lowcmd 低层路径（hg LowCmd_ 直接寻址全部 7 关节）"
+    note: >-
+      唯一实施路径裁定 [G1-04]：高层 rt/arm_sdk 封装（r1_pub.h ArmSdk::JOINTS 固定 13 关节，
+      止于 WristRoll）不含 A7 特有腕俯仰/腕偏雅（槽位 20/21/27/28），无法驱动 7 自由度臂；
+      低层 rt/lowcmd 可直接寻址 15-21/22-28，且官方 Python 侧存在 r1_A7_low_level_example.py
+      （commit 814556d1，2026-09-21）——A5 wrapper 限制不等于服务器限制的疑点已被该官方
+      Python A7 示例消除：七关节低层路径官方双语言在案。
+  other_arm:                                 # 对侧臂（非目标）
+    joint_indices_left: [15, 16, 17, 18, 19, 20, 21]
+    joint_indices_right: [22, 23, 24, 25, 26, 27, 28]
+    command_owner: "本项目 lowcmd（官方示例把双侧臂一并纳入 16 槽写零位保持；单侧接管时对侧槽位策略待 G4 现场裁定）"
+    hold_semantics_example: >-
+      官方 A7 示例：mode=1 + q=0 + dq=0 + tau=0 + kp=[100,100,100,100,50,50,50] + kd=2，
+      首段 2s 内目标从实测 q 线性插值到 0（防跳变）。注意：是"目标 0 位保持"，不是"复制反馈 q"。
+  head:
+    joint_indices: {pitch: 29, yaw: 30}
+    command_owner: "本项目 lowcmd（同上，示例一并写零位保持）"
+    hold_semantics_example: "mode=1 + q=0 + dq=0 + tau=0 + kp=[50,10] + kd=[2,0.1]（示例值）"
+  waist:
+    joint_index: 13                           # 指南口径（WAIST_YAW）；defines.h 枚举 13=WaistYaw 属带腿 R1 口径，不可用于 R1-A-D 底盘段推导
+    command_owner: null                       # 待确认：官方 A7 示例完全未写槽位 13（默认构造 mode=0/kp=0 保持零力矩）；真机腰由谁保持（运控服务 or 需显式命令）未公开
+    hold_semantics_example: "示例未触碰（默认 mode=0 Disable、全零）——语义未定义，属 §7 问询项"
+  lift_column:
+    joint_index: 12                           # 指南口径（LIFTING_COLUMN）
+    command_owner: null                       # 待确认：同腰；官方指南另有独立"底盘与立柱控制"文档页（本机渲染抓取为空，未能取证）
+    hold_semantics_example: "示例未触碰（默认 mode=0）；升降是否机械自锁未确认（阶段 2 遗留 #5）"
+  chassis:
+    joint_indices: {left_wheel: 0, right_wheel: 1}
+    command_owner: null                       # 待确认：示例未写槽位 0/1；底盘/立柱独立服务接口存在但正文未能取证
+    hold_semantics_example: "示例未触碰（默认 mode=0）"
+  gripper:
+    command_owner: null                       # 待确认：hg IDL 有 HandCmd_[7]（灵巧手 Dex3）但不在 LowCmd_ 内，走独立话题；R1-D 版本夹爪（Dex1 二指）协议未见公开
+    hold_semantics_example: null              # 无公开证据
+  unaddressed_slots: "2-11（被动脚轮）、14、31-34：官方无文档；示例不写，语义未知"
+
+# ---------------------------------------------------------------------
+# 控制权生命周期（获取 / 失败回滚 / 释放 / 失联）
+# 所有条目均为 [公开示例] 级：官方双侧 A7 示例的工程行为，非厂商协议承诺
+# ---------------------------------------------------------------------
+control:
+  acquisition:
+    mechanism: >-
+      发布 lowcmd 前经 MotionSwitcherClient（服务名 "motion_switcher"，RPC 话题按
+      rt/api/<service>/request|response 规则组装 = rt/api/motion_switcher/request 与
+      /response；api id 1001 CheckMode / 1002 SelectMode / 1003 ReleaseMode / 1004 SetSilent /
+      1005 GetSilent，motion_switcher_api.py L16-20 常量定义）循环：CheckMode 返回 name
+      非空说明机载运控在占用 → ReleaseMode 释放 → sleep 1-5s → 重查，直到 name 为空才建
+      publisher 开始发布（r1_A7_low_level_example.py L76-85 / C++ L163-171；话题组装规则
+      证据 evidence-4.1/python/channel_name.py L13-21）
+    timeout_example_s: 5.0                    # 示例 SetTimeout(5.0)（r1_A7_low_level_example.py L73）
+  failure_rollback:
+    on_checkmode_fail: "Python 示例 raise RuntimeError；C++ 示例仅打印继续（工程缺陷，不采纳）"
+    on_releasemode_fail: "Python 示例 raise RuntimeError 后进程退出；C++ 打印 Failed 后 sleep(5) 重试。均无'恢复原模式'回滚——示例不含回滚语义 [G1-07]"
+    our_policy_requirement: >-
+      本项目 4.6 需自行设计失败回滚（释放失败→不发布任何 lowcmd + 报告未获权），
+      不能照抄示例的"失败后继续"（C++）或"异常退出即弃管"（Python）
+  release:
+    mechanism: null                           # 待确认：官方 A7 示例无退出释放路径（主线程 while true 挂起）；发布停止后机载服务如何恢复（SelectMode 重选哪个名字/自动回切）未公开
+  link_loss:
+    behavior: null                            # 待确认：lowcmd 停发/断网后电机行为（阻尼/掉电/保持）完全未公开；不得以"停止发布=已停止"推定
+    watchdog_example: null                    # 官方 SDK 侧未见命令超时看门狗证据；属 §7 问询项（是否由接收端固件监护未知）
+  state_validity:
+    crc_required: true                        # 接收帧必须过 CRC，失败帧丢弃（双侧示例一致）
+    stale_state: null                         # 待确认：无官方新鲜度标准；本项目在 4.4 自定（monotonic 接收时钟）
+    motorstate_nonzero: "电机错误码非零须按故障处理（C++ 示例打印 [ERROR] motor i with code）"
+
+# ---------------------------------------------------------------------
+# 待确认项汇总（厂家/现场问询清单，详表见报告 §7）
+# ---------------------------------------------------------------------
+open_questions:
+  - "mode_machine 枚举值（R1-A7-D 正确回读值）"
+  - "lowcmd 停发/失联后整机与各部件的行为（阻尼/保持/超时阈值）"
+  - "单臂接管时对侧臂/头/腰/升降/底盘槽位的正确保持策略（示例写零位是否即厂商意图）"
+  - "MotionSwitcher ReleaseMode 后机载服务恢复机制（自动回切 or SelectMode 重选，模式名清单）"
+  - "LowState_.tick 计数语义（步长/回绕/重启复位）"
+  - "hg LowCmd 序列化总长与 CRC 覆盖的实机一致性（离线向量验证）"
+  - "底盘与立柱控制独立服务的协议（官方页面存在但本机抓取为空）"
+  - "夹爪（Dex1 二指 / Dex3-1）控制话题与 IDL（R1-D 版本未公开）"
+  - "500 Hz 低层循环在 Python + 部署主机上的可达成性（实机验收前不承诺）"
+  - "本项目部署主机 OS/架构与网卡（外置计算单元 192.168.123.164 or 外部 123 网段主机）"
