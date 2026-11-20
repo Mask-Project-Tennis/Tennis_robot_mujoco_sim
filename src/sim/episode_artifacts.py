@@ -101,6 +101,20 @@ INPUT_SHA_ROLES: tuple[str, ...] = (
     "scene_snapshot",
 )
 
+#: 按 LF 归一化后计算哈希的配置角色（YAML 文本）。
+#:
+#: 冻结场景记录的输入哈希按 LF 字节计算；Windows 上 ``core.autocrlf=true``
+#: 会把同一份提交检出为 CRLF，若直接对原始字节哈希，换机后就会把“同一份
+#: 配置”误判为被篡改。这里只归一化行尾，其余字节仍逐字节参与哈希，真实
+#: 篡改依然会被发现。模型 XML 不在其中：``.gitattributes`` 已对 R1D 资产
+#: 关闭行尾转换，按原始字节校验才能保证“校验的文件 = 加载的文件”。
+EOL_NORMALIZED_ROLES: tuple[str, ...] = (
+    "robot_profile",
+    "runtime",
+    "task",
+    "racket",
+)
+
 #: 模型 XML 中纳入依赖资产哈希的标签（T6 追加，设计 §6 依赖资产哈希快照）
 ASSET_XML_TAGS: tuple[str, ...] = ("mesh", "texture")
 _ASSET_TAG_PATTERN = re.compile(
@@ -178,6 +192,11 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
+def _sha256_bytes(data: bytes) -> str:
+    """计算字节串的 SHA-256 十六进制摘要。"""
+    return hashlib.sha256(data).hexdigest()
+
+
 def _sha256_file(path: Path) -> str:
     """计算文件的 SHA-256 十六进制摘要。"""
     digest = hashlib.sha256()
@@ -185,6 +204,33 @@ def _sha256_file(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _is_eol_normalized_role(role: str) -> bool:
+    """判断角色是否按 LF 归一化计算哈希。"""
+    return role in EOL_NORMALIZED_ROLES
+
+
+def _read_normalized_text(path: Path) -> bytes:
+    """读取文本配置文件并把 CRLF 归一化为 LF（其余字节保持不变）。"""
+    return Path(path).read_bytes().replace(b"\r\n", b"\n")
+
+
+def _role_file_digest(path: Path, role: str) -> str:
+    """按角色规则计算配置/模型文件的 SHA-256（文本角色归一化行尾）。
+
+    Args:
+        path: 待哈希文件。
+        role: 快照角色（``robot_profile`` / ``runtime`` / ``task`` /
+            ``racket`` / ``model``）。
+
+    Returns:
+        十六进制摘要；文本角色对 LF 归一化后的字节求哈希，其余角色
+        直接对原始字节求哈希。
+    """
+    if _is_eol_normalized_role(role):
+        return _sha256_bytes(_read_normalized_text(path))
+    return _sha256_file(path)
 
 
 def _jsonable(value: Any) -> Any:
@@ -960,14 +1006,22 @@ def _write_snapshot(
         relative = Path(SNAPSHOT_FILES_DIR_NAME) / _snapshot_relative_path(source)
         dest = snapshot_dir / relative
         dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, dest)
-        digest = _sha256_file(dest)
+        if _is_eol_normalized_role(role):
+            # 文本配置按 LF 归一化写快照：快照字节与 input_sha256 同源，
+            # 换机/换行尾设置后仍能逐字节复现。
+            dest.write_bytes(_read_normalized_text(source))
+            digest = _sha256_bytes(dest.read_bytes())
+            size = int(dest.stat().st_size)
+        else:
+            shutil.copy2(source, dest)
+            digest = _sha256_file(dest)
+            size = int(dest.stat().st_size)
         entries_by_role[role] = {
             "role": role,
             "source": str(source.resolve()),
             "relative_path": relative.as_posix(),
             "sha256": digest,
-            "size": int(dest.stat().st_size),
+            "size": size,
         }
         input_sha256[role] = digest
     return entries_by_role, input_sha256
@@ -1205,7 +1259,7 @@ def build_episode_payload(result: V12EpisodeResult) -> dict[str, Any]:
     for role in ("robot_profile", "runtime", "task", "racket", "model"):
         path = role_paths.get(role)
         if path is not None and Path(path).is_file():
-            input_sha256[role] = _sha256_file(Path(path))
+            input_sha256[role] = _role_file_digest(Path(path), role)
     input_sha256["scene_snapshot"] = hashlib.sha256(
         _canonical_json(scene_snapshot).encode("utf-8")
     ).hexdigest()
@@ -1702,7 +1756,7 @@ def _verify_and_resolve_sources(
                 failures.append(f"{origin} 文件缺失：{candidate_path}")
                 continue
             try:
-                actual = _sha256_file(candidate_path)
+                actual = _role_file_digest(candidate_path, role)
             except OSError as exc:  # pragma: no cover - 并发删除/权限问题
                 failures.append(f"{origin} 文件不可读：{candidate_path}（{exc}）")
                 continue
