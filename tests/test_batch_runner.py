@@ -11,6 +11,7 @@ from pathlib import Path
 
 from scripts.exp.batch_runner import (
     CSV_FIELDS,
+    RunIdentity,
     _record,
     load_done_keys,
     make_config_id,
@@ -78,31 +79,58 @@ class TestLoadDoneKeys:
         assert load_done_keys(tmp_path / "nope.csv") == set()
 
     def test_reads_and_skips_errors(self, tmp_path: Path) -> None:
-        """正常行计入、error 行不计入（error 行需要重跑）。"""
+        """timeout 按 T8a 语义记为终态，非 timeout 的 error 行需重跑。"""
         csv_path = tmp_path / "results.csv"
         rows = [
             {"config_id": "cfgA", "seed": "1", "error": ""},
             {"config_id": "cfgA", "seed": "2", "error": "timeout"},
             {"config_id": "cfgB", "seed": "1", "error": ""},
+            {"config_id": "cfgC", "seed": "1", "error": "crash"},
         ]
         with open(csv_path, "w", newline="", encoding="utf-8") as f:
             w = csv.DictWriter(f, fieldnames=["config_id", "seed", "error"])
             w.writeheader()
             w.writerows(rows)
-        assert load_done_keys(csv_path) == {("cfgA", 1), ("cfgB", 1)}
+        # timeout 行不重跑（T8a 新语义，见 tests/test_r1d_experiment_runner.py）；
+        # 其他 error 行仍不计入完成，避免把崩溃当成功跳过。
+        assert load_done_keys(csv_path) == {
+            ("cfgA", 1), ("cfgA", 2), ("cfgB", 1),
+        }
 
 
 class TestRecord:
     """单行 CSV 记录补全。"""
 
     def test_full_fields(self) -> None:
-        """记录包含全部 CSV 列（缺省补空），meta 键进 config_json。"""
-        rec = _record("exp", {"--ball-speed": 9, "--seed": 3},
-                      {"pos_error": 0.1, "hit_type": "active", "hit": True})
+        """记录包含全部 CSV 列（缺省补空），身份/状态列与 meta 键正确。"""
+        identity = RunIdentity(
+            robot_id="unitree_r1d",
+            mode="torque",
+            racket_id="blade100_v9_reference",
+            config_hash="0123456789abcdef",
+            metric_schema="v12_episode_v2_physical_hit",
+        )
+        rec = _record(
+            "exp",
+            {"--ball-speed": 9, "--seed": 3},
+            identity,
+            {"pos_error": 0.1, "hit_type": "active", "hit": True},
+            timeout_s=900.0,
+            exit_code=0,
+            log_path="results/x.log",
+        )
         assert set(rec.keys()) == set(CSV_FIELDS)
         assert rec["experiment"] == "exp"
         assert rec["seed"] == 3
         assert rec["hit"] is True
+        assert rec["robot_id"] == "unitree_r1d"
+        assert rec["mode"] == "torque"
+        assert rec["racket_id"] == "blade100_v9_reference"
+        assert rec["config_hash"] == "0123456789abcdef"
+        assert rec["metric_schema"] == "v12_episode_v2_physical_hit"
+        assert rec["timeout_s"] == 900.0
+        assert rec["exit_code"] == 0
+        assert rec["log_path"] == "results/x.log"
         assert '"--ball-speed": 9' in rec["config_json"]
         assert "--seed" not in rec["config_json"]
 

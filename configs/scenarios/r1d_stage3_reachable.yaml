@@ -3,18 +3,28 @@
 # 用途：本文件把「确定性击球验收」所需的输入冻结成单一案例，供
 # tests/test_r1d_closed_loop.py 读取并驱动真实 run_r1d_episode 调用链。
 # 路径一律相对本文件所在目录解析（本文件位于 configs/scenarios/）。
+# 键集（schema_version/profile_path/runtime_path/task_path/seed/
+# expected_hit_type）由契约测试冻结为 6 键，不得增删。
 #
-# 案例来源（Task 3.11，2026-11-18 右臂重标定）：先按右臂 FK/IK 与固定
-# 重力抛物线反推可达来球，再落盘固定；seed 固定为 42，不做 seed 扫描/挑选。
-#  - 来球：从 [2.5, -0.25, 2.8] m 以 [-5.0, 0.2, -1.0] m/s 飞出（纯重力
-#    抛物线，不含空气阻力）；t≈0.445s 时到达 [0.25, -0.16, 1.357] m。
-#  - 击球点可达性验算：右肩世界位置 [0.059, -0.086, 1.358] m（阶段 2
-#    模板实测），击球点相对肩 [0.191, -0.074, -0.001] m（|·|≈0.205m <
-#    臂展 0.35m）；对 [0.25, -0.16, 1.357] 从规划段 q 起做 IK，各关节
-#    离限位有余量；执行器 torque_max/PD/限位来自
-#    configs/robots/r1d_sim_runtime_right.yaml（provisional）。
-#  - 案例验收：hit_type 必须为 active（真实球—拍接触、接触拍速 >0.3 m/s），
-#    且同 seed/同配置连续 3 次逐位一致（详见验收报告）。
+# 案例来源（全尺寸拍 + 底座外移至近端底线后重标定）：按固定重力抛物线
+# 选取来球，使其解析落点落在 task 声明的工作区内，再落盘固定；seed 固定
+# 为 42，不做 seed 扫描/挑选。
+#  - 来球（configs/r1d_sim_right.yaml，provisional）：从 [0.3, -0.6, 2.2] m
+#    以 [-11.5, -0.3, 4.25] m/s 射出（纯重力抛物线，不含空气阻力）；
+#    t=1.05 s 时解析位置 [-11.775, -0.915, 1.2547375] m。
+#  - 工作区（同文件）：workspace_center [-11.75, -0.9, 1.25] m、半径 0.80 m；
+#    解析击球点距中心约 0.0295 m，在声明工作区内。底座位于
+#    [-12.5, -0.8, 0.155] m（configs/robots/r1d_sim_runtime_right.yaml，
+#    provisional），即击球区在基线前方约 0.75 m；全尺寸拍法兰→拍面中心
+#    0.54 m。几何可达性由上述工作区声明表达，本文件不冻结肩点常数。
+#  - 视野/代价（configs/r1d_sim_right.yaml）：max_steps 900、total_horizon 320、
+#    fixed_horizon 260（t=1.05 s ≈ 210 步 < 260，首次规划的视野不被截断）、
+#    follow_through_steps 20、Q_p 50000 / Q_v 200；执行器 torque_max/PD 增益
+#    来自 configs/robots/r1d_sim_runtime_right.yaml（provisional），关节位置
+#    限位由模型 jnt_range 回填。
+#  - 案例验收（由 tests/test_r1d_closed_loop.py 断言）：hit_type 必须为
+#    active（真实球—拍接触、接触拍速 >0.3 m/s），且同 seed/同配置连续 3 次
+#    逐位一致（详见 docs/experiments/reports/2026-11-16-unitree-stage3.md）。
 #
 # 注意：本文件不引入新的配置框架，字段与 3.10 run_r1d_episode 的三份
 # 配置参数一一对应；expected_hit_type 仅表达本案例的预期，不改变任何

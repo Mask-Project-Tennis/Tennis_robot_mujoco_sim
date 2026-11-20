@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "synthetic": true,
+  "robot_id": "unitree_r1d",
+  "run_root": "run",
+  "data_root": "run/data",
+  "runs_csv": "run/data/runs.csv",
+  "manifest_path": "run/manifest_resolved.json",
+  "source_sets": {
+    "nominal_mechanism": "exp17d_mechanism",
+    "noise": "exp17a_noise"
+  }
+}

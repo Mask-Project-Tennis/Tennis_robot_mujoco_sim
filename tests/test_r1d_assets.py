@@ -482,7 +482,7 @@ def test_joint_contract_matches_audit() -> None:
 
 
 def test_env_chain_frozen(tmp_path: Path) -> None:
-    """环境片段 0 关节;两级 q_L 同值 bake 的 z 位移关系 = 2×Δq_L。"""
+    """环境片段 0 关节;默认 q_L=0.4225 的 waist 高度与两级位移关系。"""
     # 仓库交付的环境片段:不含任何 <joint> 元素
     env_root = ET.parse(ENV_FRAGMENT).getroot()
     assert not list(env_root.iter("joint")), "环境片段必须无任何关节"
@@ -497,10 +497,12 @@ def test_env_chain_frozen(tmp_path: Path) -> None:
         bid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, link_name)
         assert bid != -1, f"环境片段缺少 body: {link_name}"
     waist_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "waist_yaw_link")
-    # q_L=0:base_link 原点起 0.3288 + 0.0427 - 0.2115 = 0.1600 m
+    # 落地方案 bake q_L=0.4225:base_link 原点起
+    # 0.3288 + 0.0427 - 0.2115 + 2×0.4225 = 1.0050 m
     np.testing.assert_allclose(
         data.xpos[waist_id][2],
-        0.3288 + ENV_LIFT_STAGE1_ORIGIN_Z + ENV_LIFT_STAGE2_ORIGIN_Z,
+        0.3288 + ENV_LIFT_STAGE1_ORIGIN_Z + ENV_LIFT_STAGE2_ORIGIN_Z
+        + 2 * 0.4225,
         atol=1e-12,
     )
 

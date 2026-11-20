@@ -57,6 +57,7 @@ from src.robot.model_factory import (
     _TORSO_GEOM,
     _assemble_bound_model,
 )
+from src.robot.racket_profile import RacketProfile
 from src.robot.robot_profile import RobotProfile
 from src.robot.runtime_parameters import RobotRuntimeParameters
 from src.sim.sim_config import SimTaskConfig
@@ -126,6 +127,8 @@ def build_tennis_scene(
     profile: RobotProfile,
     parameters: RobotRuntimeParameters,
     task: SimTaskConfig,
+    *,
+    racket_profile: RacketProfile | None = None,
 ) -> TennisSceneBundle:
     """组装 R1D 带球场景并按名称绑定球/拍/保护对地址。
 
@@ -141,6 +144,9 @@ def build_tennis_scene(
         parameters: 运行参数（须含 scene；本函数做 kinematics 级校验，
             完整仿真预检由 validate_simulation_inputs 负责）。
         task: 仿真任务配置（球/拍/保护对名称与球初位姿来源）。
+        racket_profile: 可选球拍档案（T2 新增）；None 保持旧 API 语义
+            （模板默认拍 / scene.racket_* legacy 参数），提供时球拍几何/
+            质量/惯量/安装全部来自 RacketProfile。
 
     Returns:
         带球场景组装结果（robot.parameters 已从模型 jnt_range 回填限位）。
@@ -169,6 +175,7 @@ def build_tennis_scene(
         parameters,
         validate_shape=_validate_tennis_model_shape,
         mutate=_mutate,
+        racket_profile=racket_profile,
     )
     model = robot.model
 

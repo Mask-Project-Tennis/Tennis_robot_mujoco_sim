@@ -12,7 +12,7 @@ import logging
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal, Mapping, TYPE_CHECKING
+from typing import Any, Callable, Literal, Mapping, TYPE_CHECKING
 
 import numpy as np
 
@@ -44,6 +44,7 @@ from src.ilqt.strategy_config import StrategyConfig
 if TYPE_CHECKING:
     # 仅类型标注：绑定环境（R1D 规划副本）作为 MPCController 的 env
     from src.sim.bound_robot_env import BoundRobotEnv
+    from src.ilqt.robot_env_protocol import RobotEnv
 
 logger = logging.getLogger(__name__)
 
@@ -192,6 +193,48 @@ class MPCStepResult:
     info: dict = field(default_factory=dict)  # 额外信息
 
 
+def describe_solver_backend(solver: object) -> str:
+    """按求解器实际实现返回 effective 后端标签。
+
+    产物 ``v12_episode_v2`` 的 ``backend.effective`` 沿用既有约定：
+    ``"cpp"`` = C++ 内核可用且实际生效；``"python-analytic"`` = Python
+    解析线性化；``"python-fd"`` = Python 有限差分。
+
+    Args:
+        solver: ``build_solver`` 返回的求解器实例（C++ 包装类或
+            ``ILQTSolver``）。
+
+    Returns:
+        后端标签（``"cpp"`` / ``"python-analytic"`` / ``"python-fd"``）。
+
+    Raises:
+        ValueError: 无法判定后端。不猜测、不静默归类为 Python，避免把
+            未知实例记成错误事实。
+
+    Note:
+        ``src/cpp/solver_cpp.py`` 在扩展缺失时会退化为重导出 Python
+        ``ILQTSolver``，其 ``__module__`` 仍是 ``src.ilqt.solver``；因此这里
+        额外检查 ``_CPP_AVAILABLE``，避免把回退实例误报为 ``"cpp"``。
+    """
+    module = type(solver).__module__
+    if module == "src.cpp.solver_cpp":
+        from src.cpp import solver_cpp
+
+        if not bool(getattr(solver_cpp, "_CPP_AVAILABLE", False)):
+            raise ValueError(
+                "求解器类型来自 src.cpp.solver_cpp，但 C++ 扩展实际不可用"
+                "（该模块已退化为 Python 求解器重导出），不能记为 cpp"
+            )
+        return "cpp"
+    use_analytical = getattr(solver, "use_analytical", None)
+    if isinstance(use_analytical, (bool, np.bool_)):
+        return "python-analytic" if bool(use_analytical) else "python-fd"
+    raise ValueError(
+        "无法判定求解器 effective 后端：缺少 use_analytical 且不是 C++ "
+        f"包装类（{module}.{type(solver).__name__}）"
+    )
+
+
 class MPCController:
     """MPC 规划控制器 — 可组合的规划模块。
 
@@ -212,23 +255,30 @@ class MPCController:
         config: MPCConfig,
         robot_limits: RobotLimits,
         strategies: "StrategyConfig | None" = None,
+        *,
+        planning_env_factory: "Callable[[], RobotEnv] | None" = None,
     ) -> None:
         """初始化 solver/limits/replanner/state 构建。
 
         Args:
             env: 规划环境（RM65：PlanningEnv/RM65Env；R1D：绑定环境族
-                ProfilePlanningEnv），用于规划计算。绑定环境触发 Task 3.8
-                的 R1D 分派：build_solver env 注入（Python FD）、工作空间
-                对模型校验、异步明确拒绝、同步直用 env 作 env_plan。
+                ProfilePlanningEnv），用于规划计算。绑定环境触发 R1D 分派：
+                build_solver env 注入（Python FD）、工作空间对模型校验。
             config: MPC 配置（控制规划行为）。
             robot_limits: 关节限位 + 安全滤波器（必传）。调用方负责构建，
                 仿真通常用 ``build_robot_limits(env, RealRobotConfig())``，
                 研究对比可传入自定义限位。
             strategies: 可选策略注入容器。None → 全部使用 MPCConfig 驱动的默认实现。
+            planning_env_factory: 可选规划环境工厂。None 时保持 T0 行为：
+                RM65 用 ``type(env)(model_path, dt=...)`` 延迟构造独立 env_plan；
+                绑定环境（R1D）不允许异步。提供时（R1D 异步唯一合法路径）
+                每个 AsyncReplanner 通过它构建独立规划环境实例（独立 MjData），
+                后台线程独占该环境与独立 solver，不与执行环境共享状态。
 
         Raises:
-            ValueError: 绑定环境 + async_mode=True（本阶段不支持 R1D 异步），
-                或工作空间中心/半径对模型校验失败。
+            ValueError: 绑定环境 + async_mode=True 且未提供
+                ``planning_env_factory``（不静默改同步），或工作空间中心/半径
+                对模型校验失败。
         """
         self._env = env
         self._config = config
@@ -237,6 +287,8 @@ class MPCController:
         # 绑定环境（BoundRobotEnv 族，R1D 路径）：策略/后端/校验按
         # Task 3.8 决定分派；RM65（PlanningEnv/RM65Env）保持原路径原行为
         self._is_bound_env: bool = _is_bound_env(env)
+        # 规划环境工厂：None → T0 语义；提供 → R1D 独立规划环境注入
+        self._planning_env_factory = planning_env_factory
 
         # ── R1D：工作空间中心/半径显式来自当前侧配置并对模型校验 ──
         # （中心 IK 可达 + 限位内；不能读 RM65 SHOULDER_POS/WORKSPACE_RADIUS）
@@ -248,14 +300,14 @@ class MPCController:
                 robot_limits=robot_limits,
             )
 
-        # ── R1D 异步重规划：本阶段明确拒绝（不静默改同步）──
-        # FD 规划 ~209ms/次，异步收益有限；AsyncReplanner 的 env_plan
-        # 构造依赖 RM65 系构造签名（model_path, dt），绑定环境不支持
-        if self._is_bound_env and config.async_mode:
+        # ── R1D 异步重规划：仅在注入独立规划环境工厂时开放 ──
+        # 绑定环境无法按 RM65 构造签名延迟构造 env_plan；调用方未提供工厂时
+        # 明确拒绝（不静默改同步），提供工厂后由 AsyncReplanner 独占规划环境。
+        if self._is_bound_env and config.async_mode and planning_env_factory is None:
             raise ValueError(
-                "R1D（绑定环境）本阶段不支持异步重规划：入口明确拒绝，"
-                "不静默改为同步。请设 async_mode=False（Task 3.8 决定；"
-                "后续版本如开放，须独立 planning env + 线程实例隔离测试）"
+                "R1D（绑定环境）异步重规划需要独立的规划环境工厂："
+                "请传入 planning_env_factory（返回独立规划环境实例），"
+                "或设 async_mode=False。不静默改为同步。"
             )
 
         # ── RobotLimits（调用方注入，依赖方向不再反转到 src.real）──
@@ -265,19 +317,33 @@ class MPCController:
         self._solver: Any = build_solver(
             env=env, backend=config.solver_backend, config=config.solver_config,
         )
+        # 后台线程独占求解器：工厂路径再建一个独立实例（不共享状态），
+        # 非工厂路径保持 T0 行为（同一实例）。
+        self._replan_solver: Any = (
+            build_solver(
+                env=env, backend=config.solver_backend, config=config.solver_config,
+            )
+            if planning_env_factory is not None
+            else self._solver
+        )
 
         # ── AsyncReplanner（独立 env_plan；config/robot_limits/solver 静态注入）──
-        # 绑定环境（R1D）不构造 AsyncReplanner：同步路径直接以 env 为
-        # env_plan（规划副本本就无球/无私 scratch 副作用）
-        if self._is_bound_env:
+        # 未注入工厂的绑定环境（R1D）不构造 AsyncReplanner：同步路径直接
+        # 以 env 为 env_plan（规划副本本就无球/无私 scratch 副作用）。
+        if self._is_bound_env and planning_env_factory is None:
             self._replanner: AsyncReplanner | None = None
         else:
             model_path = (
-                Path(__file__).resolve().parent.parent / "robot" / "rm65_model.xml"
+                None
+                if planning_env_factory is not None
+                else Path(__file__).resolve().parent.parent
+                / "robot"
+                / "rm65_model.xml"
             )
             self._replanner = AsyncReplanner(
-                env, do_replan, config, robot_limits, self._solver,
+                env, do_replan, config, robot_limits, self._replan_solver,
                 state=None, model_path=model_path,
+                planning_env_factory=planning_env_factory,
             )
         self._replan_state: ReplanState | None = None
 
@@ -409,9 +475,15 @@ class MPCController:
         if self._replanner is not None:
             self._replanner._state = self._replan_state
 
-            # 3. 启动 AsyncReplanner + 确保 env_plan 就绪（V11 行 1315-1318）
-            self._replanner.start()
-            self._replanner._ensure_env_plan()
+            # 3. 确保 env_plan 就绪（V11 行 1315-1318）
+            if self._planning_env_factory is None:
+                # T0 RM65 顺序：先启动后台线程，再延迟构造 env_plan
+                self._replanner.start()
+                self._replanner._ensure_env_plan()
+            else:
+                # R1D 工厂路径：主线程先创建独立 env_plan，首次同步规划
+                # 完成后再启动后台线程（避免线程在首 plan 期间争用/空转）
+                self._replanner._ensure_env_plan()
 
         # 4. 首次同步 do_replan（V11 行 1349-1364）
         first_request = PlanRequest(
@@ -489,6 +561,16 @@ class MPCController:
         self._buffer_idx = 0
         self._step_count = 0
         self._mpc_horizon = self._config.total_horizon
+
+        # 9.5 R1D 工厂路径：首次同步规划完成后启动后台规划线程
+        # （此后 step() 的重规划在独立 env_plan/data/solver 上进行）。
+        # 同步模式即便持有工厂也不启动后台线程（T0 同步行为不变）。
+        if (
+            self._replanner is not None
+            and self._planning_env_factory is not None
+            and self._config.async_mode
+        ):
+            self._replanner.start()
 
         # 10. 异步模式首次提交 → ReplanMode.submit（V11 行 1394-1409）
         if self._config.async_mode:
@@ -637,9 +719,14 @@ class MPCController:
         )
 
     def stop(self) -> None:
-        """停止 AsyncReplanner 后台线程（绑定环境为空操作）。"""
+        """停止 AsyncReplanner 后台线程（幂等；未构造重规划器时为空操作）。"""
         if self._replanner is not None:
             self._replanner.stop()
+
+    @property
+    def replanner(self) -> AsyncReplanner | None:
+        """异步重规划器实例（未构造时为 None，供产物/诊断读取统计）。"""
+        return self._replanner
 
     @property
     def done(self) -> bool:
@@ -650,6 +737,17 @@ class MPCController:
     def ball_unreachable(self) -> bool:
         """球是否不可达。"""
         return self._ball_unreachable
+
+    @property
+    def effective_backend(self) -> str:
+        """实际构造的求解器后端（``cpp`` / ``python-analytic`` / ``python-fd``）。
+
+        与 ``MPCConfig.solver_backend``（请求值，可能为 ``"auto"``）不同：
+        本属性读取 ``build_solver`` 实际返回的实例，是产物
+        ``backend.effective`` 的唯一事实来源，避免把被拒/回退的请求值当成
+        实际执行路径。
+        """
+        return describe_solver_backend(self._solver)
 
     # ──────────────────────────────────────────────────────────────────
     # 私有方法：重规划（A3 统一辅助）

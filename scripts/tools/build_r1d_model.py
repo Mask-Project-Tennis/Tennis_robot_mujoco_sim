@@ -83,6 +83,14 @@ _ENV_CHAIN: tuple[tuple[str, str], ...] = (
 _ENV_ROOT_LINK = "base_link"
 _ENV_PRISMATIC_JOINTS = ("lift_stage1_joint", "lift_stage2_joint")
 
+# 头部冻结链(joint 名, 子 link 名):挂在 waist_yaw_link 下,无关节静态渲染。
+# mesh 声明随环境片段自带 <asset>(r1d_assets.xml 属 T1 交付、不在本任务
+# 白名单,故头部网格声明放环境片段,由 model_factory 合并进唯一 asset 节)。
+_HEAD_CHAIN: tuple[tuple[str, str], ...] = (
+    ("head_pitch_joint", "head_pitch_Link"),
+    ("head_yaw_joint", "head_yaw_Link"),
+)
+
 # 臂链语义顺序(审计报告 §2):肩俯仰/肩侧摆/肩偏航/肘/腕滚转/腕俯仰/腕偏航
 _ARM_SEMANTIC_SUFFIXES = (
     "shoulder_pitch",
@@ -609,8 +617,10 @@ def _env_header_comment(q_L: float) -> ET.Comment:
         "  2) 双级升降按 mimic multiplier=1 的同一 q_L bake 为固定偏移:\n"
         f"     当前 q_L = {_fmt(q_L)} m(单级行程 [0, 0.425],总行程 2×0.425);\n"
         "     MuJoCo 的 URDF 导入不保留 mimic,升降冻结故无运行时等式约束。\n"
-        "  3) waist_yaw_link 几何保留(臂挂接点);轮/脚轮/头/对侧臂\n"
-        "     不进入本片段(排除清单见 source_manifest.yaml)。\n"
+        "  3) waist_yaw_link 几何保留(臂挂接点);头部(head_pitch/head_yaw\n"
+        "     两节)作为无关节静态链挂在其下,网格声明在本片段自带 <asset>\n"
+        "     (r1d_assets.xml 不重复声明);轮/脚轮/对侧臂不进入本片段\n"
+        "     (排除清单见 source_manifest.yaml)。\n"
         "  4) 惯量/网格逐字来自 URDF;仅视觉 geom(contype=0 conaffinity=0)。\n"
         "  5) compiler angle=degree(本片段无角度敏感内容,声明与臂片段一致)。"
     )
@@ -733,7 +743,8 @@ def _validate_env_chain(
     的 z 轴与 [0, 0.425] 行程、stage2 的 mimic multiplier=1 offset=0、
     waist_yaw_joint 的 z 轴与零 origin;base_link 的其余子关节均为
     continuous(轮/脚轮);waist_yaw_link 的其余子关节为对侧肩俯仰与
-    头部俯仰(均不进入环境片段)。
+    头部俯仰(head_pitch→head_yaw 作为无关节静态链进入环境片段,
+    网格声明随片段自带 <asset>)。
 
     Args:
         joints: joint 名 → joint 元素。
@@ -791,7 +802,8 @@ def _validate_env_chain(
     for name, _c in children.get(_ENV_ROOT_LINK, []):
         if name != "lift_mount_joint" and joints[name].attrib.get("type") != "continuous":
             raise ValueError(f"base_link 出现未预期子关节类型: {name}")
-    # waist_yaw_link 其余子关节 = 对侧/同侧肩俯仰 + head_pitch(不进环境片段)
+    # waist_yaw_link 其余子关节 = 对侧/同侧肩俯仰 + head_pitch
+    # (head_pitch→head_yaw 以无关节静态链进入环境片段)
     waist_children = {j for j, _c in children.get("waist_yaw_link", [])}
     expected_extra = {
         "left_shoulder_pitch_joint",
@@ -806,18 +818,21 @@ def _validate_env_chain(
 
 
 def build_r1d_env(
-    urdf_path: Path, output_path: Path, q_L: float = 0.0
+    urdf_path: Path, output_path: Path, q_L: float = 0.4225
 ) -> None:
     """从固定 commit 的 R1D 整机 URDF 导出冻结环境 MJCF 片段。
 
     导出 base_link → lift_mount →(stage1@q_L, stage2@q_L)→ pelvis →
     waist_yaw@0 的冻结链,无任何关节:两级 prismatic 按同一 q_L bake 为
-    固定 pos 偏移(mimic multiplier=1)。生成过程完全确定。
+    固定 pos 偏移(mimic multiplier=1);另在 waist_yaw_link 下导出
+    head_pitch→head_yaw 的无关节静态链(完整整机外观),其网格声明随
+    本片段自带 <asset>。生成过程完全确定。
 
     Args:
         urdf_path: 固定 commit 的官方 URDF 路径(内容哈希须匹配)。
         output_path: 环境片段输出路径(仓库交付物为 src/robot/r1d_env.xml)。
-        q_L: 升降 bake 值 q_L (m),默认 0;须在 [0, 0.425] 内。
+        q_L: 升降 bake 值 q_L (m),默认 0.4225(落地后保持肩高的仿真值);
+        须在 [0, 0.425] 内。
 
     Raises:
         FileNotFoundError: URDF 或其引用的网格文件缺失。
@@ -862,6 +877,35 @@ def build_r1d_env(
     for joint_name, child_link in _ENV_CHAIN:
         parent_el = _append_link_body(parent_el, child_link, joint_name)
 
+    # 头部:挂在 waist_yaw_link 下的无关节静态链(完整整机外观所需),
+    # 网格声明随本片段自带 <asset>,由 model_factory 合并进唯一 asset 节。
+    head_used_meshes: dict[str, str] = {}
+    for joint_name, child_link in _HEAD_CHAIN:
+        joint_el = joints[joint_name]
+        body_el = ET.SubElement(
+            parent_el,
+            "body",
+            {"name": child_link, **_origin_attrs(joint_el.find("origin"))},
+        )
+        link_el = links[child_link]
+        body_el.append(_build_inertial(child_link, link_el))
+        _check_collision_matches_visual(child_link, link_el)
+        _append_visual_geoms(
+            body_el, child_link, link_el, urdf_path, head_used_meshes
+        )
+        parent_el = body_el
+
+    head_asset = ET.Element("asset")
+    for mesh_name in sorted(head_used_meshes):
+        head_asset.append(ET.Comment(f"meshes/{mesh_name}.STL"))
+        head_asset.append(
+            ET.Element(
+                "mesh",
+                {"name": mesh_name, "file": head_used_meshes[mesh_name]},
+            )
+        )
+    # 环境片段结构:注释 / compiler / asset(头部网格) / worldbody
+    env_root.insert(2, head_asset)
     _write_fragment(env_root, output_path)
 
 
@@ -975,8 +1019,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--qL",
         type=float,
-        default=0.0,
-        help="升降 bake 值 q_L (m),默认 0(范围 [0, 0.425])",
+        default=0.4225,
+        help="升降 bake 值 q_L (m),默认 0.4225(范围 [0, 0.425])",
     )
     args = parser.parse_args(argv)
     build_r1d_arm(args.urdf, "left", args.arm_left)

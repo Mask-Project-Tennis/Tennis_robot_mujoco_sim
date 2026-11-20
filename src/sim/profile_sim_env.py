@@ -40,6 +40,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from src.ilqt.ball_predictor import BallPredictor
+from src.robot.constants import BOUNCE_RESTITUTION
 from src.sim.bound_robot_env import BoundRobotEnv
 from src.sim.tennis_scene import TennisSceneBundle
 
@@ -50,6 +51,14 @@ Array = NDArray[np.float64]
 # 球—拍 pair 关闭用的 margin 值：gap 须穿透 1 m 才产生接触，
 # 物理上等效关闭该显式 pair（3.2 交付的单独控制通道约定值）
 _BALL_RACKET_PAIR_MARGIN_DISABLED = -1.0
+
+# 网球半径契约（m）：与 RM65Env.BALL_RADIUS / TennisScene 的 0.033 一致，
+# 构造时从模型 ball geom size 读取并断言，解析弹跳 handler 使用该值
+_BALL_RADIUS = 0.033
+
+# 解析弹跳的切向速度保留系数：与 RM65Env._handle_ball_bounce 逐式一致，
+# 亦与 BallPredictor 的弹跳预测模型一致（消除执行/规划球物理偏差）
+_BOUNCE_TANGENTIAL_FRICTION = 0.95
 
 # set_ball_state 写入的单位四元数（wxyz，MuJoCo free joint 布局）
 _BALL_QUAT_UNIT = (1.0, 0.0, 0.0, 0.0)
@@ -90,6 +99,16 @@ class ProfileSimEnv(BoundRobotEnv):
         self._ball_qvel_start = int(scene.ball_qvel_start)
         self._ball_geom_id = int(scene.ball_geom_id)
         self._racket_geom_ids = tuple(int(g) for g in scene.racket_geom_ids)
+
+        # 球半径：从模型 ball geom size 读取并与 0.033 契约断言一致
+        # （解析弹跳 handler 必须使用与 RM65Env._handle_ball_bounce 相同的半径）
+        ball_radius = float(scene.robot.model.geom_size[scene.ball_geom_id][0])
+        if abs(ball_radius - _BALL_RADIUS) > 1e-12:
+            raise ValueError(
+                "球 geom 半径与解析弹跳契约不一致："
+                f"model={ball_radius}, expected={_BALL_RADIUS}"
+            )
+        self._ball_radius = ball_radius
 
         # 球—拍显式 pair 定位（按 pair_geom1/2，双向匹配）+ margin 快照
         self._ball_racket_pair_ids = self._locate_ball_racket_pairs(
@@ -232,11 +251,51 @@ class ProfileSimEnv(BoundRobotEnv):
 
     # ------------------------------------------------------------ 复合步进
 
+    def step(self, u: Array) -> np.ndarray:
+        """施加控制并前进一步（MuJoCo 物理 + 地面解析弹跳）。
+
+        先按父类 ``BoundRobotEnv.step`` 推进一个 MuJoCo 物理步，再应用与
+        ``RM65Env._handle_ball_bounce`` 逐式一致的解析地面弹跳（恢复系数
+        来自 ``src.robot.constants.BOUNCE_RESTITUTION``，切向速度乘 0.95）。
+        该口径与规划侧 ``BallPredictor``、发球侧
+        ``generate_ball_from_serve_box`` 的弹跳模型一致，保证执行/规划球
+        轨迹一致（修复 R1D 执行侧缺解析弹跳导致的 parity gap）。
+
+        Args:
+            u: (n,) 控制输入（语义同父类 step）。
+
+        Returns:
+            下一步主动臂状态 (2n,)（球状态经 ``get_ball_state`` 读取）。
+        """
+        arm_state = super().step(u)
+        self._handle_ball_bounce()
+        return arm_state
+
+    def _handle_ball_bounce(self) -> None:
+        """检测球是否触地并应用解析弹跳（与 RM65Env 逐式一致）。
+
+        地面判定：球心 z < 球半径且 vz < 0 时，把球心钳到球半径高度，
+        vz 反向乘恢复系数，vx/vy 乘切向摩擦系数 0.95；否则不变。
+        """
+        bq = self._ball_qpos_start
+        bv = self._ball_qvel_start
+
+        ball_z = float(self.data.qpos[bq + 2])
+        ball_vz = float(self.data.qvel[bv + 2])
+
+        if ball_z < self._ball_radius and ball_vz < 0.0:
+            self.data.qpos[bq + 2] = self._ball_radius
+            self.data.qvel[bv + 2] = -ball_vz * BOUNCE_RESTITUTION
+            friction_factor = _BOUNCE_TANGENTIAL_FRICTION
+            self.data.qvel[bv] *= friction_factor
+            self.data.qvel[bv + 1] *= friction_factor
+
     def step_full(self, u: Array) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """施加控制并前进一步，返回 (臂状态, 球位置, 球速度)。
 
         球由 MuJoCo 物理推进（重力 + 球—地面/球—拍碰撞），仅推进
-        一个 dt；共享管线（SimComponent 等）按本接口消费。
+        一个 dt；地面弹跳在 ``step`` 内按解析口径覆盖（见
+        ``_handle_ball_bounce``）。共享管线（SimComponent 等）按本接口消费。
 
         Args:
             u: (n,) 控制输入（语义同 step，力矩/位置按当前模式）。

@@ -33,6 +33,7 @@ import numpy as np
 
 from src.ilqt.profile_planning_env import ProfilePlanningEnv
 from src.robot.model_factory import load_robot_model
+from src.robot.racket_profile import RacketProfile
 from src.robot.robot_profile import RobotProfile
 from src.robot.runtime_parameters import (
     RobotRuntimeParameters,
@@ -65,6 +66,8 @@ def build_r1d_environments(
     profile: RobotProfile,
     parameters: RobotRuntimeParameters,
     task: SimTaskConfig,
+    *,
+    racket_profile: RacketProfile | None = None,
 ) -> RobotEnvironments:
     """构造 R1D 执行 + 规划环境对（模型/data 独立，预检严格）。
 
@@ -84,6 +87,10 @@ def build_r1d_environments(
             显式表达）。
         parameters: 仿真运行参数（q_lower/q_upper 通常为 None，由模型回填）。
         task: 仿真任务配置（球初态/执行器模式/几何名称来源）。
+        racket_profile: T4 新增 keyword-only。V12 球拍档案（T1
+            ``RacketProfile``）；None 时保持 T2 旧语义（runtime 里的
+            legacy ``racket_*`` 字段生效）。非 None 时同时传给带球场景
+            组装与裸规划模型组装，保证执行/规划两侧球拍几何与质量一致。
 
     Returns:
         环境对（execution/planning 的 model 与 data 均不共享可变实例）。
@@ -93,7 +100,9 @@ def build_r1d_environments(
             失败，或位置模式缺 kp/kd（不隐式补默认值）。
     """
     # 1. 带球场景（身份校验 + 限位回填内含；每次调用独立编译模型）
-    scene = build_tennis_scene(profile, parameters, task)
+    scene = build_tennis_scene(
+        profile, parameters, task, racket_profile=racket_profile
+    )
 
     # 2. 仿真完整性预检（scene.robot.parameters 已从 jnt_range 回填；
     #    与 validate_simulation_inputs 同规则，但不二次加载模型）
@@ -113,7 +122,7 @@ def build_r1d_environments(
             )
 
     # 3. 规划副本（裸模型独立编译：无球、无显式 pair、掩码全 0）
-    bare = load_robot_model(profile, parameters)
+    bare = load_robot_model(profile, parameters, racket_profile=racket_profile)
 
     # 4. 环境构造（两个独立 model/data 实例）
     execution = ProfileSimEnv(scene)
@@ -133,11 +142,12 @@ def build_r1d_environments(
 
     logger.info(
         "R1D 环境对构造完成: execution(带球 nq=%d) + planning(裸 nq=%d) "
-        "模式=%s 球初态=%s（robot_id: %s）",
+        "模式=%s 球初态=%s 球拍=%s（robot_id: %s）",
         execution.model.nq,
         planning.model.nq,
         task.actuator_mode,
         np.asarray(task.initial_ball_position).tolist(),
+        None if racket_profile is None else racket_profile.racket_id,
         profile.robot_id,
     )
     return RobotEnvironments(execution=execution, planning=planning)

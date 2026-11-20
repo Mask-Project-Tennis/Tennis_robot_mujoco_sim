@@ -1,0 +1,579 @@
+# R1D 论文 smoke manifest（T8a 交付，schema r1d_paper_smoke_v1）
+#
+# 定位：R1D（unitree_r1d 右臂）V12 parity 论文实验的“可执行运行层”清单。
+# 本文件只描述条件与依赖，不写死任何 config hash / 时间戳 / 结果数据：
+#   - config_hash 由 run_r1d_paper_smoke.py 在运行时对冻结配置文件计算（缺失即报错）
+#   - 正式 smoke 由 T8c 在 T7 冻结后执行；T8a 只保证 dry-run 与 runner 正确
+#   - 所有产物写入 --output 指定的本次运行根（默认 experiment_data/r1d_v12_parity/paper_smoke）
+#
+# 与论文矩阵的对应关系见 docs/experiments/design/r1d_v12_parity_matrix.md
+# （矩阵 19 组正文 + 3 项额外依赖；本文件每条含 paper 位置 / 矩阵入口 / 依赖 /
+#   模式 / 预期字段 / T8b 消费者 / 状态[ready|adapted|blocked|derived]）。
+#
+# 小样本规则（矩阵要求）：
+#   - 每比较 cell ≥ 2 个共同 seed（默认 100/101，与 T7 开发 seed42、留出 0-9 分离）
+#   - 全 miss / 缺 tier / 无共同 seed / 超时必须在 manifest_resolved.json 与 runs.csv 显式表现
+#   - torque 模式遍历正文全部条件；position 只覆盖入口/前馈/机制/球质等代表链
+#
+# 当前覆盖（T8a 修复轮 R3，含 case 级 runtime_overrides）：
+#   - 19 组正文共 68 cases：67 ready/adapted + 1 blocked（exp25 select_one 外部依赖）
+#   - 任务数：torque 62 cases = 126 tasks（含 exp17a 额外依赖 2 条）；
+#     position 5 cases = 10 tasks；--mode both = 136 tasks
+#   - 3 项额外依赖：exp18_fig_assets(tool, ready)、exp18_tcp_exempt_window_stats(tool,
+#     blocked 外部依赖)、exp17a_noise_none_control(batch, ready)
+#
+# case 级计划字段（T8 N14，计划 Interfaces 字面要求）：
+#   每个 case 必须可直接读出 id/source_paper_item/experiment_id/argv/extract_argv/
+#   plot_argv/expected_outputs/mode/seed/timeout_s；本文件用顶层 case_defaults 提供
+#   默认值、experiment/case 可覆盖；blocked case 对不适用字段显式写 null。
+#   extract_argv/plot_argv 指向 T8b 提取/绘图脚本（占位脚本名在 T8b 落地后替换）；
+#   {python}/{run_root}/{data_root}/{project}/{experiment_id}/{case_id}/{seed}
+#   由 run_r1d_paper_smoke.py 在 resolve 时替换。
+#
+# T7 冻结后待填/待确认（不伪造）：
+#   - timeout_s_default：按 T7 实测单回合耗时上调（当前 900s 为保守占位，可 case 级覆盖）
+#   - position 模式的 actuator/PD/MPC 覆盖：若 T7 在 configs/r1d_v12.yaml 之外
+#     另需冻结，应在 T8c 执行前补进该 overlay 或 task_overrides
+#   - TCP 1.0/1.4 档通过 case 级 runtime_overrides 生成 --runtime-config 快照
+#     （max_tcp_speed 覆盖 base runtime，不改 T7 冻结文件）；T7 若冻结多档 runtime
+#     文件，manifest 可切换为路径引用
+#   - R1D ablation 无 ablation_mode 开关：四档用 cost 覆盖近似（full/none/tube_only/
+#     softmin_only），与 RM65 的 --ablation 等价性需 T8b 用 exp17d 对照确认
+
+schema: r1d_paper_smoke_v1
+description: R1D 论文 smoke（19 组正文 + 3 项额外依赖），运行层由 T8a 提供
+generated_by: T8a
+seeds: [100, 101]
+workers_default: 1
+timeout_s_default: 900
+run_root_default: experiment_data/r1d_v12_parity/paper_smoke
+data_root_name: batch
+script: scripts/rm65_mpc_v12.py
+
+# 冻结配置：R1D overlay 模式（不传 --sim-task-config；configs/r1d_v12.yaml 由
+# resolve_v12_config 的 R1D overlay 自动加载）。config_hash 在运行时计算。
+configs:
+  robot: configs/robots/r1d_right.yaml
+  runtime: configs/robots/r1d_v12_runtime_right.yaml
+  racket: configs/rackets/blade100_v9_reference.yaml
+  task_overlay: configs/r1d_v12.yaml
+  sim_task_config: null
+
+identity_defaults:
+  robot_id: unitree_r1d
+  racket_id: blade100_v9_reference
+  metric_schema: v12_episode_v2_physical_hit
+
+# 所有 batch 条件共享的基础 argv（None = 布尔开关）
+base_argv:
+  --serve-box: null
+  --no-plot: null
+
+# 每个 case 的计划字段默认值（experiment/case 可覆盖；N14）。
+# 这些字段是“运行前计划”，不是结果数据；T8b 消费 extract_argv/plot_argv 模板，
+# T8c 逐 case 核对 seed/timeout_s/expected_outputs。
+case_defaults:
+  experiment_id: "{experiment_id}"
+  source_paper_item: "docs/experiments/design/r1d_v12_parity_matrix.md#{experiment_id}"
+  seed: [100, 101]
+  timeout_s: 900
+  expected_outputs:
+    - v12_episode.json
+    - r1d_episode.json
+    - r1d_episode.npz
+    - v12_episode.npz
+  # T8b 提取脚本尚未落地：以下脚本名为 T8a 预留占位，T8b 用实际脚本替换。
+  # {catalog} 由 producer 替换为 <run_root>/catalog.json（D 线 --catalog 消费端），
+  # 用于解析 run_root/data_root/runs.csv 与行内相对 artifact/log 路径。
+  # --mode 是必需参数：混合实验（exp15_speed_v2 / exp17d_mechanism /
+  # exp27_ball_quality）同一 case 有 torque/position 两种执行模式，缺省会报错。
+  # extractor 固定写 <output>/<mode>/<experiment>/<case>.json（见 fix_plan §0）。
+  extract_argv:
+    - "{python}"
+    - "scripts/extract/extract_r1d_smoke_stats.py"
+    - "--experiment"
+    - "{experiment_id}"
+    - "--case"
+    - "{case_id}"
+    - "--data-root"
+    - "{data_root}"
+    - "--catalog"
+    - "{catalog}"
+    - "--mode"
+    - "{mode}"
+    - "--output"
+    - "{run_root}/stats"
+  # T8b/T8c 绘图脚本尚未落地：占位脚本名同上。
+  # plot 只读 <stats-root>/<experiment>/<case>.json，不再接受 --catalog；
+  # 两模式 stats/figures 均按 <mode> 分层，避免 torque/position 互相覆盖。
+  plot_argv:
+    - "{python}"
+    - "scripts/plot/plot_r1d_smoke_stats.py"
+    - "--stats-root"
+    - "{run_root}/stats/{mode}"
+    - "--experiment"
+    - "{experiment_id}"
+    - "--case"
+    - "{case_id}"
+    - "--output"
+    - "{run_root}/figures/{mode}"
+
+# 四档机制消融在 R1D 上的可行近似（R1D 共享 CLI 面拒绝 --ablation；
+# 用 cost.* 点路径覆盖表达；等价性待 T8b 用 exp17d 对照 RM65 数据确认）
+ablation_profiles:
+  full: {}
+  none:
+    cost.tube.use_softmin_terminal: false
+    cost.tube.Q_p_tube: 0.0
+    cost.tube.Q_v_tube: 0.0
+    cost.tube.Q_n_tube: 0.0
+  tube_only:
+    cost.tube.use_softmin_terminal: false
+  softmin_only:
+    cost.tube.Q_p_tube: 0.0
+    cost.tube.Q_v_tube: 0.0
+    cost.tube.Q_n_tube: 0.0
+
+expected_fields_common:
+  - hit.physical_hit
+  - hit.physical_hit_type
+  - hit.physical_hit_step
+  - hit.pos_error
+  - hit.contact_events
+  - hit.v_racket_at_hit
+  - episode.total_steps
+  - episode.safe_steps
+  - episode.first_plan_ms
+  - episode.wall_time_s
+  - input_sha256
+
+# ===========================================================================
+# 19 组正文实验（矩阵 r1d_v12_parity_matrix.md）
+# ===========================================================================
+experiments:
+  - id: exp15_speed_v2
+    title: 球速扫描 7/9/12/15 m/s（Torque；position 入口代表）
+    paper_ref: {section: "experiments.tex §V Speed sweep", figure: "Fig.5"}
+    matrix_ref: r1d_v12_parity_matrix.md#exp15_speed_v2
+    depends_on: []
+    expected_fields: [hit_type, hit.physical_hit_type, pos_error, v_racket_at_hit, wall_time]
+    t8b_consumer: "T8b：smoke stats → E1 球速命中率（paired_stats E1 口径：hit_type==active + physical_hit 对照）"
+    notes: "旧 exp15_v12_speed_sweep（SPEEDS=[7,9,12,15]×50）是 RM65 专用入口，本组用 batch_runner 重新表达；R1D 两模式同物理配置。"
+    cases:
+      - id: speed7
+        mode: torque
+        argv: {--ball-speed: 7}
+      - id: speed9
+        mode: torque
+        argv: {--ball-speed: 9}
+      - id: speed12
+        mode: torque
+        argv: {--ball-speed: 12}
+      - id: speed15
+        mode: torque
+        argv: {--ball-speed: 15}
+      - id: speed7_position
+        mode: position
+        argv: {--ball-speed: 7}
+
+  - id: exp16_limits_v2
+    title: 真机限位 vs 仿真默认（TCP 1.0 vs 1.8）
+    paper_ref: {section: "experiments.tex §V Limits (sim vs real)", table: "Table I 脚注"}
+    matrix_ref: r1d_v12_parity_matrix.md#exp16_limits_v2
+    depends_on: []
+    expected_fields: [hit_type, hit.physical_hit_type, pos_error]
+    t8b_consumer: "T8b：与 RM65 limits 表对照（1.8 仿真默认 vs 1.0 真机限位），配对比较"
+    notes: "R1D 的 max_tcp_speed 只来自 --runtime-config；1.0 臂用 case 级 runtime_overrides 生成快照（不影响 T7 冻结 runtime）。"
+    cases:
+      - id: sim_tcp18_speed7
+        mode: torque
+        argv: {--ball-speed: 7}
+      - id: real_tcp10_speed7
+        mode: torque
+        argv: {--ball-speed: 7}
+        runtime_overrides: {max_tcp_speed: 1.0}
+
+  - id: exp17b_perturb
+    title: 时间×空间扰动（full/none 两档）
+    paper_ref: {section: "experiments.tex §V Robustness", figure: "Fig.6"}
+    matrix_ref: r1d_v12_parity_matrix.md#exp17b_perturb
+    depends_on: []
+    expected_fields: [hit_type, hit.physical_hit_type, pos_error]
+    t8b_consumer: "T8b：扰动命中率曲线（E2/E3），与 RM65 random-amplitude 协议差异需在报告注明"
+    notes: "RM65 用 --random-perturb 随机幅度；R1D 共享 CLI 面不接受，改为固定幅度 task_overrides（adapted）。"
+    cases:
+      - {id: t0_s010_full, mode: torque, tier: full, status: adapted,
+         argv: {--ball-speed: 9},
+         task_overrides: {mpc.time_perturb_s: 0.0, mpc.space_perturb_m: 0.1},
+         blocked_reason: ""}
+      - {id: t25_s020_full, mode: torque, tier: full, status: adapted,
+         argv: {--ball-speed: 9},
+         task_overrides: {mpc.time_perturb_s: 0.025, mpc.space_perturb_m: 0.2}}
+      - {id: t0_s010_none, mode: torque, tier: none, status: adapted,
+         argv: {--ball-speed: 9},
+         task_overrides: {mpc.time_perturb_s: 0.0, mpc.space_perturb_m: 0.1}}
+      - {id: t25_s020_none, mode: torque, tier: none, status: adapted,
+         argv: {--ball-speed: 9},
+         task_overrides: {mpc.time_perturb_s: 0.025, mpc.space_perturb_m: 0.2}}
+
+  - id: exp17d_mechanism
+    title: 四档机制消融（Table II）
+    paper_ref: {section: "experiments.tex §V Mechanism ablation", table: "Table II"}
+    matrix_ref: r1d_v12_parity_matrix.md#exp17d_mechanism
+    depends_on: [exp17a_noise_none_control]
+    expected_fields: [hit_type, hit.physical_hit_type, pos_error, v_racket_at_hit]
+    t8b_consumer: "T8b：Table II 四档命中率 + 命中质量；position 代表链用于七关节/图表统计"
+    notes: "R1D 无 ablation_mode 开关，四档用 cost 覆盖近似；position 代表链：full/none + 前馈关闭对照。"
+    cases:
+      - {id: full, mode: torque, tier: full, argv: {--ball-speed: 9}}
+      - {id: tube_only, mode: torque, tier: tube_only, argv: {--ball-speed: 9}}
+      - {id: softmin_only, mode: torque, tier: softmin_only, argv: {--ball-speed: 9}}
+      - {id: none, mode: torque, tier: none, argv: {--ball-speed: 9}}
+      - {id: full_position, mode: position, tier: full, argv: {--ball-speed: 9}}
+      - {id: none_position, mode: position, tier: none, argv: {--ball-speed: 9}}
+      - {id: full_position_nofeedforward, mode: position, tier: full, status: adapted,
+         argv: {--ball-speed: 9},
+         task_overrides: {actuator.feedforward: false}}
+
+  - id: exp17e_perturb7
+    title: 7 m/s 扰动（full/none）
+    paper_ref: {section: "experiments.tex §V Robustness (7 m/s)"}
+    matrix_ref: r1d_v12_parity_matrix.md#exp17e_perturb7
+    depends_on: []
+    expected_fields: [hit_type, hit.physical_hit_type, pos_error]
+    t8b_consumer: "T8b：低速扰动命中率（与 exp17b 9 m/s 对照）"
+    notes: "fixed 幅度 adapted（同 exp17b）"
+    cases:
+      - {id: t0_s020_full, mode: torque, tier: full, status: adapted,
+         argv: {--ball-speed: 7},
+         task_overrides: {mpc.time_perturb_s: 0.0, mpc.space_perturb_m: 0.2}}
+      - {id: t50_s020_full, mode: torque, tier: full, status: adapted,
+         argv: {--ball-speed: 7},
+         task_overrides: {mpc.time_perturb_s: 0.05, mpc.space_perturb_m: 0.2}}
+      - {id: t0_s020_none, mode: torque, tier: none, status: adapted,
+         argv: {--ball-speed: 7},
+         task_overrides: {mpc.time_perturb_s: 0.0, mpc.space_perturb_m: 0.2}}
+      - {id: t50_s020_none, mode: torque, tier: none, status: adapted,
+         argv: {--ball-speed: 7},
+         task_overrides: {mpc.time_perturb_s: 0.05, mpc.space_perturb_m: 0.2}}
+
+  - id: exp17f_mechanism_perturb
+    title: 扰动下机制消融（tube_only/softmin_only）
+    paper_ref: {section: "experiments.tex §V Mechanism under perturbation"}
+    matrix_ref: r1d_v12_parity_matrix.md#exp17f_mechanism_perturb
+    depends_on: [exp17b_perturb]
+    expected_fields: [hit_type, hit.physical_hit_type, pos_error]
+    t8b_consumer: "T8b：扰动下机制贡献（走廊 vs softmin）"
+    notes: "fixed 幅度 adapted；R1D cost 覆盖近似。"
+    cases:
+      - {id: t0_s020_tube_only, mode: torque, tier: tube_only, status: adapted,
+         argv: {--ball-speed: 9},
+         task_overrides: {mpc.time_perturb_s: 0.0, mpc.space_perturb_m: 0.2}}
+      - {id: t50_s020_tube_only, mode: torque, tier: tube_only, status: adapted,
+         argv: {--ball-speed: 9},
+         task_overrides: {mpc.time_perturb_s: 0.05, mpc.space_perturb_m: 0.2}}
+      - {id: t0_s020_softmin_only, mode: torque, tier: softmin_only, status: adapted,
+         argv: {--ball-speed: 9},
+         task_overrides: {mpc.time_perturb_s: 0.0, mpc.space_perturb_m: 0.2}}
+      - {id: t50_s020_softmin_only, mode: torque, tier: softmin_only, status: adapted,
+         argv: {--ball-speed: 9},
+         task_overrides: {mpc.time_perturb_s: 0.05, mpc.space_perturb_m: 0.2}}
+
+  - id: exp17g_spatial_power
+    title: 空间扰动高功效角点（power analysis）
+    paper_ref: {section: "experiments.tex §V Power analysis"}
+    matrix_ref: r1d_v12_parity_matrix.md#exp17g_spatial_power
+    depends_on: []
+    expected_fields: [hit_type, hit.physical_hit_type, pos_error]
+    t8b_consumer: "T8b：高功效角点命中率（smoke 仅 2 seed/cell，功效估算由 T8b 说明局限）"
+    notes: "RM65 用 3000 seeds 高功效；smoke 只验证运行层可产出，不对功效下结论。fixed 幅度 adapted。"
+    cases:
+      - {id: t0_s020_full, mode: torque, tier: full, status: adapted,
+         argv: {--ball-speed: 9},
+         task_overrides: {mpc.time_perturb_s: 0.0, mpc.space_perturb_m: 0.2}}
+      - {id: t0_s020_tube_only, mode: torque, tier: tube_only, status: adapted,
+         argv: {--ball-speed: 9},
+         task_overrides: {mpc.time_perturb_s: 0.0, mpc.space_perturb_m: 0.2}}
+      - {id: t0_s020_softmin_only, mode: torque, tier: softmin_only, status: adapted,
+         argv: {--ball-speed: 9},
+         task_overrides: {mpc.time_perturb_s: 0.0, mpc.space_perturb_m: 0.2}}
+      - {id: t0_s020_none, mode: torque, tier: none, status: adapted,
+         argv: {--ball-speed: 9},
+         task_overrides: {mpc.time_perturb_s: 0.0, mpc.space_perturb_m: 0.2}}
+
+  - id: exp17h_extreme
+    title: 极端扰动（s=0.3 @9；s=0.2 @12）
+    paper_ref: {section: "experiments.tex §V Extreme perturbation"}
+    matrix_ref: r1d_v12_parity_matrix.md#exp17h_extreme
+    depends_on: [exp17b_perturb]
+    expected_fields: [hit_type, hit.physical_hit_type, pos_error]
+    t8b_consumer: "T8b：极端扰动命中率（区分 9/12 m/s 两个 Block）"
+    notes: "fixed 幅度 adapted。"
+    cases:
+      - {id: s030_speed9_full, mode: torque, tier: full, status: adapted,
+         argv: {--ball-speed: 9},
+         task_overrides: {mpc.time_perturb_s: 0.0, mpc.space_perturb_m: 0.3}}
+      - {id: s030_speed9_none, mode: torque, tier: none, status: adapted,
+         argv: {--ball-speed: 9},
+         task_overrides: {mpc.time_perturb_s: 0.0, mpc.space_perturb_m: 0.3}}
+      - {id: s020_speed12_full, mode: torque, tier: full, status: adapted,
+         argv: {--ball-speed: 12},
+         task_overrides: {mpc.time_perturb_s: 0.0, mpc.space_perturb_m: 0.2}}
+      - {id: s020_speed12_none, mode: torque, tier: none, status: adapted,
+         argv: {--ball-speed: 12},
+         task_overrides: {mpc.time_perturb_s: 0.0, mpc.space_perturb_m: 0.2}}
+
+  - id: exp17i_limits_ablation
+    title: 限位消融（TCP 1.0 vs 1.8 × 四档）
+    paper_ref: {section: "experiments.tex §V Limits ablation"}
+    matrix_ref: r1d_v12_parity_matrix.md#exp17i_limits_ablation
+    depends_on: []
+    expected_fields: [hit_type, hit.physical_hit_type, pos_error]
+    t8b_consumer: "T8b：限位消融对照（2 limits × 4 modes，@7 m/s）"
+    notes: "T0 源矩阵 2 limits × 4 modes @7；R1D 用 case 级 runtime_overrides 生成 1.0 快照，1.8 用冻结 runtime。"
+    cases:
+      - {id: tcp18_full_speed7, mode: torque, tier: full, argv: {--ball-speed: 7}}
+      - {id: tcp18_tube_only_speed7, mode: torque, tier: tube_only, argv: {--ball-speed: 7}}
+      - {id: tcp18_softmin_only_speed7, mode: torque, tier: softmin_only, argv: {--ball-speed: 7}}
+      - {id: tcp18_none_speed7, mode: torque, tier: none, argv: {--ball-speed: 7}}
+      - {id: tcp10_full_speed7, mode: torque, tier: full, argv: {--ball-speed: 7},
+         runtime_overrides: {max_tcp_speed: 1.0}}
+      - {id: tcp10_tube_only_speed7, mode: torque, tier: tube_only, argv: {--ball-speed: 7},
+         runtime_overrides: {max_tcp_speed: 1.0}}
+      - {id: tcp10_softmin_only_speed7, mode: torque, tier: softmin_only, argv: {--ball-speed: 7},
+         runtime_overrides: {max_tcp_speed: 1.0}}
+      - {id: tcp10_none_speed7, mode: torque, tier: none, argv: {--ball-speed: 7},
+         runtime_overrides: {max_tcp_speed: 1.0}}
+
+  - id: exp18_sensitivity
+    title: 参数敏感性（β / window / corridor + none 基准）
+    paper_ref: {section: "experiments.tex §V Sensitivity", figure: "Fig.9"}
+    matrix_ref: r1d_v12_parity_matrix.md#exp18_sensitivity
+    depends_on: []
+    expected_fields: [hit_type, hit.physical_hit_type, pos_error]
+    t8b_consumer: "T8b：敏感性曲线（与 exp18_fig_assets 的 timing 共用图组）"
+    notes: "单因子覆盖；none 基准用于配对。"
+    cases:
+      - {id: beta1_full, mode: torque, tier: full, argv: {--ball-speed: 9},
+         task_overrides: {mpc.softmin_beta: 1.0}}
+      - {id: beta10_full, mode: torque, tier: full, argv: {--ball-speed: 9},
+         task_overrides: {mpc.softmin_beta: 10.0}}
+      - {id: window25_full, mode: torque, tier: full, argv: {--ball-speed: 9},
+         task_overrides: {cost.tube.window_half_ms: 25}}
+      - {id: radius008_tube_only, mode: torque, tier: tube_only, argv: {--ball-speed: 9},
+         task_overrides: {cost.tube.corridor_radius: 0.08}}
+      - {id: baseline_none, mode: torque, tier: none, argv: {--ball-speed: 9}}
+
+  - id: exp19_hardmin
+    title: hard-min softmin（β=1e6）× full/softmin_only
+    paper_ref: {section: "experiments.tex §V Hard-min ablation"}
+    matrix_ref: r1d_v12_parity_matrix.md#exp19_hardmin
+    depends_on: [exp17d_mechanism]
+    expected_fields: [hit_type, hit.physical_hit_type, pos_error]
+    t8b_consumer: "T8b：hard-min 与 softmin 的命中率/质量对照"
+    notes: "β=1e6 通过 mpc.softmin_beta 覆盖（R1D 白名单含该键）。"
+    cases:
+      - {id: hardmin_full, mode: torque, tier: full, argv: {--ball-speed: 9},
+         task_overrides: {mpc.softmin_beta: 1000000.0}}
+      - {id: hardmin_softmin_only, mode: torque, tier: softmin_only,
+         argv: {--ball-speed: 9},
+         task_overrides: {mpc.softmin_beta: 1000000.0}}
+
+  - id: exp21_hardmin_tcp10
+    title: hard-min @ TCP 1.0（真机限位）
+    paper_ref: {section: "experiments.tex §V Hard-min", table: "Table II 备选"}
+    matrix_ref: r1d_v12_parity_matrix.md#exp21_hardmin_tcp10
+    depends_on: [exp19_hardmin]
+    expected_fields: [hit_type, hit.physical_hit_type, pos_error]
+    t8b_consumer: "T8b：hard-min 在 TCP 1.0 真机限位下的命中率/质量"
+    notes: "T0 源 config：speed7 × full/softmin_only + TCP1.0（运行入口已从 overnight EXPERIMENTS 消失，按 config.yaml 重建）。"
+    cases:
+      - {id: hardmin_tcp10_full_speed7, mode: torque, tier: full,
+         argv: {--ball-speed: 7},
+         task_overrides: {mpc.softmin_beta: 1000000.0},
+         runtime_overrides: {max_tcp_speed: 1.0}}
+      - {id: hardmin_tcp10_softmin_only_speed7, mode: torque, tier: softmin_only,
+         argv: {--ball-speed: 7},
+         task_overrides: {mpc.softmin_beta: 1000000.0},
+         runtime_overrides: {max_tcp_speed: 1.0}}
+
+  - id: exp22_shared_spatial
+    title: shared-input 空间扰动（ballstate 目标）
+    paper_ref: {section: "experiments.tex §V Shared-input spatial"}
+    matrix_ref: r1d_v12_parity_matrix.md#exp22_shared_spatial
+    depends_on: [exp17d_mechanism]
+    expected_fields: [hit_type, hit.physical_hit_type, pos_error]
+    t8b_consumer: "T8b：shared-input 协议命中率（与 exp24 对照）"
+    notes: "fixed 幅度 adapted；ballstate 通过 mpc.spatial_perturb_target 覆盖。"
+    cases:
+      - {id: t0_s020_full, mode: torque, tier: full, status: adapted,
+         argv: {--ball-speed: 9},
+         task_overrides: {mpc.time_perturb_s: 0.0, mpc.space_perturb_m: 0.2,
+                          mpc.spatial_perturb_target: ballstate}}
+      - {id: t0_s020_none, mode: torque, tier: none, status: adapted,
+         argv: {--ball-speed: 9},
+         task_overrides: {mpc.time_perturb_s: 0.0, mpc.space_perturb_m: 0.2,
+                          mpc.spatial_perturb_target: ballstate}}
+      - {id: t25_s020_full, mode: torque, tier: full, status: adapted,
+         argv: {--ball-speed: 9},
+         task_overrides: {mpc.time_perturb_s: 0.025, mpc.space_perturb_m: 0.2,
+                          mpc.spatial_perturb_target: ballstate}}
+      - {id: t25_s020_none, mode: torque, tier: none, status: adapted,
+         argv: {--ball-speed: 9},
+         task_overrides: {mpc.time_perturb_s: 0.025, mpc.space_perturb_m: 0.2,
+                          mpc.spatial_perturb_target: ballstate}}
+
+  - id: exp23_nofreeze
+    title: 首规划不冻结（no-freeze first plan）
+    paper_ref: {section: "experiments.tex §V First-plan freeze"}
+    matrix_ref: r1d_v12_parity_matrix.md#exp23_nofreeze
+    depends_on: [exp17d_mechanism]
+    expected_fields: [hit_type, hit.physical_hit_type, first_plan_ms, pos_error]
+    t8b_consumer: "T8b：首规划冻结影响（R1D 无法复现 --no-freeze-first-plan，需说明映射）"
+    notes: "R1D 共享 CLI 面拒绝 --no-freeze-first-plan；改用 mpc.first_plan_iters=5 的快速首规划作为 adapted 代表条件。"
+    cases:
+      - {id: fast_first_plan_full, mode: torque, tier: full, status: adapted,
+         argv: {--ball-speed: 9},
+         task_overrides: {mpc.first_plan_iters: 5}}
+
+  - id: exp24_shared_full
+    title: shared-input full 消融（ballstate 目标）
+    paper_ref: {section: "experiments.tex §V Shared-input full", table: "Table II 附"}
+    matrix_ref: r1d_v12_parity_matrix.md#exp24_shared_full
+    depends_on: [exp22_shared_spatial]
+    expected_fields: [hit_type, hit.physical_hit_type, pos_error]
+    t8b_consumer: "T8b：shared-input 全档消融；exp28 复用本组代表格产物"
+    notes: "fixed 幅度 adapted；--shared-input-full 映射为 mpc.shared_input_full=true。"
+    cases:
+      - {id: t0_s020_full, mode: torque, tier: full, status: adapted,
+         argv: {--ball-speed: 9},
+         task_overrides: {mpc.time_perturb_s: 0.0, mpc.space_perturb_m: 0.2,
+                          mpc.spatial_perturb_target: ballstate,
+                          mpc.shared_input_full: true}}
+      - {id: t0_s020_none, mode: torque, tier: none, status: adapted,
+         argv: {--ball-speed: 9},
+         task_overrides: {mpc.time_perturb_s: 0.0, mpc.space_perturb_m: 0.2,
+                          mpc.spatial_perturb_target: ballstate,
+                          mpc.shared_input_full: true}}
+      - {id: t25_s020_full, mode: torque, tier: full, status: adapted,
+         argv: {--ball-speed: 9},
+         task_overrides: {mpc.time_perturb_s: 0.025, mpc.space_perturb_m: 0.2,
+                          mpc.spatial_perturb_target: ballstate,
+                          mpc.shared_input_full: true}}
+      - {id: t25_s020_none, mode: torque, tier: none, status: adapted,
+         argv: {--ball-speed: 9},
+         task_overrides: {mpc.time_perturb_s: 0.025, mpc.space_perturb_m: 0.2,
+                          mpc.spatial_perturb_target: ballstate,
+                          mpc.shared_input_full: true}}
+
+  - id: exp25_select_one
+    title: select_one 消融
+    paper_ref: {section: "experiments.tex §V Candidate selection"}
+    matrix_ref: r1d_v12_parity_matrix.md#exp25_select_one
+    depends_on: [exp17a_noise_none_control]
+    expected_fields: [hit_type, hit.physical_hit_type, pos_error]
+    t8b_consumer: "T8b：select_one 对照缺失说明（外部依赖，R1D 未暴露选择策略开关）"
+    notes: "外部依赖/R1D 无 select_one override（_OVERRIDE_VALIDATORS 无 ablation_mode）；该 cell 不可在 R1D 跑，须在 T8b 报告中显式标注缺失。"
+    cases:
+      # blocked case 仍显式给出全部计划字段：不适用字段写 null（N14）。
+      - id: select_one_full_speed9
+        mode: torque
+        tier: full
+        status: blocked
+        argv: null
+        seed: null
+        timeout_s: null
+        expected_outputs: null
+        extract_argv: null
+        plot_argv: null
+        blocked_reason: "外部依赖：select_one 消融模式无 R1D override 键（_OVERRIDE_VALIDATORS 无 ablation_mode），需选择策略开关；该 cell 在 R1D 不可跑，T8b 须显式标注缺失"
+
+  - id: exp26_tcp_grid
+    title: TCP 网格（1.0/1.4/1.8 × 7/9 m/s）
+    paper_ref: {section: "experiments.tex §V TCP grid"}
+    matrix_ref: r1d_v12_parity_matrix.md#exp26_tcp_grid
+    depends_on: []
+    expected_fields: [hit_type, hit.physical_hit_type, pos_error]
+    t8b_consumer: "T8b：TCP 网格热力图（R1D 代表条件：3 TCP 档 × 7 m/s full）"
+    notes: "源矩阵 2 speeds × 3 TCP × 4 modes；R1D 最小覆盖 3 TCP 档 @7 m/s full（每 cell 2 共同 seed）。"
+    cases:
+      - {id: tcp18_full_speed7, mode: torque, tier: full, argv: {--ball-speed: 7}}
+      - {id: tcp14_full_speed7, mode: torque, tier: full, argv: {--ball-speed: 7},
+         runtime_overrides: {max_tcp_speed: 1.4}}
+      - {id: tcp10_full_speed7, mode: torque, tier: full, argv: {--ball-speed: 7},
+         runtime_overrides: {max_tcp_speed: 1.0}}
+
+  - id: exp27_ball_quality
+    title: 出球质量（ball_out_speed / ball_out_vy）
+    paper_ref: {section: "experiments.tex §V Ball quality", table: "Table III"}
+    matrix_ref: r1d_v12_parity_matrix.md#exp27_ball_quality
+    depends_on: [exp17d_mechanism]
+    expected_fields: [hit.ball_out_speed, hit.ball_out_vy, hit.physical_hit_type, pos_error]
+    t8b_consumer: "T8b：从 v12_episode.json hit 段提取 ball_out_speed/vy（R1D 结果行不含该字段）"
+    notes: "9/12 m/s × full/none + position 代表链。"
+    cases:
+      - {id: speed9_full, mode: torque, tier: full, argv: {--ball-speed: 9}}
+      - {id: speed12_full, mode: torque, tier: full, argv: {--ball-speed: 12}}
+      - {id: speed9_none, mode: torque, tier: none, argv: {--ball-speed: 9}}
+      - {id: speed9_full_position, mode: position, tier: full, argv: {--ball-speed: 9}}
+
+  - id: exp28_always_collision
+    title: 碰撞常开验证（R1D 物理接触判定退化口径）
+    kind: derived
+    derived_from: exp24_shared_full
+    paper_ref: {section: "experiments.tex §V Collision always-on", table: "审稿 P4"}
+    matrix_ref: r1d_v12_parity_matrix.md#exp28_always_collision
+    depends_on: [exp24_shared_full]
+    expected_fields: [hit.physical_hit, hit.physical_hit_type, hit.contact_events]
+    t8b_consumer: "T8b：复用 exp24 代表格产物 + v12_episode.json contact_events，比较窗口口径与物理接触口径；不新增回合"
+    notes: "R1D 场景无 --always-collision 窗口开关（共享 CLI 面拒绝），物理接触判定常开，故本组在 R1D 上退化为 exp24 产物的判定口径对照。"
+    cases: []
+
+# ===========================================================================
+# 额外依赖（矩阵要求：exp18_fig_assets / exp18_tcp_exempt / exp17a none 对照）
+# ===========================================================================
+extra_dependencies:
+  - id: exp18_fig_assets
+    kind: tool
+    title: 图资产（timing.json + NPZ 扫描）
+    paper_ref: {section: "experiments.tex §VI Real-time", figure: "Fig.7/Fig.8"}
+    matrix_ref: r1d_v12_parity_matrix.md#额外依赖
+    depends_on: []
+    expected_outputs: [exp18_fig_assets/timing.json, exp18_fig_assets/manifest.json,
+                       "exp18_fig_assets/raw/*.npz",
+                       "exp18_fig_assets/raw/timing_logs/*.log"]
+    t8b_consumer: "T8b/T8c：fig7 计时 ECDF + fig8 失败模式；R1D async 序列不可用（共享 CLI 面拒绝 --async-replan），timing 只产 sync"
+    command: ["{python}", "scripts/exp/collect_fig_assets.py",
+              "--timing-episodes", "3", "--async-episodes", "0",
+              "--scan-cap", "2", "--seed-start", "100",
+              "--data-root", "{data_root}",
+              "--output", "{run_root}/exp18_fig_assets",
+              "--robot-config", "configs/robots/r1d_right.yaml",
+              "--runtime-config", "configs/robots/r1d_v12_runtime_right.yaml",
+              "--racket-config", "configs/rackets/blade100_v9_reference.yaml"]
+
+  - id: exp18_tcp_exempt_window_stats
+    kind: tool
+    title: TCP 豁免窗口统计（window_stats.csv）
+    paper_ref: {section: "experiments.tex §V TCP exemption"}
+    matrix_ref: r1d_v12_parity_matrix.md#额外依赖
+    depends_on: []
+    expected_outputs: [exp18_tcp_exempt/window_stats.csv]
+    t8b_consumer: "T8b：若可构造则对照豁免窗口；当前 R1D 不可达"
+    status: blocked
+    blocked_reason: "window_stats.csv 由 RM65 专用 --limits-config/TCP 1.0 豁免扫描产生，R1D 共享 CLI 面不接受 --limits-config/--max-tcp；需 T7 的 TCP1.0 runtime 变体与 T8b 决定映射。"
+
+  - id: exp17a_noise_none_control
+    kind: batch
+    title: 观测噪声 none 对照（9 m/s）
+    paper_ref: {section: "experiments.tex §V Noise"}
+    matrix_ref: r1d_v12_parity_matrix.md#额外依赖
+    depends_on: []
+    expected_fields: [hit_type, hit.physical_hit_type, pos_error]
+    t8b_consumer: "T8b：exp25/exp28 对照基线；R1D 默认无噪声、KF 关闭"
+    notes: "显式固定 perception 噪声键，避免 T7 冻结文件未来改动影响对照口径。"
+    cases:
+      - {id: none_9ms_full, mode: torque, tier: full, argv: {--ball-speed: 9},
+         task_overrides: {perception.obs_noise_pos: 0.0,
+                          perception.obs_noise_vel: 0.0,
+                          perception.obs_use_kf: false}}

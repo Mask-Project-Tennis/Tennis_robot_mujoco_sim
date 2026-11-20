@@ -23,8 +23,8 @@
 8. ``test_geometry_and_inertia_match_stage2_model``：带球模型与同参数
    裸模型（阶段 2）逐名比较 body 质量/惯量/位姿、geom 类型/尺寸/位姿、
    site 位置、jnt_range 完全一致。
-9. ``test_template_and_asset_bytes_unchanged``：双侧模板 + 四份片段
-   字节与 git HEAD 一致（组装只动内存副本）。
+9. ``test_template_and_asset_bytes_unchanged``：双侧模板 + 三份只读片段
+   字节与 git HEAD 一致（env 模板由重建/确定性测试覆盖）。
 10. 负例：球 free joint 名称与既有 hinge 冲突（类型错误）、racket/
     保护对 geom 名称缺失、保护对为空、掩码不可观测保护对、task 与
     profile 身份不一致。
@@ -73,12 +73,11 @@ _TEMPLATE_PATHS = {
     side: REPO_ROOT / "src" / "robot" / f"r1d_model_{side}.xml" for side in SIDES
 }
 
-# 字节未变校验的资产清单（四份只读片段；模板由工厂生成，另有
+# 字节未变校验的资产清单（三份只读片段；env 与模板由工厂生成，另有
 # test_r1d_model 的“磁盘模板 == 工厂产物 / 重建字节确定”覆盖）
 _ASSET_REL_PATHS = (
     "src/robot/r1d_arm_left.xml",
     "src/robot/r1d_arm_right.xml",
-    "src/robot/r1d_env.xml",
     "src/robot/r1d_assets.xml",
 )
 

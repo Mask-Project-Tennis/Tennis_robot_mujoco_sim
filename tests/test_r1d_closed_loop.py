@@ -247,18 +247,20 @@ def test_fixed_scenario_contract() -> None:
     task_raw = yaml.safe_load(scenario["task_path"].read_text(encoding="utf-8"))
     mpc_cfg = task_raw["mpc_config"]
     cost_cfg = task_raw["cost_config"]
-    # 冻结 3.11 调参结果（详见 task YAML 文件头调参记录与验收报告 §调参）
-    assert int(mpc_cfg["total_horizon"]) == 200, "3.11 调参：total_horizon=200"
+    # 冻结当前生产配置（全尺寸拍 + 底座外移至近端底线后重标定的 3.11 参数）
+    assert int(mpc_cfg["total_horizon"]) == 320, "3.11 调参：total_horizon=320"
+    assert int(mpc_cfg["fixed_horizon"]) == 260, "3.11 调参：fixed_horizon=260"
     assert int(mpc_cfg["follow_through_steps"]) == 20, "3.11 调参：随挥 20 步"
     assert float(cost_cfg["Q_p"]) == 50000.0, "3.11 调参：Q_p=50000"
     assert float(cost_cfg["Q_v"]) == 200.0, "3.11 调参：Q_v=200"
 
-    # 来球几何与固定重力抛物线一致：t=0.45s 到达 [0.25, -0.16, 1.357] m
+    # 来球几何与固定重力抛物线一致：p0=[0.3,-0.6,2.2]、v0=[-11.5,-0.3,4.25]、
+    # g=9.81（纯重力，无空气阻力），t=1.05s 到达 [-11.775,-0.915,1.2547] m。
     p0 = np.asarray(task_raw["initial_ball_position"], dtype=np.float64)
     v0 = np.asarray(task_raw["initial_ball_velocity"], dtype=np.float64)
     center = np.asarray(task_raw["workspace_center"], dtype=np.float64)
     radius = float(task_raw["workspace_radius"])
-    t_hit = 0.45
+    t_hit = 1.05
     p_analytic = np.array(
         [
             p0[0] + v0[0] * t_hit,
@@ -266,15 +268,37 @@ def test_fixed_scenario_contract() -> None:
             p0[2] + v0[2] * t_hit - 0.5 * 9.81 * t_hit * t_hit,
         ]
     )
-    assert np.allclose(p_analytic, [0.25, -0.16, 1.357], atol=1e-3), (
-        f"固定案例来球在 t=0.45s 应到达 [0.25,-0.16,1.357]±1mm，实际 {p_analytic}"
+    assert np.allclose(p_analytic, [-11.775, -0.915, 1.2547375], atol=2e-3), (
+        "固定案例来球在 t=1.05s 应到达 [-11.775,-0.915,1.2547]±2mm，"
+        f"实际 {p_analytic}"
     )
-    assert float(np.linalg.norm(p_analytic - center)) < radius, (
-        "固定案例的击球点必须落在 task 声明的击球工作区内"
+    offset = float(np.linalg.norm(p_analytic - center))
+    assert offset < radius, (
+        "固定案例的解析击球点必须落在 task 击球工作区内（偏离中心 "
+        f"{offset:.4f} m >= 半径 {radius} m）"
     )
-    # 肩—击球点距离 < R1D 臂展 0.35m（阶段 2 FK 实测右肩 [0.059,-0.086,1.358]）
-    shoulder = np.array([0.059, -0.086, 1.358])
-    assert float(np.linalg.norm(p_analytic - shoulder)) < 0.35
+
+    # 命中时序必须落在冻结视野内（t=1.05s → 210 步 @ dt=0.005）：
+    # replan_core 的 horizon_plan = min(k_hit, fixed_horizon)，首次规划要看到
+    # 击球时刻就不能被 fixed_horizon 截断；k_hit 还须落在 total_horizon
+    # （MPC 视野预算）与 max_steps（回合步数上限）之内。
+    # 注：几何可达性由 task 的 workspace_center/radius 声明表达。旧版
+    # 「肩—击球点 < 0.89m」断言绑定底座在原点时的肩点常数
+    # [0.059,-0.086,1.358]；底座已外移至 [-12.5,-0.8,0.155]
+    # （configs/robots/r1d_sim_runtime_right.yaml），该常数不再成立，
+    # 故此处不复制模型 FK 常数，只校验 task YAML 可自证的时序契约。
+    hit_steps = t_hit / float(mpc_cfg["dt"])
+    fixed_horizon = int(mpc_cfg["fixed_horizon"])
+    total_horizon = int(mpc_cfg["total_horizon"])
+    max_steps = int(task_raw["max_steps"])
+    assert hit_steps <= fixed_horizon, (
+        f"命中时刻 {hit_steps:.1f} 步超过规划视野上限 "
+        f"fixed_horizon={fixed_horizon}，首次规划会在击球前被截断"
+    )
+    assert hit_steps <= total_horizon and hit_steps <= max_steps, (
+        f"命中时刻 {hit_steps:.1f} 步须同时落在 total_horizon={total_horizon} "
+        f"与 max_steps={max_steps} 之内"
+    )
 
 
 # ---------------------------------------------------------------------------

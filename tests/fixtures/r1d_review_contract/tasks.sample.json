@@ -1,0 +1,175 @@
+{
+  "schema": "r1d_paper_smoke_resolved_v1",
+  "synthetic": true,
+  "source_manifest": "tests/fixtures/r1d_review_contract/manifest.sample.yaml",
+  "script": "scripts/rm65_mpc_v12.py",
+  "run_root": "run",
+  "data_root": "run/data",
+  "configs": {
+    "robot": "configs/robots/r1d_right.yaml",
+    "runtime": "configs/robots/r1d_v12_runtime_right.yaml",
+    "racket": "configs/rackets/blade100_v9_reference.yaml",
+    "task_overlay": "configs/r1d_v12.yaml",
+    "sim_task_config": null
+  },
+  "config_hash": "159148a4e9b47fb5",
+  "identity": {
+    "robot_id": "unitree_r1d",
+    "mode": "",
+    "racket_id": "blade100_v9_reference",
+    "config_hash": "159148a4e9b47fb5",
+    "metric_schema": "v12_episode_v2_physical_hit"
+  },
+  "seeds": [100],
+  "timeout_s_default": 900.0,
+  "tasks": [
+    {
+      "experiment": "exp16_limits_v2",
+      "case_id": "l1_tcp10",
+      "seed": 100,
+      "mode": "torque",
+      "case_status": "ready",
+      "tier": null,
+      "config_id": "ballspeed7__noplot__robotconfigconfigs_robots_r1d_right.yaml__runtimeconfigconfigs_robots_r1d_v12_runtime_right.yaml__servebox",
+      "config_hash": "159148a4e9b47fb5",
+      "identity": {
+        "robot_id": "unitree_r1d",
+        "mode": "torque",
+        "racket_id": "blade100_v9_reference",
+        "config_hash": "159148a4e9b47fb5",
+        "metric_schema": "v12_episode_v2_physical_hit"
+      },
+      "runtime": {
+        "base": "configs/robots/r1d_v12_runtime_right.yaml",
+        "base_sha256": "8eafd10a505a5188eec4cfb52b13058971bd6ca5c581b51c936cda2a2b7169dc",
+        "overrides": {"max_tcp_speed": 1.0},
+        "snapshot": "runtime_overrides/exp16_limits_v2/l1_tcp10/seed100.yaml",
+        "sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      "argv": {
+        "--serve-box": null,
+        "--no-plot": null,
+        "--ball-speed": 7,
+        "--robot-config": "configs/robots/r1d_right.yaml",
+        "--runtime-config": "runtime_overrides/exp16_limits_v2/l1_tcp10/seed100.yaml",
+        "--seed": 100,
+        "--output": "artifacts/exp16_limits_v2/l1_tcp10/seed100"
+      },
+      "artifact_dir": "artifacts/exp16_limits_v2/l1_tcp10/seed100",
+      "log_path": "logs/exp16_limits_v2/ballspeed7__noplot__robotconfigconfigs_robots_r1d_right.yaml__runtimeconfigconfigs_robots_r1d_v12_runtime_right.yaml__servebox__seed100.log",
+      "timeout_s": 900.0
+    },
+    {
+      "experiment": "exp16_limits_v2",
+      "case_id": "l1_tcp10",
+      "seed": 100,
+      "mode": "position",
+      "case_status": "ready",
+      "tier": null,
+      "config_id": "ballspeed7__noplot__positionmode__robotconfigconfigs_robots_r1d_right.yaml__runtimeconfigconfigs_robots_r1d_v12_runtime_right.yaml__servebox",
+      "config_hash": "159148a4e9b47fb5",
+      "identity": {
+        "robot_id": "unitree_r1d",
+        "mode": "position",
+        "racket_id": "blade100_v9_reference",
+        "config_hash": "159148a4e9b47fb5",
+        "metric_schema": "v12_episode_v2_physical_hit"
+      },
+      "runtime": {
+        "base": "configs/robots/r1d_v12_runtime_right.yaml",
+        "base_sha256": "8eafd10a505a5188eec4cfb52b13058971bd6ca5c581b51c936cda2a2b7169dc",
+        "overrides": {"max_tcp_speed": 1.0},
+        "snapshot": "runtime_overrides/exp16_limits_v2/l1_tcp10/seed100_position.yaml",
+        "sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+      },
+      "argv": {
+        "--serve-box": null,
+        "--no-plot": null,
+        "--position-mode": null,
+        "--ball-speed": 7,
+        "--robot-config": "configs/robots/r1d_right.yaml",
+        "--runtime-config": "runtime_overrides/exp16_limits_v2/l1_tcp10/seed100_position.yaml",
+        "--seed": 100,
+        "--output": "artifacts/exp16_limits_v2/l1_tcp10/position_seed100"
+      },
+      "artifact_dir": "artifacts/exp16_limits_v2/l1_tcp10/position_seed100",
+      "log_path": "logs/exp16_limits_v2/ballspeed7__noplot__positionmode__robotconfigconfigs_robots_r1d_right.yaml__runtimeconfigconfigs_robots_r1d_v12_runtime_right.yaml__servebox__seed100.log",
+      "timeout_s": 900.0
+    },
+    {
+      "experiment": "exp17d_mechanism",
+      "case_id": "full",
+      "seed": 100,
+      "mode": "torque",
+      "case_status": "ready",
+      "tier": "full",
+      "config_id": "ballspeed7__noplot__robotconfigconfigs_robots_r1d_right.yaml__runtimeconfigconfigs_robots_r1d_v12_runtime_right.yaml__servebox",
+      "config_hash": "159148a4e9b47fb5",
+      "identity": {
+        "robot_id": "unitree_r1d",
+        "mode": "torque",
+        "racket_id": "blade100_v9_reference",
+        "config_hash": "159148a4e9b47fb5",
+        "metric_schema": "v12_episode_v2_physical_hit"
+      },
+      "runtime": {
+        "base": "configs/robots/r1d_v12_runtime_right.yaml",
+        "base_sha256": "8eafd10a505a5188eec4cfb52b13058971bd6ca5c581b51c936cda2a2b7169dc",
+        "overrides": {},
+        "snapshot": null,
+        "sha256": "8eafd10a505a5188eec4cfb52b13058971bd6ca5c581b51c936cda2a2b7169dc"
+      },
+      "argv": {
+        "--serve-box": null,
+        "--no-plot": null,
+        "--ball-speed": 7,
+        "--robot-config": "configs/robots/r1d_right.yaml",
+        "--runtime-config": "configs/robots/r1d_v12_runtime_right.yaml",
+        "--seed": 100,
+        "--output": "artifacts/exp17d_mechanism/full/seed100"
+      },
+      "artifact_dir": "artifacts/exp17d_mechanism/full/seed100",
+      "log_path": "logs/exp17d_mechanism/ballspeed7__noplot__robotconfigconfigs_robots_r1d_right.yaml__runtimeconfigconfigs_robots_r1d_v12_runtime_right.yaml__servebox__seed100.log",
+      "timeout_s": 900.0
+    },
+    {
+      "experiment": "exp17d_mechanism",
+      "case_id": "none",
+      "seed": 100,
+      "mode": "position",
+      "case_status": "ready",
+      "tier": "none",
+      "config_id": "ballspeed7__noplot__positionmode__robotconfigconfigs_robots_r1d_right.yaml__runtimeconfigconfigs_robots_r1d_v12_runtime_right.yaml__servebox",
+      "config_hash": "159148a4e9b47fb5",
+      "identity": {
+        "robot_id": "unitree_r1d",
+        "mode": "position",
+        "racket_id": "blade100_v9_reference",
+        "config_hash": "159148a4e9b47fb5",
+        "metric_schema": "v12_episode_v2_physical_hit"
+      },
+      "runtime": {
+        "base": "configs/robots/r1d_v12_runtime_right.yaml",
+        "base_sha256": "8eafd10a505a5188eec4cfb52b13058971bd6ca5c581b51c936cda2a2b7169dc",
+        "overrides": {},
+        "snapshot": null,
+        "sha256": "8eafd10a505a5188eec4cfb52b13058971bd6ca5c581b51c936cda2a2b7169dc"
+      },
+      "argv": {
+        "--serve-box": null,
+        "--no-plot": null,
+        "--position-mode": null,
+        "--ball-speed": 7,
+        "--robot-config": "configs/robots/r1d_right.yaml",
+        "--runtime-config": "configs/robots/r1d_v12_runtime_right.yaml",
+        "--seed": 100,
+        "--output": "artifacts/exp17d_mechanism/none/position_seed100"
+      },
+      "artifact_dir": "artifacts/exp17d_mechanism/none/position_seed100",
+      "log_path": "logs/exp17d_mechanism/ballspeed7__noplot__positionmode__robotconfigconfigs_robots_r1d_right.yaml__runtimeconfigconfigs_robots_r1d_v12_runtime_right.yaml__servebox__seed100.log",
+      "timeout_s": 900.0
+    }
+  ],
+  "blocked": [],
+  "counts": {"cases": 2, "tasks": 4}
+}

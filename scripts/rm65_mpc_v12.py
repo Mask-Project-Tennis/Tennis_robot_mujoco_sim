@@ -33,26 +33,22 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.sim.rm65_env import RM65Env
-from src.tennis.ball import (
-    generate_ball_to_target_box,
-    generate_ball_from_serve_box,
-)
-from src.tennis.hitting import find_hitting_point_physics
-from src.ilqt.robot_limits import RobotLimits
-from src.ilqt.tube_types import TubeConfig, HitWindow, HittingTube
-from src.ilqt.tube_builder import search_hit_window, build_hitting_tube
-from src.ilqt.mpc_controller import MPCController, MPCConfig
-from src.ilqt.episode_runner import EpisodeRunner
-from src.ilqt.components.sim_perception import SimPerception
-from src.ilqt.components.predictive_safety import PredictiveSafetyFilter
-from src.ilqt.components.sim_component import SimComponent
-from src.real.trajectory_recorder import TrajectoryRecorder
-from src.robot.constants import SHOULDER_POS, WORKSPACE_RADIUS, INIT_Q, INIT_Q_LEFT
+from src.ilqt.tube_types import HitWindow
+from src.robot.constants import INIT_Q, INIT_Q_LEFT
+from src.robot.robot_profile import load_robot_profile
 from src.utils.yaml_utils import load_config, merge_configs
 
 # ── 多机器人入口（阶段 3 · Task 3.10）：R1D 仿真路径委托新 runner ──
 # 模块级导入使 CLI 分派可被测试 monkeypatch（不复制 V12 主循环）
-from src.sim.r1d_runner import run_r1d_episode
+from src.sim.hit_detection import classify_hit_result
+from src.sim.r1d_runner import run_r1d_episode, write_v12_r1d_artifacts
+
+# ── V12 共享管线（Task 5）：RM65/R1D 共用 src/sim/v12_episode.py ──
+from src.sim.v12_config import ResolvedV12Config, resolve_v12_config
+from src.sim.v12_episode import V12EpisodeResult, run_v12_episode
+
+# ── T6：统一 v2 产物（v12_episode_v2 JSON/NPZ + snapshot）──
+from src.sim.episode_artifacts import write_episode_artifacts
 
 logging.basicConfig(
     level=logging.INFO,
@@ -139,6 +135,13 @@ def _import_v11_visuals():
 _R1D_SHARED_FLAGS = frozenset({
     "robot_config", "runtime_config", "sim_task_config", "output",
     "seed", "no_plot", "viewer", "log_level",
+    "racket_config", "task_overrides",
+    # V12 共享基础参数：R1D overlay 同样接受并真正进入 ResolvedV12Config
+    # （serve_box → serve.mode、ball_speed → serve.ball_speed、
+    #   no_bounce → scene.use_bounce、position_mode → MPCConfig.is_position_mode、
+    #   async_replan → MPCConfig.async_mode；T4/T5 已为 R1D 实现异步重规划，
+    #   T9 命令行联调确认必须放开，不能当作 RM65 专属参数拒绝）。
+    "serve_box", "ball_speed", "no_bounce", "position_mode", "async_replan",
 })
 
 # 最近一次 R1D 分派拒绝的 RM65 专属参数清单（供测试断言；非生产 API）
@@ -272,7 +275,16 @@ def _build_parser() -> argparse.ArgumentParser:
                         help="R1D 仿真任务 YAML（仅 R1D 路径，如 configs/r1d_sim_left.yaml；"
                              "来球/步数/权重全部来自该文件）")
     parser.add_argument("--output", type=Path, default=None,
-                        help="R1D 产物输出目录（仅 R1D 路径；缺省 results/r1d_sim）")
+                        help="产物输出目录（RM65 与 R1D 路径均生效；RM65 缺省 "
+                             "results/，R1D 缺省 results/r1d_sim）")
+    # ── V12 共享管线（Task 5）：球拍描述与任务点路径覆盖 ──
+    parser.add_argument("--racket-config", type=Path, default=None,
+                        help="球拍描述 YAML（共享管线使用；R1D 右臂缺省由注册表"
+                             "提供 configs/rackets/blade100_v9_reference.yaml）")
+    parser.add_argument("--task-overrides", action="append", default=None,
+                        metavar="KEY=VALUE",
+                        help="任务参数点路径覆盖（可重复，如 "
+                             "--task-overrides mpc.total_horizon=240；值按 YAML 解析）")
     return parser
 
 
@@ -304,6 +316,60 @@ def _explicit_cli_actions(
     return explicit
 
 
+def _runtime_explicit_options(
+    parser: argparse.ArgumentParser,
+    args: argparse.Namespace,
+    argv: Sequence[str],
+) -> dict[str, object]:
+    """只把命令行真正给出的运行时覆盖转发给 ``run_v12_episode``（F01）。
+
+    旧实现无条件传全部 8 个参数，导致「未传」被当成显式 False/0，覆盖掉
+    artifact 里已保存的值；这里以 argv 实际出现的 option 为准，未出现的键
+    不进入 explicit，由管线按「已保存值 > 当前默认」继承。
+
+    Args:
+        parser: 入口解析器（用于 ``_explicit_cli_actions`` 反查）。
+        args: 已解析参数命名空间。
+        argv: 原始命令行参数（不含程序名）。
+
+    Returns:
+        形如 ``{"first_plan_flight": True, "max_tcp": 1.25}`` 的显式覆盖
+        dict；只含用户真正给出的键。
+    """
+    explicit_dests = {
+        action.dest for action in _explicit_cli_actions(parser, argv)
+    }
+    options: dict[str, object] = {}
+    if "no_freeze_first_plan" in explicit_dests:
+        # 旧 CLI 语义：--no-freeze-first-plan 表示首规划期间让球飞行
+        options["first_plan_flight"] = bool(args.no_freeze_first_plan)
+    if "always_collision" in explicit_dests:
+        options["always_collision"] = bool(args.always_collision)
+    if "ball_speed_perturb_pct" in explicit_dests:
+        options["ball_speed_perturb_pct"] = float(args.ball_speed_perturb_pct)
+    if "fixed_direction" in explicit_dests:
+        options["fixed_direction"] = bool(args.fixed_direction)
+    if "limits_config" in explicit_dests:
+        options["limits_config"] = (
+            None if args.limits_config is None else Path(args.limits_config)
+        )
+    if "max_tcp" in explicit_dests:
+        options["max_tcp"] = (
+            None if args.max_tcp is None else float(args.max_tcp)
+        )
+    if "terminal_exempt_steps" in explicit_dests:
+        options["terminal_exempt_steps"] = (
+            None if args.terminal_exempt_steps is None
+            else int(args.terminal_exempt_steps)
+        )
+    if "dq_max_fraction" in explicit_dests:
+        options["dq_max_fraction"] = (
+            None if args.dq_max_fraction is None
+            else float(args.dq_max_fraction)
+        )
+    return options
+
+
 def _collect_rejected_rm65_flags(
     parser: argparse.ArgumentParser, argv: Sequence[str]
 ) -> list[str]:
@@ -329,874 +395,509 @@ def _collect_rejected_rm65_flags(
     return rejected
 
 
+def _parse_task_overrides(
+    items: Sequence[str] | None,
+) -> dict[str, object] | None:
+    """把 ``--task-overrides KEY=VALUE`` 列表转成 T3 解析层需要的 dict。
+
+    Args:
+        items: argparse ``action="append"`` 收集的原始字符串列表。
+
+    Returns:
+        点路径 → 解析后值的 dict；未提供时返回 None。
+
+    Raises:
+        ValueError: 缺少 ``=``、键为空或值不是合法 YAML。
+    """
+    if not items:
+        return None
+    import yaml
+
+    overrides: dict[str, object] = {}
+    for item in items:
+        key, sep, raw = str(item).partition("=")
+        key = key.strip()
+        if not sep or not key:
+            raise ValueError(
+                f"--task-overrides 需要 KEY=VALUE 形式，收到 {item!r}"
+            )
+        try:
+            overrides[key] = yaml.safe_load(raw)
+        except yaml.YAMLError as exc:  # pragma: no cover - 非法 YAML 输入
+            raise ValueError(
+                f"--task-overrides {key} 的值不是合法 YAML: {exc}"
+            ) from exc
+    return overrides
+
+
+def _config_or_error(
+    parser: argparse.ArgumentParser,
+    args: argparse.Namespace,
+    argv: Sequence[str],
+) -> ResolvedV12Config:
+    """调用 T3 配置解析器；配置错误统一走 parser.error（退出码 2）。"""
+    explicit = _explicit_cli_actions(parser, argv)
+    try:
+        return resolve_v12_config(args, explicit)
+    except (ValueError, FileNotFoundError, OSError) as exc:
+        parser.error(str(exc))
+        raise AssertionError("unreachable")  # pragma: no cover - parser.error 退出
+
+
+def _derive_r1d_output_dir(args: argparse.Namespace) -> Path:
+    """R1D 产物目录：显式 --output 优先，否则 <repo>/results/r1d_sim。"""
+    if args.output is not None:
+        return Path(args.output)
+    return Path(__file__).resolve().parent.parent / "results" / "r1d_sim"
+
+
+def _print_r1d_result(
+    payload: dict[str, object], output_dir: Path
+) -> None:
+    """打印旧 ``__R1D_RESULT__`` 行（字段/顺序与 T0 一致）。"""
+    hit = dict(payload.get("hit") or {})
+    episode = dict(payload.get("episode") or {})
+    print(
+        "__R1D_RESULT__: "
+        f"side={payload.get('side')} "
+        f"hit_type={hit.get('type')} "
+        f"hit_step={hit.get('step')} "
+        f"total_steps={episode.get('total_steps')} "
+        f"safe_steps={episode.get('safe_steps')} "
+        f"failure_reason={episode.get('failure_reason')} "
+        f"first_plan_ms={episode.get('first_plan_ms')} "
+        f"output={output_dir}"
+    )
+
+
+def _view_r1d_overlay(
+    config: ResolvedV12Config, result: V12EpisodeResult
+) -> None:
+    """R1D overlay 路径的 --viewer 回放（0.2x，产物已写出后）。"""
+    from src.sim.r1d_runner import _replay_r1d_episode
+    from src.sim.v12_robot_adapter import build_v12_robot
+
+    bundle = build_v12_robot(config)
+    _replay_r1d_episode(
+        bundle.execution,
+        result.X,
+        result.ball_pos,
+        result.ball_vel,
+        float(result.dt),
+    )
+
+
 def _dispatch_robot_selection(
     parser: argparse.ArgumentParser, args: argparse.Namespace,
     argv: Sequence[str],
 ) -> int | None:
-    """提前解析机器人选择：RM65 继续旧路径，R1D 委托新 runner。
+    """机器人分派：RM65 走共享 V12 管线，R1D 固定任务/overlay 双路径。
 
     Args:
         parser: V12 参数解析器（错误经 parser.error 以退出码 2 呈现）。
-        args: 已解析参数。
-        argv: 实际传入的参数列表（不含程序名；main 传 sys.argv[1:]，
-            供按"命令行显式出现"而非"值 != 缺省"识别 RM65 专属参数）。
+        args: 已解析参数（``task_overrides`` 已转换为 dict）。
+        argv: 实际传入的参数列表（不含程序名；按"命令行显式出现"判定
+            RM65 专属参数，避免"值等于缺省"被静默忽略）。
 
     Returns:
-        None 表示 RM65 旧路径继续（main 后续零改动）；
+        None 表示 RM65 旧路径继续 main；
         int 为 R1D 路径完成/失败退出码（0 成功）。
 
     Raises:
         SystemExit: 配置类错误（缺 runtime/task、侧别错配、RM65 专属参数
-            混入、非法身份等）在构造 runner 前经 parser.error 退出码 2。
+            显式出现等）。
     """
     global _last_r1d_rejected_flags
     _last_r1d_rejected_flags = []
 
-    has_r1d_cfg = (
+    has_r1d_config = (
         args.runtime_config is not None or args.sim_task_config is not None
     )
     if args.robot_config is None:
-        if has_r1d_cfg:
+        if has_r1d_config:
             parser.error(
-                "--runtime-config/--sim-task-config 须与 --robot-config 同时"
-                "提供（R1D 仿真路径三件套缺一不可）"
+                "--runtime-config/--sim-task-config 必须与 --robot-config "
+                "同时提供"
             )
-        return None  # RM65 缺省路径
+        return None
 
-    # robot_config 显式给出：加载并按身份分派
-    from src.robot.robot_profile import load_robot_profile
     try:
-        profile = load_robot_profile(args.robot_config)
-    except (FileNotFoundError, ValueError) as exc:
-        parser.error(f"--robot-config 加载失败: {exc}")
+        profile = load_robot_profile(Path(args.robot_config))
+    except (ValueError, FileNotFoundError, OSError) as exc:
+        parser.error(f"无法加载机器人描述 {args.robot_config}: {exc}")
+        raise AssertionError("unreachable")  # pragma: no cover
 
     if profile.robot_id == "rm65":
-        if has_r1d_cfg:
+        if has_r1d_config:
             parser.error(
-                "rm65 不接受 --runtime-config/--sim-task-config"
-                "（R1D 仿真路径专用；显式 rm65.yaml 等价缺省，继续 RM65 旧路径）"
+                "RM65 机器人描述不接受 --runtime-config/--sim-task-config"
             )
-        return None  # 显式 rm65 profile == 缺省（旧路径，行为逐字一致）
-
+        return None
     if profile.robot_id != "unitree_r1d":
         parser.error(
-            f"不支持的 robot_id '{profile.robot_id}'（V12 仿真入口支持 "
-            f"rm65（缺省路径）与 unitree_r1d（R1D 仿真路径））"
+            f"不支持的机器人 robot_id={profile.robot_id!r}"
+            "（仅支持 rm65 / unitree_r1d）"
         )
 
-    # ── R1D 路径：三件套必须齐全 ──
-    if args.runtime_config is None:
-        parser.error(
-            "R1D 仿真路径缺少 --runtime-config（--robot-config 为 "
-            "unitree_r1d 时 --runtime-config 与 --sim-task-config 必须同时提供）"
-        )
-    if args.sim_task_config is None:
-        parser.error(
-            "R1D 仿真路径缺少 --sim-task-config（--robot-config 为 "
-            "unitree_r1d 时 --runtime-config 与 --sim-task-config 必须同时提供）"
-        )
-
-    # ── RM65 专属旧参数必须拒绝（不能接受后忽略）──
     rejected = _collect_rejected_rm65_flags(parser, argv)
     if rejected:
-        _last_r1d_rejected_flags = rejected
+        _last_r1d_rejected_flags = list(rejected)
         parser.error(
-            f"R1D 仿真路径不支持 RM65 专属参数（不能接受后忽略）: "
-            f"{', '.join(rejected)}；R1D 的来球/步数/权重/球速等全部来自 "
-            f"--sim-task-config YAML，共享基础参数仅 "
-            f"seed/no-plot/viewer/output/log-level"
+            "R1D 仿真路径不支持 RM65 专属参数（不能接受后忽略）: "
+            + ", ".join(rejected)
+            + "；共享基础参数仅 seed/no-plot/viewer/output/log-level/"
+            "robot-config/runtime-config/sim-task-config/racket-config/"
+            "task-overrides"
         )
 
-    output_dir = (
-        args.output
-        if args.output is not None
-        else Path(__file__).resolve().parent.parent / "results" / "r1d_sim"
-    )
+    output_dir = _derive_r1d_output_dir(args)
+
+    if args.sim_task_config is not None:
+        # 旧固定任务兼容模式：三件套委托旧 runner（T6 才迁产物 writer）。
+        # 该模式的球初态/执行模式来自任务文件，serve/ball-speed/no-bounce/
+        # position-mode 无法被旧 runner 消费，显式给出即报错（不接受后忽略）。
+        if args.runtime_config is None:
+            parser.error("R1D 固定任务模式须同时提供 --runtime-config")
+        runtime_path = Path(args.runtime_config)
+        task_path = Path(args.sim_task_config)
+        if not runtime_path.is_file():
+            parser.error(
+                f"R1D 固定任务模式的运行参数文件不存在: {runtime_path}"
+            )
+        if not task_path.is_file():
+            parser.error(f"R1D 固定任务模式的任务文件不存在: {task_path}")
+        fixed_explicit = _explicit_cli_actions(parser, argv)
+        fixed_dests = {action.dest for action in fixed_explicit}
+        # 旧固定任务入口只消费 seed/viewer；球拍/任务覆盖/异步重规划在
+        # run_r1d_episode 中无对应入口，显式给出必须报错（否则静默丢弃）。
+        unsupported = [
+            flag for flag in (
+                "racket_config", "task_overrides", "async_replan",
+            )
+            if flag in fixed_dests
+        ]
+        if unsupported:
+            parser.error(
+                "旧固定任务入口（--sim-task-config）不支持 "
+                + ", ".join(
+                    "--" + flag.replace("_", "-") for flag in unsupported
+                )
+                + "；球拍/任务覆盖/异步重规划请改用 R1D overlay 模式"
+                "（省略 --sim-task-config）"
+            )
+        fixed_conflicts = [
+            flag for flag in (
+                "serve_box", "ball_speed", "no_bounce", "position_mode",
+            )
+            if flag in fixed_dests
+        ]
+        if fixed_conflicts:
+            parser.error(
+                "R1D 固定任务模式（--sim-task-config）的来球初态/执行模式由"
+                "任务文件决定，不接受 "
+                + ", ".join(
+                    "--" + flag.replace("_", "-") for flag in fixed_conflicts
+                )
+                + "；请改用 R1D overlay 模式（省略 --sim-task-config）"
+            )
+        try:
+            result = run_r1d_episode(
+                Path(args.robot_config),
+                runtime_path,
+                task_path,
+                output_dir,
+                seed=args.seed,
+                viewer=args.viewer,
+            )
+        except (ValueError, FileNotFoundError, OSError) as exc:
+            parser.error(str(exc))
+            raise AssertionError("unreachable")  # pragma: no cover
+        _print_r1d_result(result, output_dir)
+        return 0
+
+    # R1D overlay（注册表任务 + serve 覆盖 provisional 球初态）→ 共享 V12 管线
+    config = _config_or_error(parser, args, argv)
+    runtime_explicit = _runtime_explicit_options(parser, args, argv)
     try:
-        result = run_r1d_episode(
-            args.robot_config, args.runtime_config, args.sim_task_config,
-            output_dir, seed=args.seed, viewer=args.viewer,
-        )
-    except (ValueError, FileNotFoundError) as exc:
-        parser.error(f"R1D 仿真回合失败（配置错误，未构造 runner）: {exc}")
-
-    # 摘要输出（CLI 工具 print 例外；__R1D_RESULT__ 供脚本化解析）
-    hit = result.get("hit", {})
-    episode = result.get("episode", {})
-    print("__R1D_RESULT__: "
-          f"side={result.get('side')} "
-          f"hit_type={hit.get('type')} "
-          f"hit_step={hit.get('step')} "
-          f"total_steps={episode.get('total_steps')} "
-          f"safe_steps={episode.get('safe_steps')} "
-          f"failure_reason={episode.get('failure_reason')} "
-          f"first_plan_ms={episode.get('first_plan_ms')} "
-          f"output={output_dir}")
+        result = run_v12_episode(config, **runtime_explicit)
+    except (ValueError, FileNotFoundError, OSError) as exc:
+        parser.error(str(exc))
+        raise AssertionError("unreachable")  # pragma: no cover
+    payload = write_v12_r1d_artifacts(result, Path(config.output_dir))
+    if args.viewer:
+        _view_r1d_overlay(config, result)
+    _print_r1d_result(payload, Path(config.output_dir))
     return 0
 
 
-# ==============================================================================
-# 主函数
-# ==============================================================================
-
-def main() -> None:
-    """RM-65 V12 EpisodeRunner 管线架构主函数。"""
-    # ==========================================================================
-    # 1. 参数解析（与 V11 一致）+ 多机器人选择分派（Task 3.10）
-    # ==========================================================================
-    parser = _build_parser()
-    args = parser.parse_args()
-    logging.getLogger().setLevel(getattr(logging, args.log_level))
-
-    # R1D 仿真路径在任何 RM65 配置加载前分派（缺省/显式 rm65 → 旧路径继续）
-    rc = _dispatch_robot_selection(parser, args, sys.argv[1:])
-    if rc is not None:
-        sys.exit(rc)
-
-    # ==========================================================================
-    # 2. 消融模式推导 + 随机扰动（与 V11 一致）
-    # ==========================================================================
-    if args.ablation is not None:
-        ablation_mode = args.ablation
-    else:
-        if args.no_tube and args.no_softmin:
-            ablation_mode = "none"
-        elif args.no_tube:
-            ablation_mode = "softmin_only"
-        elif args.no_softmin:
-            ablation_mode = "tube_only"
-        else:
-            ablation_mode = "full"
-    logger.info(f"[ablation] mode={ablation_mode}")
-
-    _use_tube = ablation_mode in ("full", "tube_only")
-    need_candidates = ablation_mode in ("full", "tube_only", "softmin_only", "select_one")
-    time_perturb_s = args.time_perturb_ms / 1000.0
-    space_perturb_m = args.space_perturb_m
-    perturb_alpha_min = args.perturb_alpha_min
-
-    if args.random_perturb:
-        rng_perturb = np.random.default_rng(args.seed + 99999 if args.seed is not None else None)
-        perturb_sign_cfg = args.perturb_sign
-        tp_max = abs(args.time_perturb_ms)
-        tp_min = abs(args.time_perturb_min_ms)
-        if tp_max > 1e-9:
-            tp_abs = rng_perturb.uniform(tp_min, tp_max)
-            tp_sign = {"positive": 1.0, "negative": -1.0}.get(perturb_sign_cfg, rng_perturb.choice([-1.0, 1.0]))
-            time_perturb_s = tp_sign * tp_abs / 1000.0
-        else:
-            time_perturb_s = 0.0
-        sp_max = abs(args.space_perturb_m)
-        sp_min = abs(args.space_perturb_min_m)
-        if sp_max > 1e-9:
-            sp_abs = rng_perturb.uniform(sp_min, sp_max)
-            sp_sign = {"positive": 1.0, "negative": -1.0}.get(perturb_sign_cfg, rng_perturb.choice([-1.0, 1.0]))
-            space_perturb_m = sp_sign * sp_abs
-        else:
-            space_perturb_m = 0.0
-
-    # ==========================================================================
-    # 3. 配置加载（与 V11 一致）
-    # ==========================================================================
-    base_path = Path(__file__).resolve().parent.parent / "configs"
-    config_dict = load_config(base_path / "default.yaml")
-    v5_config_path = base_path / "v5_active_hit.yaml"
-    if v5_config_path.exists():
-        config_dict = merge_configs(config_dict, load_config(v5_config_path))
-    mpc_config_path = base_path / "mpc.yaml"
-    if mpc_config_path.exists():
-        config_dict = merge_configs(config_dict, load_config(mpc_config_path))
-
-    dt = float(config_dict["sim"]["dt"])
-    g = np.array(config_dict["ball"]["gravity"], dtype=np.float64)
-
-    if args.no_follow_through:
-        config_dict["hitting"]["follow_through_steps"] = 0
-        config_dict["hitting"]["follow_through_length"] = 0.0
-        config_dict["hitting"]["follow_through_v_terminal"] = 0.0
-
-    shoulder_pos = SHOULDER_POS
-    workspace_radius = WORKSPACE_RADIUS
-
-    # ==========================================================================
-    # 4. 时间参数推导（与 V11 一致）
-    # ==========================================================================
-    total_horizon = 200
-    fixed_horizon = 40
-    replan_interval = args.replan_interval if args.replan_interval is not None else 30
-    max_iter_per_plan = 5
-    first_plan_iters = args.first_plan_iters if args.first_plan_iters is not None else 15
-    near_plan_iters = 20
-    Q_p_scale_far = args.Qp_scale_far if args.Qp_scale_far is not None else 5.0
-    Q_v_scale_far = args.Qv_scale_far if args.Qv_scale_far is not None else 3.0
-    Q_p_scale_near = args.Qp_scale_near if args.Qp_scale_near is not None else 8.0
-    Q_v_scale_near = args.Qv_scale_near if args.Qv_scale_near is not None else 120.0
-
-    if args.near_iters is not None:
-        near_plan_iters = args.near_iters
-    if args.horizon is not None:
-        fixed_horizon = args.horizon
-    if args.iter is not None:
-        max_iter_per_plan = args.iter
-
-    if args.serve_box:
-        if args.horizon is None:
-            fixed_horizon = 120
-        if args.iter is None:
-            max_iter_per_plan = 10
-        if args.replan_interval is None:
-            replan_interval = 20
-        if args.near_iters is None:
-            near_plan_iters = 5
-        # 仅当用户未显式指定 --first-plan-iters 时，serve-box 才套用 30 次下限；
-        # 显式传入（如 no-freeze 实验的 5 次加速变体）应原样生效
-        if args.first_plan_iters is None:
-            first_plan_iters = max(first_plan_iters, 30)
-        total_horizon = max(total_horizon, 250)
-        logger.info(f"serve-box auto params: horizon={fixed_horizon}, iter={max_iter_per_plan}, "
-                     f"first_plan_iters={first_plan_iters}, total_horizon={total_horizon}, "
-                     f"replan_interval={replan_interval}, near_plan_iters={near_plan_iters}")
-
-    # ==========================================================================
-    # 5. 关节 + 执行器配置（与 V11 一致）
-    # ==========================================================================
-    init_q = INIT_Q
-    init_q_left = INIT_Q_LEFT
-    # M1 注：fix_joint5_angle 赋值移到 --limits-config 块之后（line ~340），
-    # 确保 init_q 已切换到 INIT_Q_REAL 后再读取 init_q[5]。
-    # 此前在 INIT_Q_REAL 切换前赋值是巧合无害（INIT_Q[5] == INIT_Q_REAL[5]），
-    # 但属于时序耦合，未来 INIT_Q_REAL[5] 变化时会变成潜在 bug。
-    use_backswing = args.use_backswing
-    backswing_offset = -abs(args.backswing)
-    backswing_ratio = args.bs_ratio
-    use_r_decay = not args.no_r_decay
-    r_decay_ratio = args.r_decay
-
-    actuator_cfg = config_dict.get("actuator", {})
-    is_position_mode = args.position_mode or actuator_cfg.get("mode", "torque") == "position"
-    if is_position_mode:
-        kp_cfg = np.array(actuator_cfg.get("kp", [200.0, 200.0, 200.0, 50.0, 50.0, 20.0]), dtype=np.float64)
-        kd_cfg = np.array(actuator_cfg.get("kd", [20.0, 20.0, 5.0, 5.0, 5.0, 2.0]), dtype=np.float64)
-        if args.kp is not None:
-            kp_cfg = np.full(6, args.kp[0], dtype=np.float64) if len(args.kp) == 1 else np.array(args.kp, dtype=np.float64)
-        if args.kd is not None:
-            kd_cfg = np.full(6, args.kd[0], dtype=np.float64) if len(args.kd) == 1 else np.array(args.kd, dtype=np.float64)
-        use_r_decay = False
-
-    # Tube 配置
-    tube_cfg = TubeConfig(
-        window_half_ms=args.window_ms,
-        Q_p_tube=500.0,
-        Q_v_tube=0.0,
-        Q_n_tube=0.0,
-        tube_cost_ratio=1.0,
-        softmin_beta=args.softmin_beta,
-        corridor_radius=args.corridor_radius,
-        use_softmin_terminal=ablation_mode in ("full", "softmin_only"),
+def _restore_hit_window(payload: object) -> HitWindow | None:
+    """把共享管线序列化的击球窗口还原为 ``HitWindow``（仅绘图用）。"""
+    if not payload:
+        return None
+    data = dict(payload)  # type: ignore[arg-type]
+    return HitWindow(
+        best_k=int(data["best_k"]),
+        k_candidates=np.asarray(data["k_candidates"], dtype=int),
+        p_ball_candidates=np.asarray(data["p_ball_candidates"], dtype=np.float64),
+        v_ball_candidates=np.asarray(data["v_ball_candidates"], dtype=np.float64),
+        weights=np.asarray(data["weights"], dtype=np.float64),
     )
 
-    # ==========================================================================
-    # 6. 创建环境 + RobotLimits（与 V11 一致）
-    # ==========================================================================
-    model_path = Path(__file__).resolve().parent.parent / "src" / "robot" / "rm65_model.xml"
-    env = RM65Env(model_path, dt=dt)
-    env.init_q_left = init_q_left
-    if is_position_mode:
-        env.configure_actuator_mode("position", kp=kp_cfg, kd=kd_cfg)
-        use_ff_cfg = actuator_cfg.get("feedforward", True)
-        if args.no_feedforward or not use_ff_cfg:
-            env.configure_feedforward(False)
 
-    # ── 构建关节限位 ──
-    # 默认: 仿真限位 (default.yaml, TCP 1.8 m/s)
-    #   网球挥拍末端速度 ~1.2 m/s，TCP 1.8 是物理下限。
-    #   TCP 1.0 会锁死安全滤波加速 → 命中率 30%（exp16 验证）。
-    # 真机部署: --limits-config configs/real_robot.yaml
-    from src.real.config import RealRobotConfig as _RRC
-    from src.real.runner_factory import build_robot_limits as _brl
-    if args.limits_config is not None:
-        try:
-            _real_cfg = _RRC.from_yaml(args.limits_config)
-        except (FileNotFoundError, ValueError) as e:
-            parser.error(f"--limits-config 加载失败: {e}")
-        robot_limits = _brl(env, _real_cfg)
-        # 真机限位模式：切换到真机初始姿势（J2=80° 有 10° 裕度，vs INIT_Q J2=90° 在限位边界）
-        from src.robot.constants import INIT_Q_REAL
-        init_q = INIT_Q_REAL.copy()
-        logger.info("真机限位模式: init_q 切换到 INIT_Q_REAL (J2=%.1f°)", np.degrees(init_q[1]))
-        # I5: 未显式 --max-tcp 警告。real_robot.yaml 的 TCP=1.0 会锁死仿真安全滤波加速，
-        # 须用 --max-tcp 1.8 覆盖（exp16: TCP 1.0 命中率 30% vs 1.8 = 78%）。
-        if args.max_tcp is None:
-            logger.warning(
-                "--limits-config 加载真机限位（TCP=%.1f m/s），仿真生成轨迹需显式 --max-tcp 1.8，"
-                "当前未指定，安全滤波可能锁死加速 → 轨迹无效。建议追加 --max-tcp 1.8",
-                _real_cfg.max_tcp_speed,
-            )
-    else:
-        rl_cfg = config_dict.get("robot_limits", {})
-        robot_limits = RobotLimits.from_config(
-            rl_cfg, dt=dt, ctrlrange=env.model.actuator_ctrlrange[:env.NU])
+def _rm65_visuals_config() -> dict:
+    """旧可视化函数需要的配置 dict（default→v5→mpc，仅可视化用）。"""
+    repo = Path(__file__).resolve().parent.parent
+    config_dict = load_config(repo / "configs" / "default.yaml")
+    for name in ("v5_active_hit.yaml", "mpc.yaml"):
+        path = repo / "configs" / name
+        if path.exists():
+            config_dict = merge_configs(config_dict, load_config(path))
+    return config_dict
 
-    # CLI 覆盖（所有模式通用）
-    if args.max_tcp is not None:
-        robot_limits.max_tcp_speed = float("inf") if args.max_tcp == 0 else args.max_tcp
-    if args.terminal_exempt_steps is not None:
-        robot_limits.terminal_exempt_steps = args.terminal_exempt_steps
-    if args.dq_max_fraction is not None:
-        robot_limits.dq_max = robot_limits.qdot_max * dt * args.dq_max_fraction
 
-    # M1: fix_joint5_angle 在 --limits-config 切换 init_q 之后赋值
-    # （读取已切换后的 init_q[5]，避免时序耦合）
-    fix_joint5_angle: float | None = init_q[5] if args.fix_joint5 else None
-
-    logger.info(
-        "关节限位: %s, TCP=%.1f m/s, terminal_exempt=%d",
-        f"自定义({args.limits_config})" if args.limits_config else "仿真默认(default.yaml)",
-        robot_limits.max_tcp_speed,
-        robot_limits.terminal_exempt_steps,
-    )
-    if args.sim_limits:
-        logger.warning("--sim-limits 已废弃（仿真限位现为默认行为）")
-
-    # X 平面墙 body IDs 缓存（引用共享常量，消除重复）
-    from src.ilqt.components.predictive_safety import X_WALL_BODY_NAMES
-    import mujoco as _mj
-    _hard_x_body_ids = [
-        _mj.mj_name2id(env.model, _mj.mjtObj.mjOBJ_BODY, n)
-        for n in X_WALL_BODY_NAMES
-    ]
-
-    # ==========================================================================
-    # 7. 生成发球轨迹 + 寻找击打点（与 V11 一致，仿真专属）
-    # ==========================================================================
-    rng = np.random.default_rng(args.seed)
-    env.reset(init_q)
-    env.data.qpos[env.NQ:env.NQ + env.LEFT_ARM_NQ] = init_q_left
-    env.data.qvel[env.NQ:env.NQ + env.LEFT_ARM_NQ] = 0.0
-    env.update_kinematics()
-    p_racket_init = env.get_ee_pos().copy()
-    logger.info(f"球拍初始位置: {p_racket_init}")
-
-    target_center = np.array([-0.82765693, -0.47411682, 0.86947444])
-    target_offset = 0.10
-    use_bounce = not args.no_bounce
-
-    if args.serve_box:
-        serve_half_x = args.serve_x_size / 2.0
-        serve_half_y = args.serve_y_size / 2.0
-        serve_half_z = args.serve_z_size / 2.0
-        p0, v0, p_hit_expected = generate_ball_from_serve_box(
-            serve_box_center=(0.0, -args.serve_distance, args.serve_height),
-            serve_box_halfsize=(serve_half_x, serve_half_y, serve_half_z),
-            target_center=target_center,
-            target_offset=target_offset,
-            shoulder_pos=shoulder_pos,
-            workspace_radius=workspace_radius,
-            g=g,
-            ball_speed=args.ball_speed,
-            speed_range=(8.0, 18.0),
-            use_bounce=use_bounce,
-            bounce_restitution=0.75,
-            rng=rng,
+def _build_rm65_plot_env(config: ResolvedV12Config) -> RM65Env:
+    """重建 RM65 环境（仅供绘图/回放，不参与管线数值）。"""
+    repo = Path(__file__).resolve().parent.parent
+    env = RM65Env(repo / "src" / "robot" / "rm65_model.xml", dt=float(config.dt))
+    if config.actuator_mode == "position":
+        env.configure_actuator_mode(
+            "position",
+            np.asarray(config.kp, dtype=np.float64),
+            np.asarray(config.kd, dtype=np.float64),
         )
-    else:
-        hit_time = total_horizon * dt * rng.uniform(0.3, 0.4)
-        p0, v0, p_hit_expected = generate_ball_to_target_box(
-            target_center, target_offset, hit_time, g,
-            shoulder_pos=shoulder_pos, workspace_radius=workspace_radius,
-            ball_speed=args.ball_speed,
-            ball_distance=args.ball_distance,
-            approach_angle_deg=args.approach_angle,
-            rng=rng,
-            ball_direction="y",
-            ball_start_y_range=(-5.5, -4.5),
-            ball_start_z_range=(1.4, 1.8),
+        # 与 v12_robot_adapter 的执行环境同源：显式 --no-feedforward 必须在
+        # 回放环境生效，否则回放动力学与执行侧不一致（审查 R13 实测偏差）。
+        env.configure_feedforward(
+            True if config.feedforward is None else bool(config.feedforward)
         )
+    return env
 
-    hit_info = find_hitting_point_physics(
-        env, p0, v0, shoulder_pos, workspace_radius, total_horizon
+
+def _print_rm65_summary(result: V12EpisodeResult) -> None:
+    """打印旧 V12 评估块 + ``__RESULT__`` 结构化行（字段/格式不变）。"""
+    m = result.metrics
+    p_hit = np.asarray(m["p_hit"], dtype=np.float64)
+    p_ee_final = np.asarray(m["p_ee_final"], dtype=np.float64)
+    histories = dict(m["histories"])
+    ball_near_steps = int(sum(bool(x) for x in histories["ball_near"]))
+    tube_ready_steps = int(sum(bool(x) for x in histories["tube_ready"]))
+    pos_error = float(m["pos_error"])
+    pos_error_plan = float(m["pos_error_plan"])
+    vel_error = float(m["vel_error"])
+    min_dist = float(m["min_dist"])
+    ball_near_ms = float(m["ball_near_ms"])
+    tube_ready_ms = float(m["tube_ready_ms"])
+    hit_time_error = float(m["hit_time_error_ms"])
+    hit_position_error = float(m["hit_position_error"])
+    max_tcp = float(m["max_tcp_speed"])
+    max_qdot = float(m["max_qdot_ratio"])
+    max_face = float(m["max_racket_face_speed"])
+    hit_type = "主动击球" if result.active_contact else (
+        "被动接触" if result.passive_contact else "未触球"
     )
-    if hit_info is None:
-        print("\n========================================")
-        print("  网球不在工作空间内，机械臂不击打！")
-        print("========================================\n")
-        return
-
-    k_hit_total = hit_info["k_hit"]
-    p_hit = hit_info["p_hit"]
-    v_ball_hit = hit_info["v_ball_hit"]
-
-    # IK 可达性后过滤
-    ball_positions_all, ball_velocities_all = env.predict_ball_trajectory(p0, v0, total_horizon)
-    q_ik_init = env.solve_ik(p_hit, q_init=init_q, max_iter=50, eps=1e-2)
-    m_low_deg = (q_ik_init - robot_limits.q_lower) * 180.0 / np.pi
-    m_up_deg = (robot_limits.q_upper - q_ik_init) * 180.0 / np.pi
-    min_margin_deg = float(np.min(np.minimum(m_low_deg, m_up_deg)))
-    if min_margin_deg < 3.0:
-        search_range = 30
-        best_alt_k = k_hit_total
-        best_alt_margin = min_margin_deg
-        for dk in range(-search_range, search_range + 1):
-            kk = k_hit_total + dk
-            if kk < 1 or kk > len(ball_positions_all):
-                continue
-            p_alt = ball_positions_all[kk - 1]
-            dist_alt = np.linalg.norm(p_alt - shoulder_pos)
-            dz = p_alt[2] - shoulder_pos[2]
-            if not (dist_alt < workspace_radius and p_alt[2] > 0.3 and -0.60 < dz < 0.55):
-                continue
-            q_alt = env.solve_ik(p_alt, q_init=init_q, max_iter=30, eps=2e-2)
-            m_low_a = (q_alt - robot_limits.q_lower) * 180.0 / np.pi
-            m_up_a = (robot_limits.q_upper - q_alt) * 180.0 / np.pi
-            m_a = float(np.min(np.minimum(m_low_a, m_up_a)))
-            if m_a > best_alt_margin:
-                best_alt_margin = m_a
-                best_alt_k = kk
-        if best_alt_k != k_hit_total:
-            p_hit = ball_positions_all[best_alt_k - 1].copy()
-            v_ball_hit = ball_velocities_all[best_alt_k - 1].copy()
-            k_hit_total = best_alt_k
-
-    n_des_single = -v_ball_hit / (np.linalg.norm(v_ball_hit) + 1e-8)
-    if args.normal_flip:
-        n_des_single = -n_des_single
-
-    near_threshold = args.near_threshold if args.near_threshold else max(50, k_hit_total // 3)
-    far_threshold = args.far_threshold if args.far_threshold is not None else 50
-
-    hit_direction = np.array(config_dict["hitting"]["hit_direction"], dtype=np.float64)
-    racket_speed = float(config_dict["hitting"]["racket_speed"])
-
-    if args.fixed_direction:
-        d_follow = hit_direction / (np.linalg.norm(hit_direction) + 1e-8)
-    else:
-        d_follow = -v_ball_hit / (np.linalg.norm(v_ball_hit) + 1e-8)
-    v_hit_at_contact = args.target_speed * d_follow
-
-    if args.no_follow_through:
-        follow_through_length = 0.0
-        follow_through_steps = 0
-        follow_through_v_terminal = 0.0
-    else:
-        follow_through_length = args.hit_shift
-        follow_through_steps = int(config_dict["hitting"].get("follow_through_steps", 160))
-        follow_through_v_terminal = float(config_dict["hitting"].get("follow_through_v_terminal", 0.3))
-
-    logger.info(f"击打步数: {k_hit_total}, 击打位置: {p_hit}")
-    logger.info(f"随挥方向: {np.round(d_follow, 3)}, 随挥步数: {follow_through_steps}")
-
-    # ==========================================================================
-    # 8. 构建初始 Tube（仿真专属）
-    # ==========================================================================
-    initial_hitting_tube: HittingTube | None = None
-    hit_window: HitWindow | None = None
-    if need_candidates:
-        hit_window = search_hit_window(
-            env, p0, v0, shoulder_pos, workspace_radius,
-            k_hit_total + 30, tube_cfg,
-            ball_direction="y", current_step=0,
-            robot_limits=robot_limits, init_q=init_q,
-        )
-        if hit_window is not None:
-            initial_hitting_tube = build_hitting_tube(
-                hit_window, racket_speed, d_follow, tube_cfg,
-            )
-            logger.info(
-                f"候选窗口已构建: best_k={initial_hitting_tube.best_k}, "
-                f"candidates={len(initial_hitting_tube.k_candidates)}"
-            )
-
-    # ==========================================================================
-    # 9. 球速耦合扰动（与 V11 一致）
-    # ==========================================================================
-    ball_speed_perturb_pct = args.ball_speed_perturb_pct
-    if abs(ball_speed_perturb_pct) > 0.01:
-        v0_norm = np.linalg.norm(v0)
-        if v0_norm > 0.1:
-            v0_dir = v0 / v0_norm
-            offset_m = ball_speed_perturb_pct / 100.0 * 2.0
-            p0_real = p0 + v0_dir * offset_m
-            v0_real = v0.copy()
-        else:
-            p0_real = p0
-            v0_real = v0
-    else:
-        p0_real = p0
-        v0_real = v0
-
-    # ==========================================================================
-    # 10. 重置环境 + 设置球的初始状态（与 V11 一致）
-    # ==========================================================================
-    env.reset(init_q)
-    env.data.qpos[env.NQ:env.NQ + env.LEFT_ARM_NQ] = init_q_left
-    env.data.qvel[env.NQ:env.NQ + env.LEFT_ARM_NQ] = 0.0
-    env.update_kinematics()
-    env.set_ball_state(p0_real, v0_real)
-
-    x0 = np.zeros(env.NX)
-    x0[:env.NQ] = init_q
-
-    # ==========================================================================
-    # 11. 构建 MPCConfig + MPCController
-    # ==========================================================================
-    # 代价基底（对齐 V11 base_cost_fn: config Q_p * 2.0）
-    Q_p_base = np.array(config_dict["cost"]["Q_p"], dtype=np.float64) * 2.0
-    Q_v_base = np.array(config_dict["cost"]["Q_v"], dtype=np.float64) * 2.0
-
-    # 分阶段权重
-    stage_cfg = config_dict.get("stage_weights", {})
-    far_stage = stage_cfg.get("far", {"Q_qdot_mult": 1.0, "Q_qddot_mult": 1.0, "Q_du_mult": 1.0})
-    mid_stage = stage_cfg.get("mid", {"Q_qdot_mult": 2.0, "Q_qddot_mult": 2.0, "Q_du_mult": 2.0})
-    near_stage = stage_cfg.get("near", {"Q_qdot_mult": 0.0, "Q_qddot_mult": 0.0, "Q_du_mult": 0.0})
-
-    mpc_config = MPCConfig(
-        version="v12",
-        solver_backend=args.solver_backend,
-        is_position_mode=is_position_mode,
-        ablation_mode=ablation_mode,
-        dt=dt,
-        total_horizon=total_horizon,
-        fixed_horizon=fixed_horizon,
-        replan_interval=replan_interval,
-        max_iter_per_plan=max_iter_per_plan,
-        first_plan_iters=first_plan_iters,
-        near_plan_iters=near_plan_iters,
-        near_threshold=near_threshold,
-        Q_p_scale_far=Q_p_scale_far,
-        Q_v_scale_far=Q_v_scale_far,
-        Q_p_scale_near=Q_p_scale_near,
-        Q_v_scale_near=Q_v_scale_near,
-        R=float(config_dict["cost"]["R"]),
-        normal_weight=args.normal_weight,
-        racket_speed=racket_speed,
-        target_speed=args.target_speed,
-        Q_tcp_soft=args.Q_tcp_soft,
-        Q_qdot_limit=args.Q_qdot_limit,
-        tube_cfg=tube_cfg,
-        softmin_beta=args.softmin_beta,
-        follow_through_length=follow_through_length,
-        follow_through_steps=follow_through_steps,
-        follow_through_v_terminal=follow_through_v_terminal,
-        follow_trigger=args.follow_trigger,
-        no_follow_through=args.no_follow_through,
-        use_backswing=use_backswing,
-        backswing_offset=backswing_offset,
-        backswing_ratio=backswing_ratio,
-        shoulder_pos=shoulder_pos,
-        workspace_radius=workspace_radius,
-        time_perturb_s=time_perturb_s,
-        space_perturb_m=space_perturb_m,
-        perturb_alpha_min=perturb_alpha_min,
-        spatial_perturb_target=args.spatial_perturb_target,
-        shared_input_full=args.shared_input_full,
-        use_r_decay=use_r_decay,
-        r_decay_ratio=r_decay_ratio,
-        fix_joint5_angle=fix_joint5_angle,
-        normal_flip=args.normal_flip,
-        smooth_far=far_stage,
-        smooth_mid=mid_stage,
-        smooth_near=near_stage,
-        async_mode=args.async_replan,
-        # v12 新增：代价基底 + 远段阈值
-        Q_p_base=Q_p_base,
-        Q_v_base=Q_v_base,
-        Q_qdot_base=float(config_dict["cost"].get("Q_qdot", 0.0)),
-        Q_qddot_base=float(config_dict["cost"].get("Q_qddot", 0.0)),
-        Q_du_base=float(config_dict["cost"].get("Q_du", 0.0)),
-        far_threshold=far_threshold,
-        # 策略内部参数（原硬编码，现可通过 CLI 调整）
-        follow_kp=args.follow_kp if args.follow_kp is not None else 200.0,
-        follow_kd=args.follow_kd if args.follow_kd is not None else 20.0,
-        hit_lock_threshold=args.hit_lock if args.hit_lock is not None else 60,
-        hard_margin_deg=args.hard_margin if args.hard_margin is not None else 2.0,
-        warn_margin_deg=args.warn_margin if args.warn_margin is not None else 5.0,
-        j1_warn_margin_deg=args.j1_warn if args.j1_warn is not None else 8.0,
-        refiner_window_half=args.refiner_window if args.refiner_window is not None else 15,
-    )
-
-    mpc = MPCController(env, mpc_config, robot_limits=robot_limits)
-
-    # ==========================================================================
-    # 12. 组装管线组件
-    # ==========================================================================
-    # 观测门控
-    obs_gate = None
-    _obs_freq_eff = args.obs_freq if args.obs_freq > 0 else (
-        1.0 / dt if (args.obs_noise_pos > 0 or args.obs_noise_vel > 0) else 0
-    )
-    if _obs_freq_eff > 0:
-        from src.perception.ball_obs_gate import BallObservationGate
-        from src.perception.ball_estimator import BallEstimator as _BE
-        _obs_kf = None
-        if args.obs_use_kf:
-            _obs_kf = _BE(dt=dt, pos_noise_std=args.obs_noise_pos, vel_noise_std=args.obs_noise_vel)
-        obs_gate = BallObservationGate(
-            _obs_freq_eff, dt,
-            noise_pos=args.obs_noise_pos, noise_vel=args.obs_noise_vel,
-            kf=_obs_kf, rng=rng,
-        )
-
-    perception = SimPerception(env, obs_gate=obs_gate)
-    safety = PredictiveSafetyFilter(
-        env, robot_limits,
-        is_position_mode=is_position_mode,
-    )
-    sim_component = SimComponent(
-        env, mpc, robot_limits, init_q, is_position_mode,
-        _hard_x_body_ids, initial_hitting_tube, tube_cfg, dt,
-        always_collision=args.always_collision,
-    )
-    # 初始化 history（与 V11 一致：X_history[0] = x0）
-    sim_component.X_history = [x0.copy()]
-    sim_component.ball_pos_history = [p0.copy()]
-
-    # 创建轨迹记录器（如果 --dump-trajectory 指定）
-    recorder = None
-    if args.dump_trajectory:
-        recorder = TrajectoryRecorder(
-            env=env,
-            init_q=init_q,
-            init_q_left=init_q_left,
-            dt=dt,
-            metadata={
-                "p0": p0_real.tolist(),
-                "v0": v0_real.tolist(),
-                "ball_speed": args.ball_speed,
-                "is_position_mode": is_position_mode,
-            },
-            is_position_mode=is_position_mode,
-        )
-
-    step_timer = None
-    hooks = [recorder.make_hook()] if recorder else []
-    if args.dump_step_timing:
-        step_timer = _StepTimer()
-        hooks.append(step_timer.hook)
-
-    runner = EpisodeRunner(
-        mpc=mpc,
-        perception=perception,
-        safety=safety,
-        executor=sim_component,
-        post_exec_hooks=hooks,
-    )
-
-    # ==========================================================================
-    # 13. 运行 episode
-    # ==========================================================================
-    total_steps = total_horizon + follow_through_steps
-    logger.info(f"开始 V12 EpisodeRunner，总步数={total_steps} "
-                f"(MPC={total_horizon}, 随挥={follow_through_steps})，击打步数={k_hit_total}")
-
-    t_total_start = time.perf_counter()
-    _metrics = runner.run(max_steps=total_steps,
-                          first_plan_flight=args.no_freeze_first_plan)
-    t_mpc_end = time.perf_counter()
-    if step_timer is not None:
-        print(step_timer.summary(period_ms=dt * 1000.0))
-        if args.dump_step_latencies:
-            print(step_timer.latencies_line())
-
-    # ==========================================================================
-    # 14. 击打后继续仿真（V11 2225-2243，PD 保持 20 步）
-    # ==========================================================================
-    post_hit_steps = 20
-    logger.info(f"击打后继续仿真 {post_hit_steps} 步...")
-    x_current = env.get_arm_state()
-    for i in range(post_hit_steps):
-        q_hold = x_current[:env.NQ].copy()
-        if is_position_mode:
-            u_hold = q_hold.copy()
-        else:
-            u_hold = 100.0 * (q_hold - x_current[:env.NQ]) - 10.0 * x_current[env.NQ:]
-            u_hold = np.clip(u_hold,
-                             env.model.actuator_ctrlrange[:env.NU, 0],
-                             env.model.actuator_ctrlrange[:env.NU, 1])
-        x_current, ball_pos_post, _ = env.step_full(u_hold)
-        sim_component.X_history.append(x_current.copy())
-        sim_component.U_history.append(u_hold.copy())
-        sim_component.ball_pos_history.append(ball_pos_post.copy())
-
-        # 记录 post-hit 步到 TrajectoryRecorder（hook 不覆盖此段）
-        # 位置模式: u_hold 即目标角，写入 q_desired；力矩模式: q_desired 传 None
-        if recorder is not None:
-            step_idx = total_horizon + follow_through_steps + i
-            recorder.record(
-                q_desired=q_hold.copy() if is_position_mode else None,
-                q_actual=x_current[:env.NQ].copy(),
-                timestamp=step_idx * dt,
-                tcp_pos=env.get_ee_pos().copy(),
-                ball_pos=ball_pos_post.copy(),
-                u=u_hold.copy(),
-            )
-
-    # ==========================================================================
-    # 15. 评估（对齐 V11 2245-2505）
-    # ==========================================================================
-    t_total = time.perf_counter() - t_total_start
-    t_mpc = t_mpc_end - t_total_start
-
-    X_history = sim_component.X_history
-    U_history = sim_component.U_history
-    ball_pos_history = sim_component.ball_pos_history
-    distances_history = sim_component.distances_history
-    ball_near_history = sim_component.ball_near_history
-    tube_ready_history = sim_component.tube_ready_history
-
-    # 末端最终位置
-    p_ee_at_hit = sim_component.p_ee_at_hit
-    ball_pos_at_hit = sim_component.ball_pos_at_hit
-    if p_ee_at_hit is not None:
-        p_ee_final = p_ee_at_hit
-    else:
-        env.set_arm_state(x_current)
-        env.update_kinematics()
-        p_ee_final = env.get_ee_pos()
-    v_ee_final = env.get_ee_vel()
-
-    pos_error_plan = float(np.linalg.norm(p_ee_final - p_hit))
-    if ball_pos_at_hit is not None:
-        pos_error = float(np.linalg.norm(p_ee_final - ball_pos_at_hit))
-    else:
-        pos_error = pos_error_plan
-    vel_error = float(np.linalg.norm(v_ee_final - v_hit_at_contact))
-
-    # Tube 指标（大噪声下 episode 可能极早退出，采样序列为空 → min_dist 记 inf）
-    d_arr = np.array(distances_history)
-    min_dist = float(np.min(d_arr)) if d_arr.size else float("inf")
-    ball_near_duration = int(np.sum(np.array(ball_near_history, dtype=bool)))
-    ball_near_ms = ball_near_duration * dt * 1000
-    tube_ready_duration = int(np.sum(np.array(tube_ready_history, dtype=bool)))
-    tube_ready_ms = tube_ready_duration * dt * 1000
-
-    # 命中时刻误差
-    hit_step = sim_component.hit_step
-    if p_ee_at_hit is not None and hit_step >= 0:
-        hit_time_actual = hit_step * dt
-        hit_time_expected = k_hit_total * dt
-        hit_time_error = abs(hit_time_actual - hit_time_expected) * 1000
-        hit_position_error = (
-            float(np.linalg.norm(p_ee_at_hit - ball_pos_at_hit))
-            if ball_pos_at_hit is not None
-            else float(np.linalg.norm(p_ee_at_hit - p_hit))
-        )
-    else:
-        hit_time_error = 0.0
-        hit_position_error = pos_error
-
-    # 执行层指标
-    max_tcp = sim_component.max_tcp_speed
-    max_qdot = sim_component.max_qdot_ratio
-    max_face = sim_component.max_racket_face_speed
-    active_contact = sim_component.active_contact
-    passive_contact = sim_component.passive_contact
-    v_racket_at_hit_val = sim_component.v_ee_at_hit if sim_component.v_ee_at_hit is not None else 0.0
-
-    # ---- 打印评估结果 ----
-    from src.sim.hit_detection import classify_hit_result
     print("\n========================================")
-    print(f"  {classify_hit_result(active_contact, passive_contact, pos_error)}")
-
+    print(
+        "  "
+        + classify_hit_result(
+            result.active_contact, result.passive_contact, pos_error
+        )
+    )
     print("  [V12 EpisodeRunner 管线架构]")
-    print(f"  ablation: {ablation_mode}")
+    print(f"  ablation: {m['ablation_mode']}")
     print(f"  击打目标位置: {np.round(p_hit, 3)}")
     print(f"  末端实际位置: {np.round(p_ee_final, 3)}")
     print(f"  规划跟踪误差: {pos_error_plan:.4f} m")
     print(f"  速度误差: {vel_error:.4f} m/s")
-    print(f"  MPC 总步数: {len(U_history)}")
+    print(f"  MPC 总步数: {int(m['n_mpc_steps'])}")
     print("  --- Tube 专用指标 ---")
     print(f"  最小球拍-球距离: {min_dist:.4f} m")
-    print(f"  ball_near 步数: {ball_near_duration} = {ball_near_ms:.1f} ms")
-    print(f"  tube_ready 步数: {tube_ready_duration} = {tube_ready_ms:.1f} ms")
+    print(f"  ball_near 步数: {ball_near_steps} = {ball_near_ms:.1f} ms")
+    print(f"  tube_ready 步数: {tube_ready_steps} = {tube_ready_ms:.1f} ms")
     print(f"  击打时间误差: {hit_time_error:.1f} ms")
     print(f"  击打位置误差: {hit_position_error:.4f} m")
     print("  --- 计算性能 ---")
-    print(f"  总墙钟时间: {t_total:.2f}s (MPC={t_mpc:.2f}s)")
+    print(
+        f"  总墙钟时间: {float(m['wall_time_s']):.2f}s"
+        f" (MPC={float(m['mpc_time_s']):.2f}s)"
+    )
     print("  --- 执行层约束 ---")
-    hit_type = "主动击球" if active_contact else ("被动接触" if passive_contact else "未触球")
-    print(f"  max_qdot={max_qdot:.2f}x, max_tcp={max_tcp:.1f}m/s, max_face={max_face:.1f}m/s")
+    print(
+        f"  max_qdot={max_qdot:.2f}x, max_tcp={max_tcp:.1f}m/s, "
+        f"max_face={max_face:.1f}m/s"
+    )
     print(f"  击球类型: {hit_type}")
     print("========================================\n")
 
-    # 结构化结果行（ball_out_* 仅在发生击球时有值，chat12 C6 出球质量）
-    hit_type_en = "active" if active_contact else ("passive" if passive_contact else "miss")
-    _ball_out_speed = sim_component.ball_out_speed
-    _ball_out_vy = sim_component.ball_out_vy
-    print(f"__RESULT__: pos_error={pos_error:.6f} vel_error={vel_error:.6f} "
-          f"min_dist={min_dist:.6f} ball_near_ms={ball_near_ms:.1f} "
-          f"tube_ready_ms={tube_ready_ms:.1f} max_tcp={max_tcp:.2f} "
-          f"max_qdot={max_qdot:.2f} "
-          f"max_face={max_face:.1f} "
-          f"hit_type={hit_type_en} "
-          f"hit_time_error_ms={hit_time_error:.1f} hit_pos_error={hit_position_error:.6f} "
-          f"v_racket_at_hit={v_racket_at_hit_val:.3f} "
-          f"first_plan_ms={_metrics.get('first_plan_ms', 0.0):.1f} "
-          f"ball_out_speed={_ball_out_speed if _ball_out_speed is not None else -1.0:.3f} "
-          f"ball_out_vy={_ball_out_vy if _ball_out_vy is not None else -99.0:.3f}")
+    ball_out_speed = (
+        float(result.ball_out_speed)
+        if result.ball_out_speed is not None else -1.0
+    )
+    ball_out_vy = (
+        float(result.ball_out_vy) if result.ball_out_vy is not None else -99.0
+    )
+    v_racket_at_hit = float(m["v_racket_at_hit"])
+    print(
+        f"__RESULT__: pos_error={pos_error:.6f} vel_error={vel_error:.6f} "
+        f"min_dist={min_dist:.6f} ball_near_ms={ball_near_ms:.1f} "
+        f"tube_ready_ms={tube_ready_ms:.1f} max_tcp={max_tcp:.2f} "
+        f"max_qdot={max_qdot:.2f} max_face={max_face:.1f} "
+        f"hit_type={result.hit_type} "
+        f"hit_time_error_ms={hit_time_error:.1f} "
+        f"hit_pos_error={hit_position_error:.6f} "
+        f"v_racket_at_hit={v_racket_at_hit:.3f} "
+        f"first_plan_ms={float(m['first_plan_ms']):.1f} "
+        f"ball_out_speed={ball_out_speed:.3f} "
+        f"ball_out_vy={ball_out_vy:.3f}"
+    )
 
-    # ==========================================================================
-    # 16. 保存轨迹
-    # ==========================================================================
-    if args.dump_trajectory and recorder is not None:
-        # 评估完成后更新 metadata
-        recorder._metadata.update({
-            "hit_type": hit_type_en,
-            "pos_error": float(pos_error),
-            "hit_step": hit_step,
-            "post_hit_steps": post_hit_steps,
-        })
-        dump_path = Path(args.dump_trajectory)
-        recorder.save(dump_path, hit_step=hit_step)
-        logger.info(f"轨迹已保存至 {dump_path}（.npz 格式，{len(recorder._q_desired_list)} 步）")
 
-    # ==========================================================================
-    # 17. 可视化
-    # ==========================================================================
-    if not args.no_plot:
-        try:
-            _, plot_fn = _import_v11_visuals()
-            results_dir = Path(__file__).resolve().parent.parent / "results"
-            tag = f"v12_{args.seed or 'default'}"
-            ball_arr = np.array(ball_pos_history)
-            # 从环境读取球拍位置轨迹
-            racket_pos_list: list[np.ndarray] = []
-            env.reset(init_q)
-            env.data.qpos[env.NQ:env.NQ + env.LEFT_ARM_NQ] = init_q_left
-            env.update_kinematics()
-            for i in range(min(len(X_history), len(U_history) + 1)):
-                env.set_arm_state(X_history[i])
-                racket_pos_list.append(env.get_ee_pos().copy())
-            racket_pos_arr = np.array(racket_pos_list)
+def _plot_rm65_episode(
+    config: ResolvedV12Config, result: V12EpisodeResult
+) -> None:
+    """旧 ``plot_tube_results`` 路径（仅绘图，失败只 warning）。"""
+    if config.no_plot:
+        return
+    try:
+        _, plot_fn = _import_v11_visuals()
+        histories = dict(result.metrics["histories"])
+        plot_fn(
+            Path(__file__).resolve().parent.parent / "results",
+            f"v12_{config.seed or 'default'}",
+            np.asarray(result.ball_pos, dtype=np.float64),
+            np.asarray(result.racket_pos, dtype=np.float64),
+            _restore_hit_window(result.metrics.get("hit_window")),
+            histories["distances"],
+            histories["normal_align"],
+            histories["ball_near"],
+            histories["tube_ready"],
+            [],  # k_hit_steps_history（V12 未单独追踪）
+            histories["pos_error"],
+        )
+    except (ImportError, OSError, RuntimeError, ValueError) as exc:
+        logger.warning("可视化失败: %s", exc)
 
-            normal_align_history = sim_component.normal_align_history
-            pos_error_history = sim_component.pos_error_history
-            plot_fn(
-                results_dir, tag,
-                ball_arr, racket_pos_arr, hit_window,
-                distances_history, normal_align_history,
-                ball_near_history, tube_ready_history,
-                [],  # k_hit_steps_history（V12 未单独追踪）
-                pos_error_history,
-            )
-        except (ImportError, OSError, RuntimeError, ValueError) as e:
-            logger.warning(f"可视化失败: {e}")
 
-    if args.viewer:
-        try:
-            visualize_fn, _ = _import_v11_visuals()
-            U_arr = np.array(U_history)
-            from src.sim.replay import replay_trajectory
-            replay_result = replay_trajectory(
-                env, U_arr, init_q, init_q_left, p0, v0, hit_step,
-            )
-            visualize_fn(
-                env, replay_result.X_replay, U_arr, replay_result.ball_replay,
-                config_dict,
-                init_q_left=init_q_left,
-                post_hit_steps=post_hit_steps,
-            )
-        except (ImportError, OSError, RuntimeError, ValueError) as e:
-            logger.warning(f"回放可视化失败: {e}")
+def _view_rm65_episode(
+    config: ResolvedV12Config, result: V12EpisodeResult
+) -> None:
+    """旧 ``replay_trajectory`` + ``visualize_rm65_result`` 回放路径。"""
+    try:
+        visualize_fn, _ = _import_v11_visuals()
+        from src.sim.replay import replay_trajectory
+
+        env = _build_rm65_plot_env(config)
+        serve = dict(result.metrics["serve"])
+        replay_result = replay_trajectory(
+            env,
+            np.asarray(result.U, dtype=np.float64),
+            np.asarray(INIT_Q, dtype=np.float64),
+            np.asarray(INIT_Q_LEFT, dtype=np.float64),
+            np.asarray(serve["p0"], dtype=np.float64),
+            np.asarray(serve["v0"], dtype=np.float64),
+            int(result.hit_step),
+        )
+        visualize_fn(
+            env,
+            replay_result.X_replay,
+            np.asarray(result.U, dtype=np.float64),
+            replay_result.ball_replay,
+            _rm65_visuals_config(),
+            init_q_left=np.asarray(INIT_Q_LEFT, dtype=np.float64),
+            post_hit_steps=int(result.metrics["post_hit_steps"]),
+        )
+    except (ImportError, OSError, RuntimeError, ValueError) as exc:
+        logger.warning("回放可视化失败: %s", exc)
+
+
+def _write_rm65_episode_artifacts(result: V12EpisodeResult) -> None:
+    """写出 RM65 回合的 v2 产物（失败不阻断旧 CLI 输出/退出码）。
+
+    Args:
+        result: 共享管线回合结果（成功或失败均可）。
+    """
+    try:
+        payload = write_episode_artifacts(result, Path(result.config.output_dir))
+    except (OSError, ValueError, TypeError) as exc:
+        logger.warning("v2 产物写出失败（旧 CLI 行为不受影响）：%s", exc)
+        return
+    logger.info(
+        "v2 产物已写出：%s（schema=%s, hit=%s, physical=%s）",
+        result.config.output_dir,
+        payload.get("schema"),
+        payload["hit"]["legacy_hit_type"],
+        payload["hit"]["physical_hit_type"],
+    )
+
+
+def main() -> None:
+    """RM65 V12 主入口：CLI → T3 配置解析 → 共享管线 → 打印/绘图/回放。"""
+    parser = _build_parser()
+    argv = sys.argv[1:]
+    args = parser.parse_args(argv)
+    logging.getLogger().setLevel(
+        getattr(logging, str(args.log_level).upper(), logging.INFO)
+    )
+    try:
+        args.task_overrides = _parse_task_overrides(args.task_overrides)
+    except ValueError as exc:
+        parser.error(str(exc))
+
+    dispatch_code = _dispatch_robot_selection(parser, args, argv)
+    if dispatch_code is not None:
+        raise SystemExit(dispatch_code)
+
+    config = _config_or_error(parser, args, argv)
+    if config.robot_id != "rm65":  # pragma: no cover - 分派阶段已处理 R1D
+        parser.error(
+            f"内部错误：非 RM65 配置 {config.robot_id!r} 未在分派阶段处理"
+        )
+
+    if bool(args.sim_limits):
+        logger.warning(
+            "仿真默认关节限位已由 default.yaml / 机器人描述提供，"
+            "--sim-limits 已弃用（该参数不再改变行为）"
+        )
+
+    step_timer = _StepTimer() if args.dump_step_timing else None
+    hooks = (step_timer.hook,) if step_timer is not None else ()
+    dump_path = Path(args.dump_trajectory) if args.dump_trajectory else None
+    runtime_explicit = _runtime_explicit_options(parser, args, argv)
+    try:
+        result = run_v12_episode(
+            config,
+            dump_trajectory=dump_path,
+            post_exec_hooks=hooks,
+            **runtime_explicit,
+        )
+    except (ValueError, FileNotFoundError, OSError) as exc:
+        parser.error(str(exc))
+        raise AssertionError("unreachable")  # pragma: no cover
+
+    if bool(result.metrics.get("unreachable", False)):
+        serve = dict(result.metrics["serve"])
+        print("\n网球不在工作空间内，机械臂不击打！")
+        print(f"  球初始位置: {np.round(np.asarray(serve['p0']), 3)}")
+        print(f"  球初始速度: {np.round(np.asarray(serve['v0']), 3)}")
+        _write_rm65_episode_artifacts(result)
+        return
+
+    if step_timer is not None:
+        print(step_timer.summary(period_ms=float(config.dt) * 1000.0))
+        if args.dump_step_latencies:
+            print(step_timer.latencies_line())
+
+    _print_rm65_summary(result)
+    _write_rm65_episode_artifacts(result)
+
+    if dump_path is not None:
+        logger.info(
+            "轨迹已保存至 %s（.npz 格式，%d 步）", dump_path, len(result.U)
+        )
+
+    _plot_rm65_episode(config, result)
+
+    if config.viewer:
+        _view_rm65_episode(config, result)
 
 
 if __name__ == "__main__":

@@ -126,6 +126,9 @@ class PredictiveSafetyFilter:
         arm_nq: int = 6,
         enable_x_wall: bool = True,
         contact_checker: ForbiddenContactChecker | None = None,
+        *,
+        x_wall_body_names: tuple[str, ...] | None = None,
+        x_wall_limit: float | None = None,
     ) -> None:
         """初始化预测性安全滤波器。
 
@@ -136,6 +139,15 @@ class PredictiveSafetyFilter:
             arm_nq: 臂关节数。
             enable_x_wall: 是否启用 X 平面墙。
             contact_checker: 可选禁止对碰撞检查器（None = 旧默认）。
+            x_wall_body_names: T4 新增 keyword-only。X 平面墙检查的刚体名
+                元组；None 时保持 RM65 共享常量 ``X_WALL_BODY_NAMES``
+                （旧行为逐位不变）。供 V12RobotBundle 的 ``x_wall`` 配置
+                显式映射“世界 X 平面 + 检查刚体”，不在组件层硬编码单一
+                机器人布局。
+            x_wall_limit: T4 新增 keyword-only。世界坐标系 X 坐标上限
+                （米）；None 时保持 RM65 常量 ``-0.1``。R1D 的机体坐标
+                中线保护由 contact_checker 承担（``enable_x_wall=False``），
+                此处只表达“世界 X 平面”这一语义，不照搬 RM65 数值。
 
         Raises:
             ValueError: enable_x_wall=True 且 X 墙 body 名缺失。
@@ -146,6 +158,13 @@ class PredictiveSafetyFilter:
         self._nq = arm_nq
         self._enable_x_wall = enable_x_wall
         self._contact_checker = contact_checker
+        # X 墙语义参数（None → RM65 旧常量，T0 行为逐位不变）
+        self._x_wall_body_names: tuple[str, ...] = (
+            X_WALL_BODY_NAMES if x_wall_body_names is None else tuple(x_wall_body_names)
+        )
+        self._x_wall_limit: float = (
+            _X_WALL_LIMIT if x_wall_limit is None else float(x_wall_limit)
+        )
 
         # dt / NU 从环境读取（运行时固定）
         self._dt: float = float(env.dt)  # type: ignore[attr-defined]
@@ -180,7 +199,7 @@ class PredictiveSafetyFilter:
         model = self._env.model  # type: ignore[attr-defined]
         ids: list[int] = []
         missing: list[str] = []
-        for name in X_WALL_BODY_NAMES:
+        for name in self._x_wall_body_names:
             bid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, name)
             if bid < 0:
                 missing.append(name)
@@ -279,7 +298,10 @@ class PredictiveSafetyFilter:
         env.set_arm_state(x_pred)  # type: ignore[attr-defined]
         env.update_kinematics()  # type: ignore[attr-defined]
         data = env.data  # type: ignore[attr-defined]
-        ok = all(data.xpos[bid, 0] <= _X_WALL_LIMIT for bid in self._x_wall_body_ids)
+        ok = all(
+            data.xpos[bid, 0] <= self._x_wall_limit
+            for bid in self._x_wall_body_ids
+        )
         # 恢复
         env.set_arm_state(arm_state)  # type: ignore[attr-defined]
         env.set_ball_state(*ball_ref)  # type: ignore[attr-defined]

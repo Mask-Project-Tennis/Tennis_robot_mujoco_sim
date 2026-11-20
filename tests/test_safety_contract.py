@@ -34,11 +34,20 @@ class TestXWallBodyNamesConsistency:
     def test_v12_uses_shared_constant(self):
         """V12 的 X-wall body-name 解析应引用共享常量，而非硬编码重复。"""
         from src.ilqt.components.predictive_safety import X_WALL_BODY_NAMES
-        # 读取 V12 源码，验证它 import 了共享常量
-        v12_path = Path(__file__).resolve().parent.parent / "scripts" / "rm65_mpc_v12.py"
-        v12_source = v12_path.read_text(encoding="utf-8")
-        assert "X_WALL_BODY_NAMES" in v12_source, (
-            "V12 应导入并使用 X_WALL_BODY_NAMES 共享常量"
+        # T5 起 X 墙逻辑迁入 V12RobotBundle 适配层；共享常量应在适配器中消费。
+        adapter_path = (
+            Path(__file__).resolve().parent.parent
+            / "src" / "sim" / "v12_robot_adapter.py"
+        )
+        adapter_source = adapter_path.read_text(encoding="utf-8")
+        assert "X_WALL_BODY_NAMES" in adapter_source, (
+            "V12 适配层应导入并使用 X_WALL_BODY_NAMES 共享常量"
+        )
+        # 主脚本只消费已解析的 bundle，不应再硬编码另一份 body 名列表。
+        script_path = Path(__file__).resolve().parent.parent / "scripts" / "rm65_mpc_v12.py"
+        script_source = script_path.read_text(encoding="utf-8")
+        assert "X_WALL_BODY_NAMES" not in script_source, (
+            "主脚本不应重复定义/硬编码 X_wall body 名列表；应消费 bundle.x_wall"
         )
 
 

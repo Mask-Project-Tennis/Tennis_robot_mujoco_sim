@@ -353,10 +353,17 @@ def test_base_translation_and_rotation(side: str) -> None:
     default = _default_bundle(side)
     tcp0, rot0 = _fk_site(default.model, default.binding, params.init_q, "racket_center")
 
-    # 高度 +0.10 m：TCP 增量精确等于 [0,0,0.10]，姿态不变
-    lifted = _bundle_with_scene(side, base_position=np.array([0.0, 0.0, 1.1]))
+    # 水平平移 [0.10, -0.05, 0] m：TCP 增量精确等于该位移，姿态不变。
+    # （R1D 底座高度被落地高度契约固定在轮/脚轮上，故用水平平移验证
+    # 刚体平移语义；垂直方向的落地校验由 test_r1d_v12_scene 覆盖。）
+    scene = params.scene
+    assert scene is not None
+    shift = np.array([0.10, -0.05, 0.0])
+    lifted = _bundle_with_scene(
+        side, base_position=np.asarray(scene.base_position) + shift
+    )
     tcp1, rot1 = _fk_site(lifted.model, lifted.binding, params.init_q, "racket_center")
-    np.testing.assert_allclose(tcp1 - tcp0, [0.0, 0.0, 0.10], atol=1e-9)
+    np.testing.assert_allclose(tcp1 - tcp0, shift, atol=1e-9)
     np.testing.assert_allclose(rot1, rot0, atol=1e-9)
 
     # 绕 Z 旋转 90°（基座位置不变）：FK 按刚体变换变化
@@ -373,7 +380,7 @@ def test_base_translation_and_rotation(side: str) -> None:
 
 @pytest.mark.parametrize("side", SIDES)
 def test_racket_transform_and_inertia(side: str) -> None:
-    """拍面偏移符合 flange 旋转；圆盘惯量与质量符合闭式公式。"""
+    """拍面偏移符合 flange 旋转；全尺寸拍惯量与质量符合参数化公式。"""
     params = _load_parameters(side)
     scene = params.scene
     assert scene is not None
@@ -398,8 +405,9 @@ def test_racket_transform_and_inertia(side: str) -> None:
     _, rot2 = _fk_site(tilted.model, tilted.binding, params.init_q, "racket_center")
     np.testing.assert_allclose(rot2, flange_rot @ _RX90, atol=1e-9)
 
-    # 圆盘惯量闭式公式（默认与自定义参数均须满足）；显式 inertial 不双重计质量。
-    # 球拍现含 3 个 geom：racket_face 碰撞代理 + 视觉拍面 + 拍柄（后两者 contype=0）
+    # 复合体惯量（拍头+拍柄，body 原点在拍面中心）：轴向 X 约 0.0018，
+    # 横向 Y/Z 约 0.004（0.30 kg 成人拍近似，按质量线性缩放）。
+    # 球拍现含 9 个 geom：碰撞面 + 视觉拍面 + 拍柄 + 2 拍喉 + 4 拍框。
     bundles = [
         default,
         _bundle_with_scene(
@@ -409,16 +417,17 @@ def test_racket_transform_and_inertia(side: str) -> None:
     for bundle in bundles:
         sc = bundle.parameters.scene
         assert sc is not None
-        m, r, h = sc.racket_mass, sc.racket_radius, sc.racket_half_thickness
+        m = sc.racket_mass
         rid = mujoco.mj_name2id(bundle.model, mujoco.mjtObj.mjOBJ_BODY, "r1d_racket")
         assert rid != -1
         np.testing.assert_allclose(bundle.model.body_mass[rid], m, atol=1e-12)
-        ixx = m * (3.0 * r**2 + (2.0 * h) ** 2) / 12.0
-        izz = 0.5 * m * r**2
+        scale = m / 0.30
         np.testing.assert_allclose(
-            bundle.model.body_inertia[rid], [ixx, ixx, izz], atol=1e-12
+            bundle.model.body_inertia[rid],
+            [0.0018 * scale, 0.0040 * scale, 0.0040 * scale],
+            atol=1e-12,
         )
-        assert int(bundle.model.body_geomnum[rid]) == 3
+        assert int(bundle.model.body_geomnum[rid]) == 9
 
 
 @pytest.mark.parametrize("side", SIDES)
@@ -435,10 +444,10 @@ def test_parameter_change_does_not_mutate_other_bundle(side: str) -> None:
     mass_a = float(base_a.model.body_mass[racket_a])
     q_lower_a = np.array(base_a.parameters.q_lower)
 
-    # 以另一组参数构建 bundle B（基座抬升 + 球拍加重 + torso 移位）
+    # 以另一组参数构建 bundle B（基座水平平移 + 球拍加重 + torso 移位）
     modified = _bundle_with_scene(
         side,
-        base_position=scene.base_position + np.array([0.0, 0.0, 0.10]),
+        base_position=scene.base_position + np.array([0.10, 0.0, 0.0]),
         racket_mass=0.5,
         racket_radius=0.15,
         torso_position=np.array([0.0, 0.0, 0.0]),
@@ -639,11 +648,19 @@ def test_template_rebuild_is_byte_deterministic(side: str, tmp_path: Path) -> No
         mesh.attrib["file"]: (ASSET_FRAGMENT.parent / mesh.attrib["file"]).resolve()
         for mesh in ET.fromstring(ASSET_FRAGMENT.read_bytes()).iter("mesh")
     }
-    fragment_by_name = {p.name: p for p in fragment_refs.values()}
-    assert len(rebuilt_refs) == len(fragment_refs) == 20
+    env_refs = {
+        mesh.attrib["file"]: (ENV_FRAGMENT.parent / mesh.attrib["file"]).resolve()
+        for mesh in ET.fromstring(ENV_FRAGMENT.read_bytes()).iter("mesh")
+    }
+    expected_by_name = {p.name: p for p in fragment_refs.values()}
+    expected_by_name.update({p.name: p for p in env_refs.values()})
+    # 20 个资产片段 mesh + 2 个环境片段自带的头部 mesh（head_pitch/head_yaw）
+    assert len(fragment_refs) == 20
+    assert len(env_refs) == 2
+    assert len(rebuilt_refs) == 22
     for target in rebuilt_refs.values():
         assert target.is_file(), f"重定位后的 mesh 引用应存在: {target}"
-        assert target.read_bytes() == fragment_by_name[target.name].read_bytes(), (
+        assert target.read_bytes() == expected_by_name[target.name].read_bytes(), (
             f"mesh 内容应与片段资产一致: {target.name}"
         )
 
@@ -677,7 +694,7 @@ def test_export_relocates_meshes_when_relative_unavailable(
 
     root = ET.fromstring(out.read_bytes())
     files = [mesh.attrib["file"] for mesh in root.iter("mesh")]
-    assert len(files) == 20, "资产片段应携带 20 个 mesh 声明"
+    assert len(files) == 22, "资产片段 20 + 环境片段头部 2 个 mesh 声明"
     assert all(f.startswith("meshes/") for f in files), "应改写为重定位子目录的相对引用"
     exported = {p.name for p in (tmp_path / "meshes").iterdir()}
     assert exported == {Path(f).name for f in files}, "mesh 文件应全部重定位到导出目录"
@@ -685,7 +702,7 @@ def test_export_relocates_meshes_when_relative_unavailable(
     # 导出后实际加载：模板与重定位 mesh 自包含，MuJoCo 可编译出 7 维模型
     model = load_mujoco_model(out)
     assert model.nq == 7 and model.nv == 7 and model.nu == 7
-    assert model.nmesh == 20
+    assert model.nmesh == 22
 
 
 @pytest.mark.skipif(
@@ -710,7 +727,7 @@ def test_cross_drive_export_loads_directly(side: str) -> None:
         )
         model = mujoco.MjModel.from_xml_path(str(out))
         assert model.nq == 7 and model.nv == 7 and model.nu == 7
-        assert model.nmesh == 20
+        assert model.nmesh == 22
     finally:
         shutil.rmtree(out_dir, ignore_errors=True)
 
@@ -780,12 +797,13 @@ def test_template_defaults_match_runtime_yaml(side: str) -> None:
     )
     inertial = racket.find("inertial")
     assert inertial is not None
-    m, r, h = scene.racket_mass, scene.racket_radius, scene.racket_half_thickness
+    m = scene.racket_mass
     assert float(inertial.attrib["mass"]) == pytest.approx(m, abs=1e-12)
-    ixx = m * (3.0 * r**2 + (2.0 * h) ** 2) / 12.0
-    izz = 0.5 * m * r**2
+    scale = m / 0.30
     np.testing.assert_allclose(
-        _vec(inertial.attrib["diaginertia"]), [ixx, ixx, izz], atol=1e-12
+        _vec(inertial.attrib["diaginertia"]),
+        [0.0018 * scale, 0.0040 * scale, 0.0040 * scale],
+        atol=1e-12,
     )
 
     # 简化机身：相对固定基座定位

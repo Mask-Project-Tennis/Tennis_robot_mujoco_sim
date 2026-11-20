@@ -1,0 +1,27 @@
+# R1D-V12 任务覆盖层（T3 交付，schema r1d_v12_overlay_v1）
+#
+# 定位：R1D 从与 RM65 完全相同的 V12 基线解析派生后，在此文件应用
+# **机器人专用显式覆盖**。这里只放 R1D 与 RM65 必然不同、且已有证据的字段；
+# 其余字段（时间参数、代价、Tube、执行器等）沿用 V12 基线，后续由 T7 调参
+# 任务通过 `--task-overrides` 或本文件显式追加，不做隐式复制。
+#
+# 重要约定：
+# 1. `overrides` 的键是 T3 白名单点路径（见 src/sim/v12_config.py 的
+#    `_OVERRIDE_VALIDATORS`）；未知键或类型错误会在运行前失败。
+# 2. `target.*` 全部为 **provisional**，来源是阶段 3 的 R1D 固定球任务
+#    `configs/r1d_sim_right.yaml`（workspace_center/radius）。T2 的
+#    r1d_v12_runtime_right.yaml 与 T5/T7 的标定若给出新值，必须显式更新本文件。
+# 3. 不写 `shoulder_pos`：R1D 肩点由 T5 从实际模型派生（载荷/底座位姿），
+#    禁止复用 RM65 的 constants.SHOULDER_POS。
+# 4. 不写 mpc/cost 数值：T7 负责 R1D 调参与证据，T3 不臆造。
+
+schema_version: 1
+robot_id: unitree_r1d
+
+overrides:
+  # 目标区域（provisional，源 configs/r1d_sim_right.yaml workspace_center）
+  target.center: [-11.75, -0.9, 1.25]
+  # target.offset 保持 V12 字面量 0.10，不在这里重复声明：
+  # 同值重复会伪装成“R1D 差异”，若 R1D 标定确定需要不同偏移，再显式加回。
+  # 工作区半径（provisional，源 configs/r1d_sim_right.yaml workspace_radius）
+  target.workspace_radius: 0.80

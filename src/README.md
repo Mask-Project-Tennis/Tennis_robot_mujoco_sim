@@ -4,8 +4,8 @@
 
 | 模块 | 职责 | 关键文件 | 符号数 |
 |------|------|---------|--------|
-| `robot/` | 机器人模型定义（多机器人描述/参数/绑定/模型工厂 + MuJoCo XML + 正运动学） | `rm65_model.xml`, `kinematics.py`, `robot_profile.py`, `model_factory.py` | 9 |
-| `sim/` | MuJoCo 环境封装 + 轨迹回放 + 击打检测 + R1D 单臂仿真栈（配置/场景/绑定/执行/规划环境/闭环入口） | `rm65_env.py`, `env.py`, `viewer.py`, `replay.py`, `hit_detection.py`, `sim_config.py`, `tennis_scene.py`, `bound_robot_env.py`, `profile_sim_env.py`, `env_factory.py`, `collision_checks.py`, `r1d_runner.py` | 91 |
+| `robot/` | 机器人模型定义（多机器人描述/参数/绑定/模型工厂/球拍档案 + MuJoCo XML + 正运动学） | `rm65_model.xml`, `kinematics.py`, `robot_profile.py`, `racket_profile.py`, `model_factory.py` | 10 |
+| `sim/` | MuJoCo 环境封装 + 轨迹回放 + 击打检测 + R1D 单臂仿真栈 + V12 共享管线（配置/适配/Episode/产物） | `rm65_env.py`, `env.py`, `viewer.py`, `replay.py`, `hit_detection.py`, `sim_config.py`, `tennis_scene.py`, `bound_robot_env.py`, `profile_sim_env.py`, `env_factory.py`, `collision_checks.py`, `r1d_runner.py`, `v12_config.py`, `v12_robot_adapter.py`, `v12_episode.py`, `episode_artifacts.py` | 120+ |
 | `dynamics/` | 动力学线性化（解析/有限差分） | `linearize.py` | 5 |
 | `ilqt/` | iLQR 求解器 + MPCController + EpisodeRunner + 可插拔策略 + 可组合组件 + R1D 规划环境 | `solver.py`, `mpc_controller.py`, `episode_runner.py`, `profile_planning_env.py`, `strategies/`, `components/` | 160 |
 | `cpp/` | C++ 加速模块（pybind11：线性化、前向传递、约束检查） | `solver_cpp.py`, `mujoco_utils.h`, `cost_params.h` | 91 |
@@ -48,10 +48,15 @@ from src.perception.ball_estimator import BallEstimator  # 卡尔曼滤波器
 from src.tennis.ball import predict_trajectory            # 抛物线预测
 from src.utils.mujoco_loader import load_mujoco_model     # 跨平台模型加载
 from src.robot.model_factory import load_robot_model      # R1D 模型工厂（profile+参数 → RobotModelBundle）
+from src.robot.racket_profile import load_racket_profile   # 球拍档案（几何/质量/COM/惯量/安装/来源，SI）
 from src.robot.model_kinematics import ModelKinematics    # 名称映射运动学探针（TCP 位姿/雅可比）
 from src.sim.sim_config import load_sim_task_config, validate_simulation_inputs  # R1D 仿真任务配置（阶段 3）
 from src.sim.env_factory import build_r1d_environments     # R1D 执行/规划环境组装（阶段 3）
-from src.sim.r1d_runner import run_r1d_episode             # R1D 单臂闭环仿真入口（阶段 3）
+from src.sim.r1d_runner import run_r1d_episode             # R1D 旧单臂闭环入口（阶段 3，兼容）
+from src.sim.v12_config import resolve_v12_config          # V12 统一配置解析（RM65/R1D 注册表 + 稀疏覆盖，T3）
+from src.sim.v12_robot_adapter import build_v12_robot      # V12RobotBundle/SimulationEnv 双机器人适配（T4）
+from src.sim.v12_episode import run_v12_episode            # V12 共享 Episode 管线（T5）
+from src.sim.episode_artifacts import write_episode_artifacts  # v12_episode_v2 产物/快照/回放（T6）
 from src.ilqt.profile_planning_env import ProfilePlanningEnv  # R1D 规划侧环境（虚拟球，阶段 3）
 ```
 
@@ -61,6 +66,7 @@ from src.ilqt.profile_planning_env import ProfilePlanningEnv  # R1D 规划侧环
 
 - `constants.py`：共享常量单一事实来源（DT/INIT_Q/INIT_Q_REAL/INIT_Q_LEFT/SHOULDER_POS/WORKSPACE_RADIUS/KP/KD），仅依赖 numpy
 - `robot_profile.py`：`RobotProfile` 机器人描述加载器（configs/robots/*.yaml → 身份/模型路径/关节语义名称，纯配置层，不加载 MuJoCo/SDK、不含数值参数；校验 model_path 存在性）
+- `racket_profile.py`（T1）：`RacketProfile` 球拍档案加载器（`load_racket_profile(path)`；冻结 dataclass，几何/质量/COM/惯量/法兰安装/连接件/来源，SI 单位，柄底原点 +Z 长轴 +X 法向，TCP=拍面中心；非法输入 ValueError 不回落）
 - `model_binding.py`：`ModelBinding` 模型名称绑定器（按名称解析关节/执行器/TCP 的 qpos/qvel 地址，只接受标量关节，校验执行器传动目标与描述维度/重名，只读不修改模型）
 - `runtime_parameters.py`：`RobotRuntimeParameters`/`SceneParameters` 运行参数纯参数层（configs/robots/*_runtime.yaml 严格解析 + 维数/单位/能力校验；未知限值显式 null 不补值，不导入 MuJoCo/real/ilqt）
 - `model_factory.py`：R1D 场景模型工厂（`write_r1d_model_template` 合并裸臂/环境/资产片段生成双侧模板；`load_robot_model` 参数化加载→绑定→校验→jnt_range 回填 q 限位，返回 `RobotModelBundle`；支持集 robot_id=unitree_r1d，模型工具需显式模块导入不进包根 `__init__`）
@@ -83,7 +89,11 @@ from src.ilqt.profile_planning_env import ProfilePlanningEnv  # R1D 规划侧环
 - `profile_sim_env.py`（阶段 3）：`ProfileSimEnv` 带球执行环境（`step_full` + 球状态读写 + `set_arm_collision` 只切球—拍 pair_margin + `get_racket_face_speed`）
 - `env_factory.py`（阶段 3）：`RobotEnvironments` + `build_r1d_environments(profile, parameters, task)`（执行/规划双环境组装、位置模式 PD 同步、球初态注入）
 - `collision_checks.py`（阶段 3）：`has_forbidden_contact` + `ForbiddenContactChecker.from_env/has_contact_at_q`（禁止机身—臂接触检查，独立 MjData 零污染）
-- `r1d_runner.py`（阶段 3）：★ `run_r1d_episode(profile_path, runtime_path, task_path, output_dir, *, seed=None)` R1D 单臂闭环入口（MPCController + SimComponent/SimPerception/PredictiveSafetyFilter + EpisodeRunner，写 `r1d_episode.json`/`r1d_episode.npz`）
+- `r1d_runner.py`（阶段 3）：`run_r1d_episode(profile_path, runtime_path, task_path, output_dir, *, seed=None)` 旧 R1D 单臂闭环入口（保留兼容；T5 后主路径改走 `v12_episode`）
+- `v12_config.py`（T3）：`resolve_v12_config(args, explicit_options)` → `ResolvedV12Config`；RM65 默认→v5→mpc→CLI 顺序，R1D 显式注册表 + 稀疏覆盖，`--racket-config/--task-overrides`，冲突在构造环境前失败
+- `v12_robot_adapter.py`（T4）：`SimulationEnv` Protocol + `V12RobotBundle`（execution/planning/limits/init_q/joint_names/几何/保护接触/X 墙/planning_env_factory/backend/racket）+ `build_v12_robot(config)`；R1D 七维地址、异步工厂、estimated joint damping/armature 注入
+- `v12_episode.py`（T5）：`V12EpisodeResult` + `run_v12_episode(config, ...)` 共享 V12 流程（初始化/发球/候选点/Tube/MPC/组件/hooks/执行/指标），按 bundle 名映射不硬编码 6/7
+- `episode_artifacts.py`（T6）：`write_episode_artifacts/load_episode_artifacts/build_replay_bundle/replay_episode_artifacts`；`v12_episode_v2` JSON/NPZ、ContactEvent、源配置/模型快照、资源哈希与回放校验
 
 ### dynamics/ — 动力学
 

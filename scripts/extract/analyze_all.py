@@ -6,7 +6,7 @@
 （报告数据集 episode 总数 / no-verdict 率 / 各档排除率极差）：
 
 1. ``paired_stats.py``      E1-E8 主分析（球速扫描 / 限位代价 / 标称四档 /
-                            扰动网格 / 高功效角点 / 限速×机制）
+                            扰动网格 / 高功效角点 / 限速×机制）+ E9 共享输入 + 表格数据
 2. ``aux_stats.py``         敏感性 sweep（exp18）+ TCP 超限诊断 + 豁免窗复核
 3. ``extract_chat8_aux.py`` I(t,s) 交互 / both-succeed 子集 / hard-min 配对
 4. ``check_shared_input.py``共享输入（ballstate）交叉验证
@@ -16,8 +16,15 @@
 
 用法::
 
-    python scripts/extract/analyze_all.py                  # 全部子分析 + 记账
-    python scripts/extract/analyze_all.py --accounting-only  # 只打印记账
+    python scripts/extract/analyze_all.py                       # 全部子分析 + 记账
+    python scripts/extract/analyze_all.py --accounting-only     # 只打印记账
+    python scripts/extract/analyze_all.py --data-root DIR --output DIR   # 指定根与输出
+
+- `--data-root`：实验数据根（默认 `experiment_data/`，旧行为不变）。所有子分析
+  都以**同一个** `--data-root` 调用，子模块不得回退默认根。
+- `--output`：输出目录；透传给每个子模块（其 JSON 落在同一目录），并写
+  `<output>/analyze_all.json` 记录记账与各子模块状态。缺省只打印。
+- `--dry-run`：只打印，不写任何文件（也不让子模块写）。
 
 记账口径：只统计「论文正文引用了其数字」的数据集（README 证据表 E1-E4/E6-E9），
 artifact-only 的感知 sweeps（exp17a_noise / exp17c_obsfreq）与研发期扫描
@@ -37,7 +44,11 @@ from typing import Any
 
 PROJECT = Path(__file__).resolve().parents[2]
 EXTRACT = PROJECT / "scripts" / "extract"
-DATA = PROJECT / "experiment_data"
+DEFAULT_DATA_ROOT = PROJECT / "experiment_data"
+
+sys.path.insert(0, str(EXTRACT))
+
+from paired_stats import tier_of  # noqa: E402
 
 # 论文报告数据集（README 证据表）：目录名 -> 论文中的角色
 REPORTED: dict[str, str] = {
@@ -67,15 +78,36 @@ SUBMODULES: tuple[str, ...] = (
 )
 
 
-def experiment_stat(name: str) -> dict[str, Any]:
-    """统计一个实验目录：行数、error 行数、各档排除率极差（pp）。"""
-    path = DATA / name / "results.csv"
+def build_parser() -> argparse.ArgumentParser:
+    """构造命令行解析器（--data-root / --output / --dry-run / --accounting-only）。"""
+    parser = argparse.ArgumentParser(
+        description="论文数字统一复现入口",
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--data-root", type=Path, default=None,
+                        help=f"实验数据根（默认 {DEFAULT_DATA_ROOT}）；"
+                             "同一值透传给所有子分析")
+    parser.add_argument("--output", type=Path, default=None,
+                        help="输出目录（透传子模块；写 <output>/analyze_all.json）")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="只打印，不写任何文件（子模块也不写）")
+    parser.add_argument("--accounting-only", action="store_true",
+                        help="只打印记账（episode 总数 / no-verdict / 档间差）")
+    return parser
+
+
+def experiment_stat(data_root: Path, name: str) -> dict[str, Any] | None:
+    """统计一个实验目录：行数、error 行数、各档排除率极差（pp）；缺文件返回 None。"""
+    path = data_root / name / "results.csv"
+    if not path.is_file():
+        return None
     with open(path, newline="", encoding="utf-8") as f:
         rows = list(csv.DictReader(f))
     per_tier: dict[str, list[int]] = defaultdict(lambda: [0, 0])
     errors = 0
     for r in rows:
-        tier = str(json.loads(r["config_json"]).get("--ablation", "(单档)"))
+        row = dict(r)
+        row["config_json"] = r.get("config_json", "{}")
+        tier = tier_of(row) or "(单档)"
         per_tier[tier][0] += 1
         if (r.get("error") or "").strip():
             errors += 1
@@ -89,61 +121,126 @@ def experiment_stat(name: str) -> dict[str, Any]:
     }
 
 
-def print_accounting() -> None:
-    """打印论文 Accounting 句的三个量（论文 results.tex Limitations 末段）。"""
+def compute_accounting(data_root: Path) -> dict[str, Any]:
+    """计算论文 Accounting 句的三个量；缺失实验记为 unavailable。"""
     total = 0
     errs = 0
     spread = 0.0
     worst = "无"
+    missing: list[str] = []
+    experiments: dict[str, Any] = {}
     for name, role in REPORTED.items():
-        st = experiment_stat(name)
+        st = experiment_stat(data_root, name)
+        if st is None:
+            missing.append(name)
+            experiments[name] = {"role": role, "unavailable_reason": "missing_csv"}
+            continue
+        experiments[name] = {"role": role, **st}
         total += st["rows"]
         errs += st["errors"]
         if st["spread_pp"] > spread:
             spread, worst = st["spread_pp"], name
+    result: dict[str, Any] = {
+        "data_root": str(data_root.resolve()),
+        "experiments": experiments,
+        "missing": missing,
+        "totals": {"episodes": total, "no_verdict": errs,
+                   "no_verdict_pct": (100 * errs / total) if total else None,
+                   "max_tier_error_spread_pp": spread,
+                   "worst_spread_experiment": worst if total else None},
+    }
+    if total == 0:
+        result["unavailable_reason"] = "no_reported_experiment_csv"
+    return result
+
+
+def print_accounting(data: dict[str, Any]) -> None:
+    """打印论文 Accounting 句的三个量（论文 results.tex Limitations 末段）。"""
+    for name, role in REPORTED.items():
+        st = data["experiments"].get(name, {})
+        if "unavailable_reason" in st:
+            print(f"  {name:24s} 不可用（{st['unavailable_reason']}）  [{role}]")
+            continue
         print(f"  {name:24s} {st['rows']:6d} 行  error {st['errors']:4d}  "
               f"档间差 {st['spread_pp']:.2f} pp  [{role}]")
-    print(f"\n  记账合计: {total} episodes, no-verdict {errs} = "
-          f"{100 * errs / total:.2f}%  (论文写 1.3%)")
-    print(f"  各档排除率最大极差: {spread:.2f} pp ({worst})  (论文写 at most 0.5 pp)")
+    totals = data["totals"]
+    if totals["no_verdict_pct"] is None:
+        print("\n  记账合计: 不可估计（无任何报告数据集 CSV）")
+        return
+    print(f"\n  记账合计: {totals['episodes']} episodes, "
+          f"no-verdict {totals['no_verdict']} = {totals['no_verdict_pct']:.2f}%  "
+          f"(论文写 1.3%)")
+    print(f"  各档排除率最大极差: {totals['max_tier_error_spread_pp']:.2f} pp "
+          f"({totals['worst_spread_experiment']})  (论文写 at most 0.5 pp)")
 
 
-def run_submodules() -> None:
-    """依次运行五个子分析（各自打印结果并刷新其跟踪产物）。
+def _submodule_argv(data_root: Path, output: Path | None,
+                    dry_run: bool) -> list[str]:
+    """构造传给子模块的 argv：data-root 与 output 同源透传。"""
+    argv = ["--data-root", str(data_root)]
+    if output is not None:
+        argv += ["--output", str(output)]
+    if dry_run:
+        argv.append("--dry-run")
+    return argv
 
-    analyze_chat12_night 为顶层执行脚本（无 main()），用 runpy 以 __main__ 运行。
-    """
-    sys.path.insert(0, str(EXTRACT))
+
+def run_submodules(data_root: Path, output: Path | None,
+                   dry_run: bool) -> dict[str, Any]:
+    """依次运行六个子分析（全部收到同一 --data-root / --output）。"""
+    status: dict[str, Any] = {}
+    shared_argv = _submodule_argv(data_root, output, dry_run)
     for name in SUBMODULES:
         print("\n" + "═" * 78)
-        print(f"【{name}】")
+        print(f"【{name}】  argv: {name}.py {' '.join(shared_argv)}")
         print("═" * 78)
-        if name == "analyze_chat12_night":
-            import runpy
-            runpy.run_path(str(EXTRACT / "analyze_chat12_night.py"),
-                           run_name="__main__")
-            continue
         mod = importlib.import_module(name)
         main = getattr(mod, "main", None)
         if main is None:
             print("  (无 main()，跳过)")
+            status[name] = {"status": "skipped", "reason": "no_main"}
             continue
-        main()
+        try:
+            rc = main(list(shared_argv))
+        except FileNotFoundError as exc:
+            print(f"  不可估计：{exc}")
+            status[name] = {"status": "unavailable", "reason": str(exc)}
+            continue
+        status[name] = {"status": "ok", "returncode": rc}
+    return status
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> int:
     """解析参数：默认全跑，--accounting-only 只打印记账。"""
-    parser = argparse.ArgumentParser(description="论文数字统一复现入口")
-    parser.add_argument("--accounting-only", action="store_true",
-                        help="只打印记账（episode 总数 / no-verdict / 档间差）")
-    args = parser.parse_args()
+    args = build_parser().parse_args(argv)
+    data_root: Path = args.data_root if args.data_root is not None else DEFAULT_DATA_ROOT
+    accounting = compute_accounting(data_root)
+    status: dict[str, Any] = {}
     if not args.accounting_only:
-        run_submodules()
+        status = run_submodules(data_root, args.output, args.dry_run)
         print("\n" + "═" * 78)
     print("【记账 Accounting】")
     print("═" * 78)
-    print_accounting()
+    print_accounting(accounting)
+    if args.output is not None:
+        target = args.output / "analyze_all.json"
+        payload = {"data_root": str(data_root.resolve()),
+                   "accounting": accounting,
+                   "submodules": status,
+                   "argv": {"data_root": str(data_root), "output": str(args.output),
+                            "dry_run": args.dry_run,
+                            "accounting_only": args.accounting_only}}
+        if args.dry_run:
+            print(f"\n[analyze_all] dry-run：不写文件（目标 {target}）")
+        else:
+            print(f"\n[analyze_all] 写出目标 {target}")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(json.dumps(payload, ensure_ascii=False, indent=2),
+                              encoding="utf-8")
+    elif not args.dry_run:
+        print("\n[analyze_all] 未给 --output：只打印，不写文件")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

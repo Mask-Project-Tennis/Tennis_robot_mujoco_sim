@@ -1,0 +1,96 @@
+# 旧拍球拍参数档案（由 src/robot/rm65_model.xml 的几何/惯量独立导出）
+#
+# 用途：R1D-V12 parity 任务 T1 的 legacy 配置。该档案是旧拍在 V12 中的唯一物理来源，
+#      用于对照 T0 基线行为；不得由本档案反推修改 rm65_model.xml。
+#
+# 坐标系约定（SI）：
+#   * 局部系原点 = 柄底（手柄胶囊下端 tip）；
+#   * +Z 长轴指向拍头；+X 拍面法向；+Y 右手系；
+#   * TCP = 拍面几何中心；
+#   * mount 表示 p_flange = R(wxyz) @ p_local + position。
+#
+# 导出方式（不走任何生成函数，纯几何换算）：
+#   XML 中 r_racket_body 的坐标系已满足" +Z 长轴、+X 法向、+Y 右手系"，
+#   但原点在法兰处。手柄胶囊 fromto = "0 0 0.03 -> 0 0 0.22"、size = 0.012，
+#   故柄底在 body 系 z = 0.03 - 0.012 = 0.018；所有 body 系坐标减去 0.018 得局部系坐标，
+#   安装平移 = R(body quat) @ (0, 0, 0.018)。
+schema_version: 1
+racket_id: rm65_legacy
+description: "旧拍（rm65_model.xml 中的 r_racket_body：0.35 kg 简化拍，用于 V12 基线 parity 对照）"
+geometry:
+  length: 0.352
+  tcp: [0.0, 0.0, 0.232]
+  face_area: 0.03769911184307752
+  face:
+    shape: ellipsoid
+    center: [0.0, 0.0, 0.232]
+    semi_axes: [0.025, 0.10, 0.12]
+  handle:
+    shape: capsule
+    start: [0.0, 0.0, 0.012]
+    end: [0.0, 0.0, 0.202]
+    radius: 0.012
+  throat: []
+  frame: []
+mass: 0.35
+com: [0.0, 0.0, 0.112]
+inertia:
+  matrix:
+    - [0.003, 0.0, 0.0]
+    - [0.0, 0.001, 0.0]
+    - [0.0, 0.0, 0.003]
+mount:
+  position: [0.0, 0.0, 0.018]
+  wxyz: [0.7071067811865475, 0.0, 0.0, 0.7071067811865475]
+connector: null
+provenance:
+  geometry.length:
+    source: legacy_model
+    units: m
+    reference: "src/robot/rm65_model.xml：body r_racket_body → geom r_racket_face（ellipsoid pos 0 0 0.25，size 0.025 0.10 0.12）、geom r_racket_handle（capsule fromto 0 0 0.03 0 0 0.22）"
+    method: "柄底 = 胶囊下端 tip（body 系 z = 0.03 - 0.012 = 0.018）；全长 = 拍面中心 z 0.25 + 半长 0.12 - 柄底 0.018 = 0.352 m"
+  geometry.tcp:
+    source: legacy_model
+    units: m
+    reference: "src/robot/rm65_model.xml：site racket_center pos 0 0 0.25"
+    method: "TCP 取 site racket_center，换算到柄底原点：0.25 - 0.018 = 0.232 m"
+  geometry.face:
+    source: legacy_model
+    units: m
+    reference: "src/robot/rm65_model.xml：geom r_racket_face ellipsoid pos 0 0 0.25，size 0.025 0.10 0.12"
+    method: "MuJoCo ellipsoid 的 size 即三个半轴，直接沿用；中心换算到柄底原点（0.25 - 0.018 = 0.232 m）；实心椭球近似"
+  geometry.face_area:
+    source: legacy_model
+    units: m^2
+    reference: "src/robot/rm65_model.xml：geom r_racket_face ellipsoid size 半宽 0.10、半长 0.12"
+    method: "椭圆面积近似 π·半宽·半长 = π·0.10·0.12"
+  geometry.handle:
+    source: legacy_model
+    units: m
+    reference: "src/robot/rm65_model.xml：geom r_racket_handle capsule fromto 0 0 0.03 0 0 0.22，size 0.012"
+    method: "fromto 端点与半径直接换算到柄底原点：start z = 0.03 - 0.018 = 0.012，end z = 0.22 - 0.018 = 0.202，半径 0.012"
+  mass:
+    source: legacy_model
+    units: kg
+    reference: "src/robot/rm65_model.xml：body r_racket_body → inertial mass 0.35"
+    method: "直接沿用 XML inertial mass 0.35 kg（原模型未区分穿线质量）"
+  com:
+    source: legacy_model
+    units: m
+    reference: "src/robot/rm65_model.xml：body r_racket_body → inertial pos 0 0 0.13"
+    method: "质心 z = 0.13 - 0.018 = 0.112 m，x = y = 0"
+  inertia:
+    source: legacy_model
+    units: kg·m^2
+    reference: "src/robot/rm65_model.xml：body r_racket_body → inertial diaginertia 0.003 0.001 0.003"
+    method: "MuJoCo diaginertia 为主惯量对角元，inertial 系与球拍局部系同向，故 COM 惯量矩阵 = diag(0.003, 0.001, 0.003)；原点从法兰平移到柄底不改变质心惯量"
+  mount.position:
+    source: legacy_model
+    units: m
+    reference: "src/robot/rm65_model.xml：body r_racket_body pos 0 0 0、quat 0.707107 0 0 0.707107（父 body r_flange）"
+    method: "body → flange 旋转为绕 Z 轴 90°；安装平移 = R(q) @ (0, 0, 0.018) = (0, 0, 0.018)"
+  mount.wxyz:
+    source: legacy_model
+    units: "1"
+    reference: "src/robot/rm65_model.xml：body r_racket_body quat 0.707107 0 0 0.707107"
+    method: "XML quat 归一化后为 (0.7071067811865475, 0, 0, 0.7071067811865475)，即绕 Z 轴 90°"

@@ -12,6 +12,7 @@ Task 3.9 起按 ``SimExecutionEnv`` 协议（见 protocols.py）而非 RM65Env
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -27,6 +28,96 @@ if TYPE_CHECKING:
 # 主动命中判定的拍面速度阈值 [m/s]（接触时拍速 > 该值为主动击球，
 # ≤ 为被动接触；V11 约定，R1D 复用同一阈值）
 ACTIVE_HIT_FACE_SPEED_THRESHOLD = 0.3
+
+# 球-拍接近门控的 V12 缺省几何（RM65 旧路径逐字保持；R1D 由
+# bundle.racket / 场景参数注入覆盖，见 Task 5 brief §4.5）
+DEFAULT_BALL_RADIUS = 0.033
+DEFAULT_RACKET_RADIUS = 0.12
+DEFAULT_PROXIMITY_MARGIN = 0.03
+
+# 命中口径规则标识（T6：写入指标/产物，便于跨机器人对照与审计）
+LEGACY_HIT_RULE = "first_ball_racket_contact_in_collision_window"
+PHYSICAL_HIT_RULE = "first_physical_face_contact_face_speed_0p3"
+
+
+@dataclass(frozen=True)
+class ContactEvent:
+    """一个球—拍接触事件（同一物理步采集，含正距离接近事件）。
+
+    字段与 T6 契约逐字一致：``step`` / ``time_s`` 为该物理步（``step *
+    dt``）；``distance_m`` 直接取 MuJoCo ``contact.dist``（正值为接近
+    margin，负值为真实穿透）；``physical_contact`` 仅在 ``dist <= 0`` 时
+    为 True；``face_speed_m_s`` 取**同一物理步**的拍面/末端速度；命中
+    分类按拍面 + 物理接触 + 速度阈值（0.3 m/s）判定。
+    """
+
+    step: int
+    time_s: float
+    ball_geom_name: str
+    other_geom_name: str
+    surface_kind: str
+    distance_m: float
+    face_speed_m_s: float
+    physical_contact: bool
+    hit_type: str
+
+    def to_dict(self) -> dict[str, object]:
+        """返回 JSON 可序列化的字段字典（键名与契约一致）。"""
+        return {
+            "step": int(self.step),
+            "time_s": float(self.time_s),
+            "ball_geom_name": self.ball_geom_name,
+            "other_geom_name": self.other_geom_name,
+            "surface_kind": self.surface_kind,
+            "distance_m": float(self.distance_m),
+            "face_speed_m_s": float(self.face_speed_m_s),
+            "physical_contact": bool(self.physical_contact),
+            "hit_type": self.hit_type,
+        }
+
+
+def classify_surface_kind(geom_name: str) -> str:
+    """按拍 geom 名称判定接触面类型。
+
+    Args:
+        geom_name: 球拍侧 geom 名称（如 ``r_racket_face`` /
+            ``racket_frame`` / ``racket_handle``）。
+
+    Returns:
+        ``"face"`` / ``"frame"`` / ``"handle"`` / ``"other"``。
+    """
+    name = str(geom_name).lower()
+    if "face" in name:
+        return "face"
+    if "frame" in name or "throat" in name:
+        return "frame"
+    if "handle" in name:
+        return "handle"
+    return "other"
+
+
+def classify_contact_hit_type(
+    surface_kind: str,
+    physical_contact: bool,
+    face_speed_m_s: float,
+) -> str:
+    """按接触面/物理接触/拍速分类单个事件命中类型。
+
+    Args:
+        surface_kind: 接触面类型（见 :func:`classify_surface_kind`）。
+        physical_contact: 是否为真实物理接触（``dist <= 0``）。
+        face_speed_m_s: 同一物理步的拍面速度 [m/s]。
+
+    Returns:
+        ``"active"``（拍面真实接触且拍速 > 0.3）、``"passive"``（拍面
+        真实接触但拍速 ≤ 0.3）或 ``"miss"``。
+    """
+    if surface_kind == "face" and physical_contact:
+        if float(face_speed_m_s) > ACTIVE_HIT_FACE_SPEED_THRESHOLD:
+            return "active"
+        return "passive"
+    return "miss"
+
 
 
 class SimComponent:
@@ -60,6 +151,9 @@ class SimComponent:
         always_collision: bool = False,
         ball_geom_id: int | None = None,
         racket_geom_ids: tuple[int, ...] | None = None,
+        ball_radius: float = DEFAULT_BALL_RADIUS,
+        racket_radius: float = DEFAULT_RACKET_RADIUS,
+        proximity_margin: float = DEFAULT_PROXIMITY_MARGIN,
     ) -> None:
         """初始化仿真组件。
 
@@ -80,6 +174,11 @@ class SimComponent:
             ball_geom_id: 球碰撞 geom id（R1D 按解析 ID 判定接触；
                 须与 racket_geom_ids 同时提供或同时缺省）。
             racket_geom_ids: 拍碰撞 geom id 元组（3.2 场景解析结果）。
+            ball_radius: 球半径 [m]（球-拍接近门控；缺省为 V12 RM65 旧值
+                0.033，R1D 由场景参数提供）。
+            racket_radius: 球拍等效半径 [m]（缺省 0.12 保持 RM65 旧判据；
+                R1D 由 ``bundle.racket.face_semi_axes`` 提供）。
+            proximity_margin: 接近门控余量 [m]（缺省 0.03 保持 RM65 旧判据）。
 
         Raises:
             ValueError: ball_geom_id 与 racket_geom_ids 只提供其一
@@ -106,13 +205,33 @@ class SimComponent:
             if ball_geom_id is None or racket_geom_ids is None
             else (int(ball_geom_id), tuple(int(g) for g in racket_geom_ids))
         )
+        # 球-拍接近门控几何（Task 5：参数化，旧 RM65 缺省值逐位不变）
+        for _name, _value in (
+            ("ball_radius", ball_radius),
+            ("racket_radius", racket_radius),
+            ("proximity_margin", proximity_margin),
+        ):
+            if not np.isfinite(float(_value)) or float(_value) < 0.0:
+                raise ValueError(
+                    f"{_name} 必须为非负有限值，收到 {_value!r}"
+                )
+        self.ball_radius = float(ball_radius)
+        self.racket_radius = float(racket_radius)
+        self.proximity_margin = float(proximity_margin)
+        # 与旧表达式 (0.033 + 0.12 + 0.03) 相同的相加次序，保证 RM65
+        # 缺省判据逐位不变。
+        self._ball_near_threshold = (
+            self.ball_radius + self.racket_radius + self.proximity_margin
+        )
         self._nu = env.NU
         self._nq = env.NQ
 
-        # history 列表
+        # history 列表（ball_vel_history 与 ball_pos_history 严格同帧对齐，
+        # 见 R07：每逻辑步末追加该步最终球速度，含击球反弹后的速度）
         self.X_history: list[np.ndarray] = []
         self.U_history: list[np.ndarray] = []
         self.ball_pos_history: list[np.ndarray] = []
+        self.ball_vel_history: list[np.ndarray] = []
         self.distances_history: list[float] = []
         self.normal_align_history: list[float] = []
         self.ball_near_history: list[bool] = []
@@ -137,6 +256,13 @@ class SimComponent:
         # 出球质量（chat12 审稿 C6：击球后球的反弹速度）
         self.ball_out_speed: float | None = None
         self.ball_out_vy: float | None = None
+
+        # T6：本次回合采集到的全部球—拍接触事件（同一步多事件全保留），
+        # 以及独立于 legacy 口径的 physical 命中判定（首帧拍面真实接触）。
+        self.contact_events: list[ContactEvent] = []
+        self.physical_hit: bool = False
+        self.physical_hit_type: str = "miss"
+        self.physical_hit_step: int = -1
 
         self._step_count: int = 0
 
@@ -173,8 +299,10 @@ class SimComponent:
         n_align = float(n_rack_cur @ n_des_cur)
         self.normal_align_history.append(n_align)
 
-        # ball_near
-        is_ball_near = (dist_cur < 0.033 + 0.12 + 0.03) and (abs(n_align) > 0.7)
+        # ball_near（Task 5：球/拍半径由构造参数提供，缺省值与旧判据逐位一致）
+        is_ball_near = (dist_cur < self._ball_near_threshold) and (
+            abs(n_align) > 0.7
+        )
         self.ball_near_history.append(is_ball_near)
 
         # tube_ready
@@ -236,6 +364,9 @@ class SimComponent:
         # ---- 接触检测（V11 2036-2062；R1D 按解析 geom ID + 真实接触过滤）----
         ball_racket_hit = False
         if enable_collision and not self.ball_was_hit:
+            # T6：先采集本物理步的全部球—拍接触事件（含正距离 margin），
+            # 再执行下方 legacy 第一接触判定（判据/阈值/break 一字不改）。
+            self._collect_contact_events(step)
             n_contacts = env.data.ncon
             if n_contacts > 0:
                 for ci in range(n_contacts):
@@ -292,11 +423,161 @@ class SimComponent:
             v_ee = env.get_ee_vel()
             v_ball_rebound = compute_rebound_velocity(ball_vel_before_step, v_ee, n_racket, e=0.8)
             env.set_ball_vel(v_ball_rebound)
+            # 本逻辑步的最终球速度取反弹后的速度（与 set_ball_vel 写入的
+            # env 状态一致，保证 ball_vel_history 记录的是该帧真实速度）
+            ball_vel_new = v_ball_rebound
             # 出球质量记录：反弹速度模长 + Y 分量（来球自 -Y 飞来，出球应朝 +Y）
             self.ball_out_speed = float(np.linalg.norm(v_ball_rebound))
             self.ball_out_vy = float(v_ball_rebound[1])
 
+        # ---- 球速度 history（R07：与 ball_pos 同帧，取本逻辑步最终速度）----
+        self.ball_vel_history.append(
+            np.asarray(ball_vel_new, dtype=np.float64).copy()
+        )
+
         self._step_count += 1
+
+    def _current_contact_speed(self) -> float:
+        """取当前物理步的拍面速度标量 [m/s]。
+
+        R1D（注入接触 ID）用 ``get_racket_face_speed()``（拍面中心线速度）；
+        RM65 旧路径用末端线速度模（与 legacy 判定逐字一致）。
+        """
+        if self._contact_geom_ids is not None:
+            return float(self._env.get_racket_face_speed())
+        return float(np.linalg.norm(self._env.get_ee_vel()))
+
+    def _is_ball_racket_pair(self, contact: Any) -> bool:
+        """判断接触是否为球—拍对（**不做** dist 过滤，供事件采集用）。
+
+        与 :meth:`_is_ball_racket_contact` 的区别：后者是 legacy 命中判据
+        （R1D 要求 ``dist <= 0``），本方法只判断 geom 对，以便把正距离
+        margin 接近也记录为 ``ContactEvent``（``physical_contact=False``）。
+        """
+        if self._contact_geom_ids is not None:
+            ball_id, racket_ids = self._contact_geom_ids
+            g1, g2 = int(contact.geom1), int(contact.geom2)
+            return (g1 == ball_id and g2 in racket_ids) or (
+                g2 == ball_id and g1 in racket_ids
+            )
+        g1 = self._env.model.geom(contact.geom1).name  # type: ignore[union-attr]
+        g2 = self._env.model.geom(contact.geom2).name  # type: ignore[union-attr]
+        return ("ball" in g1 or "ball" in g2) and (
+            "racket" in g1 or "racket" in g2
+        )
+
+    def _contact_geom_names(self, contact: Any) -> tuple[str, str]:
+        """返回 ``(球 geom 名, 拍 geom 名)``（顺序无关的接触对）。"""
+        g1 = self._env.model.geom(contact.geom1).name  # type: ignore[union-attr]
+        g2 = self._env.model.geom(contact.geom2).name  # type: ignore[union-attr]
+        if self._contact_geom_ids is not None:
+            ball_id = self._contact_geom_ids[0]
+            if int(contact.geom1) == ball_id:
+                return g1, g2
+            return g2, g1
+        if "ball" in g1:
+            return g1, g2
+        return g2, g1
+
+    def _collect_contact_events(self, step: int) -> None:
+        """采集当前物理步的全部球—拍接触事件（T6 契约）。
+
+        扫描 ``env.data.ncon`` 全部接触，命中球—拍对的接触逐个记录为
+        :class:`ContactEvent`（同一步多事件全保留）；同一物理步的拍速只
+        取一次。首个 ``physical_contact and surface_kind == "face"`` 事件
+        决定 ``physical_hit / physical_hit_type / physical_hit_step``。
+
+        Args:
+            step: 当前执行步编号（时间 = ``step * dt``）。
+        """
+        n_contacts = int(self._env.data.ncon)
+        if n_contacts <= 0:
+            return
+        speed = self._current_contact_speed()
+        for ci in range(n_contacts):
+            c = self._env.data.contact[ci]
+            if not self._is_ball_racket_pair(c):
+                continue
+            ball_name, racket_name = self._contact_geom_names(c)
+            distance = float(c.dist)
+            physical = distance <= 0.0
+            surface_kind = classify_surface_kind(racket_name)
+            event = ContactEvent(
+                step=int(step),
+                time_s=float(step) * float(self._dt),
+                ball_geom_name=str(ball_name),
+                other_geom_name=str(racket_name),
+                surface_kind=surface_kind,
+                distance_m=distance,
+                face_speed_m_s=speed,
+                physical_contact=physical,
+                hit_type=classify_contact_hit_type(
+                    surface_kind, physical, speed,
+                ),
+            )
+            self.contact_events.append(event)
+            if (
+                not self.physical_hit
+                and event.physical_contact
+                and event.surface_kind == "face"
+            ):
+                self.physical_hit = True
+                self.physical_hit_type = event.hit_type
+                self.physical_hit_step = int(step)
+
+    def contact_summary(self) -> dict:
+        """汇总新旧命中口径（供 ``metrics``/产物写入）。
+
+        Returns:
+            扁平字典：``physical_hit`` / ``physical_hit_type`` /
+            ``physical_hit_step`` / ``legacy_hit`` / ``legacy_hit_type`` /
+            ``legacy_hit_rule`` / ``physical_hit_rule`` /
+            ``legacy_vs_physical_divergence`` / ``contact_events``。
+        """
+        legacy_hit = bool(self.ball_was_hit)
+        if self.active_contact:
+            legacy_hit_type = "active"
+        elif self.passive_contact:
+            legacy_hit_type = "passive"
+        else:
+            legacy_hit_type = "miss"
+
+        divergence: dict[str, object] | None = None
+        if legacy_hit != self.physical_hit:
+            divergence = {
+                "legacy_hit": legacy_hit,
+                "legacy_hit_type": legacy_hit_type,
+                "physical_hit": self.physical_hit,
+                "physical_hit_type": self.physical_hit_type,
+                "reason": (
+                    "legacy_hit_without_physical_face_contact"
+                    if legacy_hit
+                    else "physical_hit_without_legacy_hit"
+                ),
+            }
+        elif self.physical_hit and legacy_hit_type != self.physical_hit_type:
+            divergence = {
+                "legacy_hit": legacy_hit,
+                "legacy_hit_type": legacy_hit_type,
+                "physical_hit": self.physical_hit,
+                "physical_hit_type": self.physical_hit_type,
+                "reason": (
+                    "hit_type_mismatch_legacy_first_contact_vs_first_"
+                    "physical_face"
+                ),
+            }
+
+        return {
+            "physical_hit": self.physical_hit,
+            "physical_hit_type": self.physical_hit_type,
+            "physical_hit_step": self.physical_hit_step,
+            "legacy_hit": legacy_hit,
+            "legacy_hit_type": legacy_hit_type,
+            "legacy_hit_rule": LEGACY_HIT_RULE,
+            "physical_hit_rule": PHYSICAL_HIT_RULE,
+            "legacy_vs_physical_divergence": divergence,
+            "contact_events": [event.to_dict() for event in self.contact_events],
+        }
 
     def _is_ball_racket_contact(self, contact: Any) -> bool:
         """判断一个 MuJoCo 接触是否为球—拍物理接触。
@@ -362,6 +643,8 @@ class SimComponent:
             self.X_history.append(x_current.copy())
             self.U_history.append(u_hold.copy())
             self.ball_pos_history.append(ball_pos_adv.copy())
+            # R07：每个物理子步都记录球速度（取 env 真实 qvel，与位置同帧）
+            self.ball_vel_history.append(env.get_ball_vel().copy())
         return n_steps
 
     # ── 指标汇总 ─────────────────────────────────────────────────────────
@@ -390,4 +673,13 @@ class SimComponent:
             "passive_contact": self.passive_contact,
             "ball_out_speed": self.ball_out_speed,
             "ball_out_vy": self.ball_out_vy,
+            # 球-拍接近门控几何事实（Task 5：随产物记录，便于跨机器人对照）
+            "proximity": {
+                "ball_radius": self.ball_radius,
+                "racket_radius": self.racket_radius,
+                "proximity_margin": self.proximity_margin,
+                "ball_near_threshold": self._ball_near_threshold,
+            },
+            # T6：新旧命中口径独立汇总（含全部接触事件）
+            **self.contact_summary(),
         }

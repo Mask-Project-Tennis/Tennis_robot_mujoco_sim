@@ -11,21 +11,14 @@
 # - protected_geom_pairs：右侧 7 个臂连杆 geom（*_visual）+ 球拍 geom，
 #   各与简化机身 torso_box 组成禁止接触对；臂 geom 名以右侧模板为准
 #   （right_*_Link_visual）。
-# - workspace_center/radius：FK 实测依据 — 右肩世界位置 [0.059, -0.086, 1.358]，
-#   init_q 拍面 [0.169, -0.170, 1.502]，肘伸直位拍面 [0.393, -0.136, 1.332]
-#   （阶段 2 模板 mj_forward 实测，与左侧 y 镜像）；半径 0.45。provisional。
-#   * 3.11 处置：中心 y 由 -0.25 改 -0.10。原因：3.8
-#     validate_workspace_against_model 在 [0.25,-0.25,1.35] 的局部 IK 解
-#     q[1]=0.3289 rad 超过右肩侧摆上界 +0.2268 rad（3.10 已订正该点
-#     并非物理绝对不可达：换 IK 初值存在限位内分支 q1=-0.3779/误差 0.9mm，
-#     3.8 校验为多初值/局部问题）；本片无权改 3.8 校验，故把右生产中心
-#     移到右臂可达区 -0.10（3.10 实测可通过该校验），使右侧环境/求解器/
-#     短回合测试可真实运行。右侧不宣称命中（见验收报告）。
-# - initial_ball_position/velocity：右臂可达区内重新定位（来球自 y=-0.25
-#   朝中线下落）；抛物线验算 t≈0.44s 到击球高度 1.40m、落点
-#   [0.25, -0.16, 1.36]，与 workspace_center=[0.25,-0.10,1.35] 对齐。
-#   原 y=-0.45/vy=0.3 的镜像来球会在右侧低点被动擦拍（face 0.28 m/s），
-#   无法满足主动命中契约。provisional。
+# - workspace_center/radius：全尺寸外移球拍（法兰→拍面中心 0.54 m）后重新标定。
+#   右肩世界位置约 [0.059, -0.086, 1.358]；[0.25,-0.10,1.35] 的 IK 解
+#   q[5]=-1.145 rad 超过腕俯仰下界 -0.5236，故击球区外移到 x=0.55：
+#   [0.55,-0.17,1.35] 的 IK 解 [0.36,0.19,0.00,0.49,-0.08,-0.08,0.01]
+#   在限位内（误差 0.9 mm）。本文件所有数值仍为 provisional。
+# - initial_ball_position/velocity：来球自 y=-0.25 朝中线下落；
+#   抛物线验算 t≈0.39s 到击球高度，落点 [0.55,-0.17,1.36]，
+#   与 workspace_center=[0.55,-0.17,1.35] 对齐。provisional。
 # - max_steps/solver_config/mpc_config/cost_config：与左侧同值（双侧同构，
 #   见左侧文件头逐项理由，含 3.11 的 total_horizon 200 / follow_through 20 /
 #   Q_p 50000 / Q_v 200 调参记录）。provisional。
@@ -49,11 +42,11 @@ protected_geom_pairs:               # 禁止接触对（3.2 解析为 geom id �
   - [right_wrist_pitch_link_visual, torso_box]
   - [right_wrist_yaw_link_visual, torso_box]
   - [racket_face, torso_box]
-workspace_center: [0.25, -0.10, 1.35]   # 世界系击球区中心（3.11：y -0.25→-0.10，见文件头处置）
-workspace_radius: 0.45                  # m，臂+拍可达半径量级（provisional）
-initial_ball_position: [2.5, -0.25, 2.8]  # 世界系来球初位置（provisional，右臂可达区）
-initial_ball_velocity: [-5.0, 0.2, -1.0]  # m/s，朝右侧击球区下落（provisional）
-max_steps: 600          # 3.0s @ dt=0.005（provisional）
+workspace_center: [-11.75, -0.9, 1.25]   # 基线前 0.75 m 的击球区（全尺寸拍）
+workspace_radius: 0.80                  # m，含全尺寸拍的保守可达半径
+initial_ball_position: [0.3, -0.6, 2.2]  # 网前对手侧发球（旧发球分布）
+initial_ball_velocity: [-11.5, -0.3, 4.25] # 过网后下落，t≈1.05s 到击球区
+max_steps: 900          # 4.5s @ dt=0.005
 actuator_mode: torque   # 力矩模式默认；position 为仿真 PD（需 kp/kd）
 solver_config:
   backend: python       # R1D 默认 Python+FD（七维不落 C++ 六维内核）
@@ -68,8 +61,8 @@ solver_config:
   lin_eps: 1.0e-6       # FD 扰动步长（rad，provisional）
 mpc_config:
   dt: 0.005
-  total_horizon: 200    # 1.0s episode 规划视野（3.11：400→200，机理见左文件头）
-  fixed_horizon: 160    # 0.8s 固定段（provisional）
+  total_horizon: 320    # 1.6s：网→底线约 12m，8m/s 最低速需 1.5s
+  fixed_horizon: 260    # 1.3s 固定段
   replan_interval: 20   # 100ms 重规划节奏（沿既有节奏）
   max_iter_per_plan: 10
   first_plan_iters: 30

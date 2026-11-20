@@ -29,9 +29,9 @@ import json
 import logging
 import math
 import time
-from dataclasses import asdict
+from dataclasses import fields
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
@@ -49,6 +49,9 @@ from src.sim.collision_checks import ForbiddenContactChecker
 from src.sim.env_factory import build_r1d_environments
 from src.sim.hit_detection import classify_hit_result
 from src.sim.sim_config import load_sim_task_config, validate_simulation_inputs
+
+if TYPE_CHECKING:  # pragma: no cover - 仅类型标注，避免运行期循环依赖
+    from src.sim.v12_episode import V12EpisodeResult
 
 logger = logging.getLogger(__name__)
 
@@ -433,7 +436,7 @@ def _summarize(
     else:
         failure_reason = None
 
-    scene_dict = asdict(filled.scene)
+    scene_serialized = _scene_to_jsonable(filled.scene)
 
     return {
         "schema": _OUTPUT_SCHEMA,
@@ -451,7 +454,7 @@ def _summarize(
             "model_template": _sha256_file(model_path),
         },
         "provisional_fields": list(filled.provisional_fields),
-        "fixed_scene_params": _to_jsonable(scene_dict),
+        "fixed_scene_params": _to_jsonable(scene_serialized),
         "workspace": {
             "center": np.asarray(task.workspace_center, dtype=np.float64).tolist(),
             "radius": float(task.workspace_radius),
@@ -551,6 +554,61 @@ def _write_outputs(
     )
 
 
+def write_v12_r1d_artifacts(
+    result: "V12EpisodeResult",
+    output_dir: Path,
+) -> dict[str, Any]:
+    """把 V12 共享管线结果写成 v2 产物 + 旧 ``r1d_sim_episode_v1`` 兼容产物。
+
+    T6：先调用 :func:`src.sim.episode_artifacts.write_episode_artifacts`
+    写出统一的 ``v12_episode_v2`` JSON/NPZ 与快照；随后继续按旧 schema
+    写 ``r1d_episode.json`` / ``r1d_episode.npz``（字段名/键义/数组键
+    ``t`` 逐字保持），保证旧 R1D 消费方与 T5 回归测试不受影响。
+
+    Args:
+        result: :class:`src.sim.v12_episode.V12EpisodeResult` 实例。
+        output_dir: 产物输出目录（不存在则创建）。
+
+    Returns:
+        旧 schema 的 JSON payload（可直接 ``json.dumps``）。
+
+    Raises:
+        ValueError: 结果不含 R1D 元数据（非 R1D 回合）。
+    """
+    artifact = result.metrics.get("r1d_artifact")
+    if artifact is None:
+        raise ValueError(
+            "write_v12_r1d_artifacts 只接受 R1D 回合结果"
+            "（metrics['r1d_artifact'] 缺失）"
+        )
+    # T6：统一 v2 产物（含快照/hit 新旧口径），失败回合同样落盘
+    from src.sim.episode_artifacts import write_episode_artifacts
+
+    output_dir = Path(output_dir)
+    write_episode_artifacts(result, output_dir)
+
+    payload = json.loads(json.dumps(artifact, ensure_ascii=False))
+    output_dir.mkdir(parents=True, exist_ok=True)
+    (output_dir / _JSON_NAME).write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    np.savez(
+        output_dir / _NPZ_NAME,
+        X=np.asarray(result.X, dtype=np.float64),
+        U=np.asarray(result.U, dtype=np.float64).reshape(-1, result.U.shape[-1]),
+        ball_pos=np.asarray(result.ball_pos, dtype=np.float64),
+        ball_vel=np.asarray(result.ball_vel, dtype=np.float64),
+        t=np.asarray(result.time, dtype=np.float64),
+        simulation_only=np.array(True),
+        schema=np.array(_OUTPUT_SCHEMA),
+    )
+    logger.info(
+        "R1D 共享管线产物写出: %s（X %s, U %s）",
+        output_dir / _NPZ_NAME, result.X.shape, result.U.shape,
+    )
+    return payload
+
+
 def _replay_r1d_episode(
     execution: Any,
     X: np.ndarray,
@@ -624,6 +682,30 @@ def _sha256_file(path: Path) -> str:
         for chunk in iter(lambda: handle.read(65536), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _scene_to_jsonable(scene: Any) -> dict[str, Any]:
+    """把 ``SceneParameters`` 逐字段转成可 JSON 序列化 dict。
+
+    ``dataclasses.asdict`` 会深拷贝 ``fixed_joint_poses``（T2 起为
+    ``MappingProxyType`` 只读视图），在 pickle 该类型时抛
+    ``TypeError: cannot pickle 'mappingproxy' object``（T4 报告 R1）。
+    本函数在 asdict 之前先把映射转普通 dict，并保留全部键值。
+    """
+    result: dict[str, Any] = {}
+    for item in fields(scene):
+        value = getattr(scene, item.name)
+        if hasattr(value, "items"):
+            result[item.name] = {str(k): float(v) for k, v in dict(value).items()}
+        elif isinstance(value, np.ndarray):
+            result[item.name] = [float(x) for x in value.reshape(-1)]
+        elif isinstance(value, (list, tuple)):
+            result[item.name] = [_to_jsonable(x) for x in value]
+        elif isinstance(value, np.generic):
+            result[item.name] = value.item()
+        else:
+            result[item.name] = value
+    return result
 
 
 def _to_jsonable(value: Any) -> Any:

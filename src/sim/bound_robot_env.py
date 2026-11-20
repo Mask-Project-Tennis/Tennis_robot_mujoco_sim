@@ -113,6 +113,9 @@ class BoundRobotEnv:
         self.NQ = n
         self.NX = 2 * n
         self.NU = n
+        # T4：SimulationEnv 契约需要 NV（MuJoCo 速度维数；带球执行模型为
+        # n+6，裸规划模型为 n）。只读实例属性，不改变既有状态布局语义。
+        self.NV = int(self.model.nv)
 
         # 保持关节目标角（held_joint_names 为空时为零长度数组）
         held_q = np.asarray(
@@ -363,13 +366,14 @@ class BoundRobotEnv:
         return self._jacr_cache.copy()
 
     def get_ee_normal(self) -> np.ndarray:
-        """拍面法向 (3,)：TCP site 局部 +Z 轴在世界系中的方向（单位化）。
+        """拍面法向 (3,)：TCP site 局部 +X 轴在世界系中的方向（单位化）。
 
-        R1D 场景球拍为圆柱、拍面局部 +Z 即圆柱轴/法向；通用模型以
-        TCP site 帧的 Z 轴为法向约定。
+        R1D 球拍采用 RM65 拓扑：拍柄沿局部 +Z，拍面法向为局部 +X
+        （碰撞圆柱已用 geom quat 转到 X 轴）。通用模型以 TCP site 帧的
+        X 轴为法向约定。
         """
         rot = self.data.site_xmat[self._binding.tcp_site_id].reshape(3, 3)
-        normal = np.array(rot[:, 2])
+        normal = np.array(rot[:, 0])
         normal /= np.linalg.norm(normal) + 1e-12
         return normal
 

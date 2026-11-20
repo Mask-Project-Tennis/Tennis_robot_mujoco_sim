@@ -12,9 +12,9 @@
 |------|------|------|---------|
  | `scripts/` (根) | 7 | 活跃核心脚本 | `python scripts/xxx.py --args` |
 | `sim/` | 5 | 独立仿真（MPC/iLQR/Training/工具） | `python scripts/sim/xxx.py --args` |
-| `exp/` | ~20 | 活跃实验基础设施（exp9-15） | `python scripts/exp/xxx.py --args` |
-| `extract/` | 9 | 结果提取：日志 → CSV | `python scripts/extract/xxx.py` |
-| `plot/` | 14 | 论文图表生成 | `python scripts/plot/xxx.py` |
+| `exp/` | ~21 | 活跃实验基础设施（exp9-15 + R1D 论文 smoke） | `python scripts/exp/xxx.py --args` |
+| `extract/` | 10 | 结果提取：日志/产物 → CSV/JSON | `python scripts/extract/xxx.py` |
+| `plot/` | 15 | 论文图表生成 + R1D per-case smoke 图 | `python scripts/plot/xxx.py` |
 | `tools/` | 20 | 独立工具（查看器·扫描·诊断·可视化·轨迹残影渲染·R1D 模型构建与预览） | `python scripts/tools/xxx.py` |
 | `test/` | 10 | 快速验证脚本 | `python scripts/test/xxx.py` |
 | `archive/` | 59 | 已归档（V6-V10 + tube + 旧实验 + 旧 sim 脚本） | 详见 `archive/README.md` |
@@ -31,7 +31,10 @@
 | `run_real_robot.py` | 真机入口（--robot-config 可选机器人描述，默认 configs/robots/rm65.yaml；描述加载/校验失败以日志+退出码 2 呈现） |
 | `replay_trajectory.py` | 轨迹回放（含 --speed 安全检查） |
 
-## R1D 单臂控制 + 双侧渲染入口（阶段 3）
+## R1D 单臂控制 + 双侧渲染入口（阶段 3 旧路径，保留兼容）
+
+> 2026-11-19 起新增 R1D×V12 共享管线入口（见下一节）。本节旧三件套路径仍可运行，
+> 产物为旧 `r1d_sim_episode_v1`；新工作请优先使用 R1D×V12 路径。
 
 `scripts/rm65_mpc_v12.py` 同时是 R1-A7-D 单臂闭环仿真入口（实现委托 `src/sim/r1d_runner.py::run_r1d_episode`）。
 R1D 路径只接受 `--robot-config`/`--runtime-config`/`--sim-task-config`/`--output`/`--seed`/`--no-plot`/`--viewer`/`--log-level`（其中 `--seed`/`--no-plot`/`--viewer`/`--output`/`--log-level` 为共享基础参数，`--robot-config`/`--runtime-config`/`--sim-task-config` 为 R1D 专属配置项），其余 RM65 旧参数（`--serve-box`/`--position-mode`/`--async-replan`/`--fix-joint5`/`--dump-trajectory` 等）被拒绝（退出码 2）：
@@ -53,6 +56,36 @@ python scripts/rm65_mpc_v12.py \
 - 固定可达案例（阶段 3 验收）：`configs/scenarios/r1d_stage3_reachable.yaml`（右臂三路径、`seed 42`、`expected_hit_type: active`；路径相对 scenario 文件解析）。
 - 离线仿真口径：单回合首 plan 约 6–14 s、整回合 8–14 s（Python 有限差分后端），非实时。
 - 左侧命令仍可运行（`--robot-config ... r1d_left.yaml` 等三份 left 配置），但左侧现在是渲染/短回合验证，不再承担固定案例验收。
+
+## R1D × V12 Parity（阶段 4，2026-11-19）
+
+同一 `scripts/rm65_mpc_v12.py` 在 `--robot-config configs/robots/r1d_right.yaml` 时走
+`src/sim/v12_config.py` → `v12_robot_adapter.py` → `v12_episode.py` → `episode_artifacts.py`
+共享管线；无需再传旧三件套（注册表自动指向 `r1d_v12_runtime_right.yaml`/`r1d_v12.yaml`/
+`blade100_v9_reference.yaml`）。`--serve-box/--ball-speed/--position-mode/--seed/--no-plot/
+--async-replan/--racket-config/--task-overrides` 均可用于 R1D；旧 `--runtime-config/--sim-task-config`
+三件套仍兼容。
+
+```bash
+# 固定案例（两模式真实 active）完整命令：见 docs/r1d_v12_usage.md §4
+python scripts/rm65_mpc_v12.py \
+  --robot-config configs/robots/r1d_right.yaml --seed 42 --no-plot \
+  --serve-box --ball-speed 7 --output results/r1d_active_position --position-mode \
+  --task-overrides mpc.total_horizon=270 --task-overrides mpc.fixed_horizon=260 \
+  --task-overrides mpc.racket_speed=1.5 --task-overrides mpc.target_speed=1.5 \
+  --task-overrides mpc.normal_weight=0
+
+# R1D 论文 smoke（19 组+3 额外依赖，默认每 cell 2 seeds 100/101）
+python scripts/exp/run_r1d_paper_smoke.py \
+  --manifest configs/experiments/r1d_paper_smoke.yaml \
+  --output experiment_data/r1d_v12_parity/paper_smoke
+```
+
+- 产物：`v12_episode.json`（schema `v12_episode_v2`，含 ContactEvent/身份/哈希）+ `v12_episode.npz`
+  + `snapshot/`；R1D 另写旧 `r1d_episode.json/.npz` 兼容投影。
+- 统计/绘图：`scripts/extract/extract_r1d_smoke_stats.py`、`scripts/plot/plot_r1d_smoke_stats.py`、
+  `scripts/plot/paper_figs.py --data-root/--out/--fig table3`、`scripts/tools/render_swing_hero.py`。
+- 验收测试：`tests/test_r1d_v12_acceptance.py`；完整使用/限制/证据见 `docs/r1d_v12_usage.md`。
 
 ## sim/ — 独立仿真（5 个）
 

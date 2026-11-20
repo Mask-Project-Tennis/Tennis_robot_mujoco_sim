@@ -12,7 +12,8 @@
 - 冻结策略与派生模型一致（审计报告 §4）：
   * 轮/脚轮/头/对侧臂不进入链；
   * 双级升降 prismatic 按同一 ``LIFT_QL`` bake（当前 ``r1d_env.xml``
-    bake q_L=0，即环境链全部关节角为 0，偏移只剩 origin）；
+    bake q_L=0.4225，对应 base_z=0.155 m 的落地高度，waist 世界 z 仍为
+    1.16 m）；
   * 腰 ``waist_yaw_joint`` 冻结 0；
   * 仅该侧 7 个臂关节取输入 q。
 - 场景数值（r1d_mount 的 ``base_position``/``base_quaternion`` 与
@@ -41,9 +42,9 @@ RUNTIME_PATHS: dict[str, Path] = {
     for side in ("left", "right")
 }
 
-# 双级升降的 bake 值（m）。r1d_env.xml 当前 bake q_L=0（两级 prismatic
-# 关节角均为 0），与派生环境片段一致；若 q_L 改动需同步此常量。
-LIFT_QL = 0.0
+# 双级升降的 bake 值（m）。落地方案 base_z=0.155 m 时，取 q_L=0.4225
+# 使 waist 世界高度仍为 1.16 m（原 base_z=1.0、q_L=0 的肩高不变）。
+LIFT_QL = 0.4225
 
 # 腰关节冻结值（rad，审计 §4 冻结策略：两限位集合公共值 0）
 WAIST_QL = 0.0
@@ -195,12 +196,24 @@ class R1DUrdfFk:
     （scene YAML 的 racket_position/racket_quaternion）。
     """
 
-    def __init__(self, side: str, urdf_path: Path = URDF_PATH) -> None:
+    def __init__(
+        self,
+        side: str,
+        urdf_path: Path = URDF_PATH,
+        *,
+        base_position: Sequence[float] | None = None,
+        base_quaternion: Sequence[float] | None = None,
+        lift_ql: float = LIFT_QL,
+    ) -> None:
         """解析 URDF 与该侧 runtime YAML scene 数值。
 
         Args:
             side: "left" 或 "right"。
             urdf_path: 官方整机 URDF 路径（默认 assets/unitree_r1d/r1d.urdf）。
+            base_position: 可选底座世界位置覆盖 (3,)（默认取 runtime YAML）。
+            base_quaternion: 可选底座姿态覆盖 wxyz (4,)（默认取 runtime YAML）。
+            lift_ql: 双级升降单级 bake 值（m，默认 ``LIFT_QL``）；用于对照
+                场景层显式升降位移重烘是否一致。
 
         Raises:
             ValueError: side 非法、URDF 关节链与预期不符（名称/父子关系
@@ -258,10 +271,17 @@ class R1DUrdfFk:
 
         # scene 数值（base 挂载 + 球拍）——输入而非被测对象
         scene = _parse_scene_vectors(RUNTIME_PATHS[side])
-        self._base_position = scene["base_position"]
-        self._base_rotation = _quaternion_matrix(scene["base_quaternion"])
+        self._base_position = (
+            scene["base_position"]
+            if base_position is None
+            else np.asarray(base_position, dtype=np.float64)
+        )
+        self._base_rotation = _quaternion_matrix(
+            scene["base_quaternion"] if base_quaternion is None else base_quaternion
+        )
         self._racket_position = scene["racket_position"]
         self._racket_rotation = _quaternion_matrix(scene["racket_quaternion"])
+        self._lift_ql = float(lift_ql)
 
     def _joint_transform(self, joint: ET.Element, value: float) -> np.ndarray:
         """单个 URDF 关节的 4×4 变换：Origin(xyz, rpy) @ Motion(axis, q)。
@@ -302,8 +322,8 @@ class R1DUrdfFk:
         """世界系 → 该侧 r1d_flange（dex1_base_joint child 原点）的 4×4 变换。"""
         q_map = dict(zip(self._arm_joint_names, (float(v) for v in q)))
         frozen = {
-            "lift_stage1_joint": LIFT_QL,
-            "lift_stage2_joint": LIFT_QL,
+            "lift_stage1_joint": self._lift_ql,
+            "lift_stage2_joint": self._lift_ql,
             "waist_yaw_joint": WAIST_QL,
         }
         t = _make_transform(self._base_rotation, self._base_position)
@@ -313,6 +333,21 @@ class R1DUrdfFk:
             motion = self._joint_transform(joint, value)
             t = _apply_transform(t, motion[:3, :3], motion[:3, 3])
         return t
+
+    def flange_pose(self, q: Sequence[float]) -> tuple[np.ndarray, np.ndarray]:
+        """该侧法兰（``r1d_flange`` site 对应点）的世界位姿（独立 URDF FK）。
+
+        Args:
+            q: (7,) 该侧臂关节角（rad），顺序同 :meth:`tcp_pose`。
+
+        Returns:
+            (pos, rot)：(3,) 世界位置与 3×3 世界旋转矩阵。
+        """
+        q_arr = np.asarray(q, dtype=np.float64)
+        if q_arr.shape != (len(self._arm_joint_names),):
+            raise ValueError(f"q 应为 ({len(self._arm_joint_names)},)，实际 {q_arr.shape}")
+        t = self._flange_transform(q_arr)
+        return t[:3, 3].copy(), t[:3, :3].copy()
 
     def tcp_pose(self, q: Sequence[float]) -> tuple[np.ndarray, np.ndarray]:
         """该侧 TCP（= MuJoCo racket_center site 对应点）的世界位姿。

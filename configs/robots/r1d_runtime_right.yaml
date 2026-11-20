@@ -30,14 +30,14 @@ qddot_max: null
 torque_max: null             # URDF effort 非 0 但未经实机验证，不作运行限值（N0-9）
 max_tcp_speed: null
 scene:
-  base_position: [0.0, 0.0, 1.0]      # 虚拟固定基座（环境链 base_link 原点，世界系）
+  base_position: [0.0, 0.0, 0.155]      # 虚拟固定基座（环境链 base_link 原点，世界系）
   base_quaternion: [1.0, 0.0, 0.0, 0.0]  # wxyz 单位四元数
-  racket_position: [0.0, 0.0, 0.25]   # 相对 r1d_flange（该侧 dex1_base_joint origin），非实物标定
+  racket_position: [0.0, 0.0, 0.54]   # 相对 r1d_flange（该侧 dex1_base_joint origin），非实物标定
   racket_quaternion: [1.0, 0.0, 0.0, 0.0]  # 拍面局部 +Z 为法向
   racket_radius: 0.12                 # 实心圆盘占位几何（临时值）
   racket_half_thickness: 0.005
   racket_mass: 0.30                   # 实心圆盘近似惯量，不宣称实物惯量
-  torso_position: [-0.25, 0.0, -0.30]  # 相对固定基座的简化机身 box 中心（临时值）
+  torso_position: [-0.25, 0.0, 0.72]  # 相对固定基座的简化机身 box 中心（临时值）
   torso_half_size: [0.15, 0.20, 0.30]  # 简化 box，不是整机外形
 provisional_fields: [dt, init_q,
                      base_position, base_quaternion,

@@ -15,13 +15,15 @@ model_factory 绑定模型后从 jnt_range 解析填回。
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal, NoReturn
+from types import MappingProxyType
+from typing import Any, Literal, Mapping, NoReturn
 
 import numpy as np
 import yaml
 
+from src.robot.court_geometry import COURT_PROFILES
 from src.robot.robot_profile import RobotProfile
 
 # §2.2 契约中的数组类型别名
@@ -64,10 +66,14 @@ _NULLABLE_ARRAY_FIELDS = (
     "torque_max",
 )
 
-# scene 允许的键（与 SceneParameters 字段同名）
+# scene 允许的键（与 SceneParameters 字段同名；含旧 legacy racket_*、T2
+# 新增的显式升降/固定姿态字段，以及 I2 的球场视觉 profile）
 _SCENE_FIELDS = (
     "base_position",
     "base_quaternion",
+    "lift_displacement",
+    "fixed_joint_poses",
+    "court_profile",
     "racket_position",
     "racket_quaternion",
     "racket_radius",
@@ -75,6 +81,39 @@ _SCENE_FIELDS = (
     "racket_mass",
     "torso_position",
     "torso_half_size",
+)
+
+# scene 必填键（旧 9 字段配置同样满足：T2 新增两项均可省略取默认值）
+_SCENE_REQUIRED_FIELDS = (
+    "base_position",
+    "base_quaternion",
+    "torso_position",
+    "torso_half_size",
+)
+
+# scene 中的 legacy 球拍字段（全有或全无；提供 RacketProfile 时须全为 None）
+_SCENE_LEGACY_RACKET_FIELDS = (
+    "racket_position",
+    "racket_quaternion",
+    "racket_radius",
+    "racket_half_thickness",
+    "racket_mass",
+)
+
+# 双级升降单级 bake 位移（m）的默认值与单级行程上界（与 r1d_env.xml 契约一致）
+DEFAULT_LIFT_DISPLACEMENT = 0.4225
+MAX_LIFT_DISPLACEMENT = 0.425
+
+# 被动臂 7 关节语义后缀（scene.fixed_joint_poses 的合法关节名 = 对侧前缀 +
+# 后缀 + "_joint"；主动侧关节不得在场景层固定）
+_ARM_SEMANTIC_SUFFIXES = (
+    "shoulder_pitch",
+    "shoulder_roll",
+    "shoulder_yaw",
+    "elbow",
+    "wrist_roll",
+    "wrist_pitch",
+    "wrist_yaw",
 )
 
 # provisional_fields 允许标记的字段名（数值字段 + scene 字段）
@@ -102,49 +141,78 @@ _SIMULATION_REQUIRED_FIELDS = (
 
 @dataclass(frozen=True)
 class SceneParameters:
-    """场景几何参数 — 固定基座/球拍/机身的位置与形状描述。
+    """场景几何参数 — 固定基座/升降/固定姿态/机身（及 legacy 球拍）描述。
 
-    D2 场景组装使用；RM65 运行参数 scene 为 None，不覆写旧几何。
+    R1D 场景组装使用；RM65 运行参数 scene 为 None，不覆写旧几何。
+
+    T2 起球拍几何/质量/惯量的唯一物理来源是 RacketProfile 档案（显式传给
+    ``load_robot_model``/``build_tennis_scene``）；本类的 ``racket_*`` 字段
+    仅为**旧 API（未提供档案）legacy 模式**保留，提供档案时必须全部为
+    None（不得重复给出）。
 
     Attributes:
         base_position: (3,) 世界系中的固定基座位置（m）。
         base_quaternion: (4,) 基座姿态，wxyz，须单位长度，零四元数拒绝。
-        racket_position: (3,) 相对 d2_flange（link_7 末端法兰）的拍面中心（m）。
-        racket_quaternion: (4,) 拍面姿态，wxyz，拍面局部 +Z 为法向。
-        racket_radius: 球拍半径（m）。
-        racket_half_thickness: 球拍半厚（m）。
-        racket_mass: 球拍质量（kg），实心圆盘近似，不宣称实物惯量。
         torso_position: (3,) 简化机身 box 中心，相对固定基座（m）。
         torso_half_size: (3,) 简化机身 box 半尺寸（m）。
+        lift_displacement: 双级升降单级 bake 位移（m），范围
+            [0, 0.425]，默认 0.4225；与 base_position[2] 同源推导落地高度。
+        fixed_joint_poses: 对侧被动臂固定关节姿态 {关节名: 角度 rad}；
+            空映射 = 工厂默认被动臂姿态（模板烘焙值），部分覆盖其余取默认。
+        court_profile: 球场白线视觉 profile；``legacy_v1`` = 旧 10 线
+            （默认，保持既有渲染），``itf_2026_v1`` = ITF 2026 标准 12 线。
+            只影响球场白线 geom，不参与动力学、碰撞或安全限值。
+        racket_position: (3,) legacy 模式相对法兰的拍面中心（m）；档案模式 None。
+        racket_quaternion: (4,) legacy 模式拍面姿态 wxyz；档案模式 None。
+        racket_radius: legacy 模式球拍半径（m）；档案模式 None。
+        racket_half_thickness: legacy 模式球拍半厚（m）；档案模式 None。
+        racket_mass: legacy 模式球拍质量（kg）；档案模式 None。
     """
 
     base_position: Array
     base_quaternion: Array
-    racket_position: Array
-    racket_quaternion: Array
-    racket_radius: float
-    racket_half_thickness: float
-    racket_mass: float
     torso_position: Array
     torso_half_size: Array
+    lift_displacement: float = DEFAULT_LIFT_DISPLACEMENT
+    fixed_joint_poses: Mapping[str, float] = field(default_factory=dict)
+    court_profile: str = "legacy_v1"
+    racket_position: Array | None = None
+    racket_quaternion: Array | None = None
+    racket_radius: float | None = None
+    racket_half_thickness: float | None = None
+    racket_mass: float | None = None
 
     def __post_init__(self) -> None:
-        """冻结数组为只读 float64 副本、标量转有限 float（防别名写入）。"""
+        """冻结数组为只读 float64 副本、标量/姿态转有限 float（防别名写入）。"""
         for name in (
             "base_position",
             "base_quaternion",
-            "racket_position",
-            "racket_quaternion",
             "torso_position",
             "torso_half_size",
         ):
             object.__setattr__(
                 self, name, _readonly_float64(getattr(self, name), name)
             )
+        for name in ("racket_position", "racket_quaternion"):
+            value = getattr(self, name)
+            if value is not None:
+                object.__setattr__(
+                    self, name, _readonly_float64(value, name)
+                )
+        object.__setattr__(
+            self,
+            "lift_displacement",
+            _finite_float(self.lift_displacement, "lift_displacement"),
+        )
         for name in ("racket_radius", "racket_half_thickness", "racket_mass"):
-            object.__setattr__(
-                self, name, _finite_float(getattr(self, name), name)
-            )
+            value = getattr(self, name)
+            if value is not None:
+                object.__setattr__(self, name, _finite_float(value, name))
+        object.__setattr__(
+            self,
+            "fixed_joint_poses",
+            _readonly_pose_mapping(self.fixed_joint_poses),
+        )
 
 
 @dataclass(frozen=True)
@@ -243,9 +311,9 @@ def load_runtime_parameters(
     unknown = sorted(map(str, set(raw) - set(_RUNTIME_FIELDS)))
     if unknown:
         raise ValueError(f"未知字段 {unknown}（文件: {path}）")
-    for field in _RUNTIME_FIELDS:
-        if field not in raw:
-            raise ValueError(f"缺少字段 {field}（文件: {path}）")
+    for key in _RUNTIME_FIELDS:
+        if key not in raw:
+            raise ValueError(f"缺少字段 {key}（文件: {path}）")
 
     _require_schema_version(raw, path)
 
@@ -321,20 +389,20 @@ def validate_runtime_parameters(
     n = profile.ndof
     _check_array(params.init_q, (n,), "init_q", context)
     _check_array(params.held_q, (len(profile.held_joint_names),), "held_q", context)
-    for field in _NULLABLE_ARRAY_FIELDS:
-        array = getattr(params, field)
+    for key in _NULLABLE_ARRAY_FIELDS:
+        array = getattr(params, key)
         if array is not None:
-            _check_array(array, (n,), field, context)
+            _check_array(array, (n,), key, context)
 
     # 增益与限值的符号约束
     if params.kp is not None and bool(np.any(params.kp <= 0)):
         _reject("kp", "必须逐元素为正数", context)
     if params.kd is not None and bool(np.any(params.kd < 0)):
         _reject("kd", "不允许负值", context)
-    for field in ("qdot_max", "qddot_max", "torque_max"):
-        array = getattr(params, field)
+    for key in ("qdot_max", "qddot_max", "torque_max"):
+        array = getattr(params, key)
         if array is not None and bool(np.any(array <= 0)):
-            _reject(field, "必须逐元素为正数", context)
+            _reject(key, "必须逐元素为正数", context)
 
     # 可空限值必须成对提供（整组未知或整组已知）
     _check_paired(params.kp is None, params.kd is None, "kp", "kd", context)
@@ -354,7 +422,7 @@ def validate_runtime_parameters(
     if params.max_tcp_speed is not None and not params.max_tcp_speed > 0:
         _reject("max_tcp_speed", f"{params.max_tcp_speed} 必须为正数", context)
 
-    _validate_scene(params.scene, context)
+    _validate_scene(params.scene, profile, context)
 
     # provisional_fields 只允许标记已知数值字段（防拼写错误静默生效）
     unknown_provisional = sorted(
@@ -379,33 +447,107 @@ def validate_runtime_parameters(
             )
 
 
-def _validate_scene(scene: SceneParameters | None, context: str) -> None:
-    """校验场景几何参数的形状、有限性、四元数单位性与正数项。
+def _validate_scene(
+    scene: SceneParameters | None, profile: RobotProfile, context: str
+) -> None:
+    """校验场景几何参数的形状、有限性、四元数单位性、升降范围与固定姿态。
+
+    T2 起球拍几何的物理来源是 RacketProfile 档案；``racket_*`` 字段仅作为
+    旧 API 的 legacy 模式保留，因此本函数：
+
+    * 必需字段（底座/机身）始终校验；
+    * legacy 球拍 5 字段必须"全有或全无"（成组提供），提供时逐项校验；
+    * ``lift_displacement`` 校验范围 [0, 0.425]（与 r1d_env.xml 单级行程一致）；
+    * ``fixed_joint_poses`` 的关节名必须是**对侧被动臂**的 7 关节之一，
+      主动侧关节不得出现在场景层（固定主动关节会破坏 7 主动 DOF 契约）；
+    * ``court_profile`` 只能是 :data:`COURT_PROFILES` 中的合法视觉 profile
+      （纯渲染选择，不校验动力学/碰撞）。
 
     Args:
         scene: 场景参数；None（RM65 风格）直接通过。
+        profile: 机器人描述，用于推导被动侧前缀与合法关节名。
         context: 错误消息附带的身份与来源上下文。
     """
     if scene is None:
         return
-    for field, shape in (
+    if scene.court_profile not in COURT_PROFILES:
+        _reject(
+            "scene.court_profile",
+            f"未知球场 profile {scene.court_profile!r}（合法: {COURT_PROFILES}）",
+            context,
+        )
+    for name, shape in (
         ("base_position", (3,)),
         ("base_quaternion", (4,)),
-        ("racket_position", (3,)),
-        ("racket_quaternion", (4,)),
         ("torso_position", (3,)),
         ("torso_half_size", (3,)),
     ):
-        _check_array(getattr(scene, field), shape, f"scene.{field}", context)
+        _check_array(getattr(scene, name), shape, f"scene.{name}", context)
     _check_unit_quaternion(scene.base_quaternion, "scene.base_quaternion", context)
-    _check_unit_quaternion(
-        scene.racket_quaternion, "scene.racket_quaternion", context
-    )
-    for field in ("racket_radius", "racket_half_thickness", "racket_mass"):
-        if not getattr(scene, field) > 0:
-            _reject(f"scene.{field}", "必须为正数", context)
+
+    legacy_values = {field: getattr(scene, field) for field in _SCENE_LEGACY_RACKET_FIELDS}
+    provided = [field for field, value in legacy_values.items() if value is not None]
+    if provided and len(provided) != len(_SCENE_LEGACY_RACKET_FIELDS):
+        missing = sorted(set(_SCENE_LEGACY_RACKET_FIELDS) - set(provided))
+        _reject(
+            "scene.racket_*",
+            f"legacy 球拍字段必须成组提供（缺少 {missing}）",
+            context,
+        )
+    if provided:
+        _check_array(scene.racket_position, (3,), "scene.racket_position", context)
+        _check_array(scene.racket_quaternion, (4,), "scene.racket_quaternion", context)
+        _check_unit_quaternion(
+            scene.racket_quaternion, "scene.racket_quaternion", context
+        )
+        for field in ("racket_radius", "racket_half_thickness", "racket_mass"):
+            if not getattr(scene, field) > 0:
+                _reject(f"scene.{field}", "必须为正数", context)
     if bool(np.any(scene.torso_half_size <= 0)):
         _reject("scene.torso_half_size", "必须逐元素为正数", context)
+
+    # 升降位移：与 r1d_env.xml 两级 prismatic 单级行程一致
+    if not 0.0 <= scene.lift_displacement <= MAX_LIFT_DISPLACEMENT:
+        _reject(
+            "scene.lift_displacement",
+            f"{scene.lift_displacement} 超出 [0, {MAX_LIFT_DISPLACEMENT}]",
+            context,
+        )
+
+    # 固定关节姿态：只允许对侧被动臂关节，主动关节不得在场景层固定
+    if scene.fixed_joint_poses:
+        passive_prefix = _passive_side_prefix(profile)
+        legal_names = {
+            f"{passive_prefix}_{suffix}_joint" for suffix in _ARM_SEMANTIC_SUFFIXES
+        }
+        active_names = set(profile.active_joint_names)
+        for joint_name in scene.fixed_joint_poses:
+            if joint_name in active_names:
+                _reject(
+                    f"scene.fixed_joint_poses.{joint_name}",
+                    "是主动关节，不得在场景层固定（主动 DOF 必须保持 7 个）",
+                    context,
+                )
+            if joint_name not in legal_names:
+                _reject(
+                    f"scene.fixed_joint_poses.{joint_name}",
+                    f"不是对侧被动臂的合法关节名（合法集合: {sorted(legal_names)}）",
+                    context,
+                )
+
+
+def _passive_side_prefix(profile: RobotProfile) -> str:
+    """推导对侧（被动）臂前缀：主动侧为 left 时被动侧为 right，反之亦然。"""
+    first = profile.active_joint_names[0] if profile.active_joint_names else ""
+    active_prefix = first.split("_", 1)[0] if "_" in first else ""
+    if active_prefix == "left":
+        return "right"
+    if active_prefix == "right":
+        return "left"
+    raise ValueError(
+        f"无法从 active_joint_names[0]='{first}' 推导被动臂前缀"
+        f"（robot_id: {profile.robot_id}）"
+    )
 
 
 # ---------- 底层校验/转换辅助 ----------
@@ -464,6 +606,35 @@ def _readonly_float64(
         _reject(field, f"无法转换为数值数组: {exc}", context)
     array.setflags(write=False)
     return array
+
+
+def _readonly_pose_mapping(
+    value: Any, field: str = "fixed_joint_poses", context: str = "构造输入"
+) -> Mapping[str, float]:
+    """把固定关节姿态转换为只读映射（键=关节名，值=有限 float 弧度）。
+
+    接受 Mapping（如 dict）或 (关节名, 角度) 对的可迭代序列；键必须是非空
+    字符串、值必须是有限数值（bool 不作为数值接受）。返回 MappingProxyType
+    包装的只读视图，避免调用方后续修改影响已加载参数。
+
+    Raises:
+        ValueError: 结构不可迭代、键非字符串/为空、值非有限数值。
+    """
+    if isinstance(value, Mapping):
+        items = list(value.items())
+    else:
+        try:
+            items = [(key, angle) for key, angle in value]
+        except (TypeError, ValueError):
+            _reject(field, "必须是映射结构或 (关节名, 角度) 对序列", context)
+    poses: dict[str, float] = {}
+    for key, angle in items:
+        if not isinstance(key, str) or not key.strip():
+            _reject(field, f"关节名必须是非空字符串（收到 {key!r}）", context)
+        if key in poses:
+            _reject(field, f"存在重复关节名 {key}", context)
+        poses[key] = _finite_float(angle, f"{field}.{key}", context)
+    return MappingProxyType(poses)
 
 
 def _check_array(
@@ -594,7 +765,18 @@ def _check_yaml_float_elements(
 
 
 def _require_scene(raw: dict[str, Any], path: Path) -> SceneParameters | None:
-    """解析 scene 节：null → None；映射 → 严格按 SceneParameters 字段解析。"""
+    """解析 scene 节：null → None；映射 → 按必需/可选字段严格解析。
+
+    T2 起 scene 允许两种形态共存：
+
+    * 必需：底座位姿与简化机身（base_position/base_quaternion/
+      torso_position/torso_half_size）；
+    * 可选：``lift_displacement``（默认 0.4225）、``fixed_joint_poses``
+      （默认空 = 模板烘焙姿态）、``court_profile``（默认 legacy_v1）、
+      legacy 球拍 5 字段（全有或全无）。
+
+    未知键一律拒绝；错误消息均带文件路径。
+    """
     value = raw.get("scene")
     if value is None:
         return None
@@ -603,42 +785,107 @@ def _require_scene(raw: dict[str, Any], path: Path) -> SceneParameters | None:
     unknown = sorted(map(str, set(value) - set(_SCENE_FIELDS)))
     if unknown:
         _reject("scene", f"含未知键 {unknown}", f"文件: {path}")
-    for field in _SCENE_FIELDS:
-        if field not in value:
-            _reject("scene", f"缺少键 {field}", f"文件: {path}")
+    for key in _SCENE_REQUIRED_FIELDS:
+        if key not in value:
+            _reject("scene", f"缺少键 {key}", f"文件: {path}")
 
-    arrays: dict[str, Array] = {}
-    for field in (
-        "base_position",
-        "base_quaternion",
-        "racket_position",
-        "racket_quaternion",
-        "torso_position",
-        "torso_half_size",
-    ):
-        element = value[field]
-        if not isinstance(element, list):
-            _reject(
-                f"scene.{field}", "必须是数值列表", f"文件: {path}"
-            )
-        assert isinstance(element, list)  # 供类型收窄
-        _check_yaml_float_elements(element, f"scene.{field}", path)
-        arrays[field] = _readonly_float64(element, f"scene.{field}", f"文件: {path}")
-    scalars = {
-        field: _finite_float(value[field], f"scene.{field}", f"文件: {path}")
-        for field in ("racket_radius", "racket_half_thickness", "racket_mass")
+    arrays = {
+        field: _require_scene_array(value, field, path)
+        for field in _SCENE_REQUIRED_FIELDS
     }
+
+    # 可选升降位移（缺省 = 模板 bake 默认值，由 _validate_scene 范围校验）
+    lift_displacement = (
+        DEFAULT_LIFT_DISPLACEMENT
+        if "lift_displacement" not in value
+        else _finite_float(
+            value["lift_displacement"], "scene.lift_displacement", f"文件: {path}"
+        )
+    )
+
+    # 可选固定关节姿态（null/缺省 = 空映射；名字合法性在 validate 阶段按 profile 校验）
+    poses_raw = value.get("fixed_joint_poses")
+    if poses_raw is None:
+        fixed_joint_poses: dict[str, float] = {}
+    else:
+        fixed_joint_poses = dict(
+            _readonly_pose_mapping(
+                poses_raw, "scene.fixed_joint_poses", f"文件: {path}"
+            )
+        )
+
+    # 可选球场视觉 profile（缺省 = legacy_v1，保持旧 10 线渲染）
+    court_profile = value.get("court_profile", "legacy_v1")
+    if not isinstance(court_profile, str):
+        _reject(
+            "scene.court_profile",
+            "必须是字符串",
+            f"文件: {path}",
+        )
+    court_profile = court_profile.strip()
+    if court_profile not in COURT_PROFILES:
+        _reject(
+            "scene.court_profile",
+            f"未知球场 profile {court_profile!r}（合法: {COURT_PROFILES}）",
+            f"文件: {path}",
+        )
+
+    # legacy 球拍字段：全有或全无（提供档案时不得重复给出）
+    present = [field for field in _SCENE_LEGACY_RACKET_FIELDS if field in value]
+    if present and len(present) != len(_SCENE_LEGACY_RACKET_FIELDS):
+        missing = sorted(set(_SCENE_LEGACY_RACKET_FIELDS) - set(present))
+        _reject(
+            "scene",
+            f"legacy 球拍字段必须成组提供（缺少 {missing}）",
+            f"文件: {path}",
+        )
+    legacy_arrays: dict[str, Array | None] = {
+        "racket_position": None,
+        "racket_quaternion": None,
+    }
+    legacy_scalars: dict[str, float | None] = {
+        "racket_radius": None,
+        "racket_half_thickness": None,
+        "racket_mass": None,
+    }
+    if present:
+        legacy_arrays["racket_position"] = _require_scene_array(
+            value, "racket_position", path
+        )
+        legacy_arrays["racket_quaternion"] = _require_scene_array(
+            value, "racket_quaternion", path
+        )
+        for field in ("racket_radius", "racket_half_thickness", "racket_mass"):
+            legacy_scalars[field] = _finite_float(
+                value[field], f"scene.{field}", f"文件: {path}"
+            )
+
     return SceneParameters(
         base_position=arrays["base_position"],
         base_quaternion=arrays["base_quaternion"],
-        racket_position=arrays["racket_position"],
-        racket_quaternion=arrays["racket_quaternion"],
         torso_position=arrays["torso_position"],
         torso_half_size=arrays["torso_half_size"],
-        racket_radius=scalars["racket_radius"],
-        racket_half_thickness=scalars["racket_half_thickness"],
-        racket_mass=scalars["racket_mass"],
+        lift_displacement=lift_displacement,
+        fixed_joint_poses=fixed_joint_poses,
+        court_profile=court_profile,
+        racket_position=legacy_arrays["racket_position"],
+        racket_quaternion=legacy_arrays["racket_quaternion"],
+        racket_radius=legacy_scalars["racket_radius"],
+        racket_half_thickness=legacy_scalars["racket_half_thickness"],
+        racket_mass=legacy_scalars["racket_mass"],
     )
+
+
+def _require_scene_array(
+    raw: dict[str, Any], field: str, path: Path
+) -> Array:
+    """校验 scene 节内的必填数值数组（元素 bool/非数值/NaN/Inf 拒绝）。"""
+    element = raw.get(field)
+    if not isinstance(element, list):
+        _reject(f"scene.{field}", "必须是数值列表", f"文件: {path}")
+    assert isinstance(element, list)  # 供类型收窄
+    _check_yaml_float_elements(element, f"scene.{field}", path)
+    return _readonly_float64(element, f"scene.{field}", f"文件: {path}")
 
 
 def _require_provisional_fields(

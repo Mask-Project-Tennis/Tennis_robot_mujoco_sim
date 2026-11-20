@@ -70,6 +70,7 @@ def _short_task_copy(
     *,
     max_steps: int = 60,
     workspace_center: list[float] | None = None,
+    workspace_radius: float | None = None,
 ) -> Path:
     """基于真实 task YAML 生成短回合副本（仅削减步数/迭代，结构不变）。
 
@@ -81,6 +82,8 @@ def _short_task_copy(
             tmp 副本使用：生产 r1d_sim_right.yaml 的中心过不了
             validate_workspace_against_model（3.8 局部 IK 解超限位，
             见 test_side_right_resolved 的实测依据；3.11 调参范围）。
+        workspace_radius: 可选工作空间半径覆盖（m）；与中心一起用于构造
+            模型可达的临时工作区（不改生产 YAML）。
 
     Returns:
         写出的 tmp YAML 路径（provisional 数值原样保留，缩减项仅限
@@ -90,6 +93,8 @@ def _short_task_copy(
     data["max_steps"] = max_steps
     if workspace_center is not None:
         data["workspace_center"] = list(workspace_center)
+    if workspace_radius is not None:
+        data["workspace_radius"] = float(workspace_radius)
     mpc = data["mpc_config"]
     mpc.update(
         total_horizon=_SHORT_HORIZON,  # 保留来球到达视野（见上方常量注释）
@@ -270,7 +275,6 @@ class TestV12R1dExclusiveFlagsRejected:
             ["--serve-box"],
             ["--fix-joint5"],                       # brief 点名：明确拒绝
             ["--ball-speed", "7"],
-            ["--async-replan"],
             ["--dump-trajectory", "x.npz"],
             ["--position-mode"],
             ["--limits-config", "configs/real_robot.yaml"],
@@ -917,3 +921,117 @@ class TestImportGuard:
         )
         payload = json.loads(proc.stdout.strip().splitlines()[-1])
         assert payload["blocked"] == []
+
+
+# ============================================================================
+#  6. R15：旧固定任务入口不得静默忽略新共享参数 / 缺文件必须早退
+# ============================================================================
+
+
+class TestV12FixedTaskRejectsNewSharedFlags:
+    """``--sim-task-config`` 兼容分支对球拍/任务覆盖/异步重规划显式报错。"""
+
+    _BASE = [
+        "--robot-config", str(PROFILE_LEFT),
+        "--runtime-config", str(RUNTIME_LEFT),
+    ]
+
+    @staticmethod
+    def _dispatch(argv: list[str]) -> object:
+        """解析并分派给定 argv（返回退出码；错误路径抛 SystemExit(2)）。"""
+        import rm65_mpc_v12 as v12
+
+        parser = v12._build_parser()
+        args = parser.parse_args(argv)
+        return v12._dispatch_robot_selection(parser, args, argv)
+
+    @pytest.mark.parametrize(
+        ("extra", "option"),
+        [
+            (["--racket-config", "does-not-exist.yaml"], "--racket-config"),
+            (["--task-overrides", "unknown.option=123"], "--task-overrides"),
+            (["--async-replan"], "--async-replan"),
+        ],
+    )
+    def test_explicit_new_flag_rejected(
+        self, extra: list[str], option: str,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """固定任务 + 三个新参数分别退出 2，stderr 点名该参数。"""
+        argv = self._BASE + ["--sim-task-config", str(TASK_LEFT)] + extra
+        with pytest.raises(SystemExit) as exc:
+            self._dispatch(argv)
+        assert int(exc.value.code) == 2
+        assert option in capsys.readouterr().err
+
+    def test_missing_task_file_exits_2(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """--sim-task-config 指向不存在文件 → 退出 2，不进入 runner。"""
+        argv = self._BASE + [
+            "--sim-task-config", str(tmp_path / "no_such_task.yaml"),
+            "--output", str(tmp_path / "out"),
+        ]
+        with pytest.raises(SystemExit) as exc:
+            self._dispatch(argv)
+        assert int(exc.value.code) == 2
+        assert "任务文件不存在" in capsys.readouterr().err
+
+    def test_missing_runtime_file_exits_2(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """--runtime-config 指向不存在文件 → 退出 2，不进入 runner。"""
+        argv = [
+            "--robot-config", str(PROFILE_LEFT),
+            "--runtime-config", str(tmp_path / "no_such_runtime.yaml"),
+            "--sim-task-config", str(TASK_LEFT),
+            "--output", str(tmp_path / "out"),
+        ]
+        with pytest.raises(SystemExit) as exc:
+            self._dispatch(argv)
+        assert int(exc.value.code) == 2
+        assert "运行参数文件不存在" in capsys.readouterr().err
+
+    def test_no_extra_flags_runs_old_schema(self, tmp_path: Path) -> None:
+        """无额外参数仍返回 0，并产出旧 ``r1d_sim_episode_v1`` schema。
+
+        生产左右 task 的 workspace 中心在 T0 基线上过不了
+        ``validate_workspace_against_model``（既有 3F+3E，见
+        ``docs/experiments/reports/2026-11-18-r1d-v12-parity.md``），与本任务
+        R15 无关。为真正走完旧 runner，这里用初始 TCP 位置作为可达中心
+        （半径 0.2 m）构造 tmp 副本：仅改测试输入，不改生产 configs。
+        """
+        import json
+
+        from src.robot.robot_profile import load_robot_profile
+        from src.robot.runtime_parameters import load_runtime_parameters
+        from src.sim.env_factory import build_r1d_environments
+        from src.sim.sim_config import load_sim_task_config
+
+        profile = load_robot_profile(PROFILE_LEFT)
+        runtime = load_runtime_parameters(RUNTIME_LEFT, profile)
+        base_task = load_sim_task_config(TASK_LEFT, profile)
+        envs = build_r1d_environments(profile, runtime, base_task)
+        center = envs.execution.get_ee_pos().tolist()
+
+        task = _short_task_copy(
+            tmp_path, TASK_LEFT, max_steps=20,
+            workspace_center=center, workspace_radius=0.2,
+        )
+        out_dir = tmp_path / "out"
+        rc = self._dispatch(
+            [
+                "--robot-config", str(PROFILE_LEFT),
+                "--runtime-config", str(RUNTIME_LEFT),
+                "--sim-task-config", str(task),
+                "--seed", "42",
+                "--no-plot",
+                "--output", str(out_dir),
+            ]
+        )
+        assert rc == 0
+        payload = json.loads(
+            (out_dir / "r1d_episode.json").read_text(encoding="utf-8")
+        )
+        assert payload["schema"] == "r1d_sim_episode_v1"
+        assert payload["robot_id"] == "unitree_r1d"

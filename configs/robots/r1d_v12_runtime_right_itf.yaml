@@ -1,0 +1,62 @@
+# R1D 右臂（unitree_r1d）V12 parity 仿真运行参数 — ITF 球场视觉变体（I2）。
+# 本文件逐字段复制 configs/robots/r1d_v12_runtime_right.yaml，唯一差异是
+# scene.court_profile: itf_2026_v1（ITF 2026 标准 12 线球场白线）。其余数值、
+# 限值与 provisional 标记完全一致；用途是在不改变动力学/碰撞/安全限值的
+# 前提下渲染标准球场。legacy 旧 10 线仍由原文件（缺省 legacy_v1）保持。
+# 与阶段 3 文件 r1d_sim_runtime_right.yaml 的差异（该旧文件字节不动，仍可加载
+# 旧 API 语义）：
+# - scene 不再重复提供球拍几何/质量（racket_position/quaternion/radius/
+#   half_thickness/mass）；球拍唯一物理来源是 RacketProfile 档案（T1），
+#   由 load_robot_model(..., racket_profile=...) / build_tennis_scene(...)
+#   显式注入。
+# - scene 新增显式 lift_displacement（双级升降单级 bake 值，m）与
+#   fixed_joint_poses（对侧被动臂固定关节姿态，rad；空映射 = 工厂默认姿态）。
+# - 底座落地高度与升降同源：base_position[2] 必须等于轮/脚轮推导的
+#   0.155 m（model_factory 校验），不允许 base 0.155 + lift 0 的悬浮组合。
+#
+# 数值来源与 provisional 标记（全部为仿真建模试验值，不冒充硬件限值）：
+# - torque_max / qdot_max：官方 URDF 声明逐项抄录（r1d.urdf；右肩俯仰
+#   60/18.8、右肩侧摆 60/18.8、右肩偏航 33/33.4、右肘 33/33.4、
+#   右腕滚转 33/33.4、右腕俯仰 10/37.7、右腕偏航 10/37.7）。
+# - qddot_max：URDF 无加速度声明（未知能力），试验值 = qdot_max / 0.15 s。
+# - kp/kd（位置模式仿真 PD）：按 ω_n≈60 rad/s、ζ≈1 设计的仿真试验值。
+# - max_tcp_speed：1.8 m/s 仿真上限（真机 1.0 m/s 另配，provisional）。
+# - q_lower/q_upper 保持 null：模型 jnt_range 是位置限位唯一权威，由
+#   model_factory.load_robot_model 绑定后回填（不入 provisional_fields）。
+# - lift_displacement：取 q_L=0.4225 m 使落地 0.155 m 时 waist 世界高度
+#   仍为 1.005 m（与阶段 2/3 肩高一致）；单级行程 [0, 0.425] m。
+# 关节顺序与 r1d_right.yaml active_joint_names 同序（URDF 原名）。
+schema_version: 1
+robot_id: unitree_r1d
+joint_names: [right_shoulder_pitch_joint, right_shoulder_roll_joint,
+              right_shoulder_yaw_joint, right_elbow_joint,
+              right_wrist_roll_joint, right_wrist_pitch_joint,
+              right_wrist_yaw_joint]
+dt: 0.005                    # 仿真计算步长，与阶段 2/3 一致（provisional）
+# T7 冻结准备姿态（几何/姿态优先调参结果；非 URDF 声明值，provisional）：
+# 来自位置模式实际挥拍第 60 步姿态，使 torque 模式首 plan 的目标可达且避开
+# 机身预测接触（默认待机位 [0.45,0.15,-0.01,...] 在 torque 下 175 步触发
+# forbidden contact）。两模式共用该 runtime 文件；位置模式同一姿态 + 更高
+# 目标拍速亦可达 active（T7 p1p5 证据）。
+init_q: [0.091, 0.152, 0.021, 0.504, -0.218, 0.321, 0.019]  # T7 冻结准备姿态（provisional）
+held_q: []                   # held_joint_names=[]，保持关节无角度
+kp: [400.0, 400.0, 250.0, 120.0, 60.0, 40.0, 40.0]   # 仿真 PD 位置增益（provisional）
+kd: [12.0, 12.0, 8.0, 5.0, 2.5, 1.5, 1.5]            # 仿真 PD 阻尼增益（provisional）
+q_lower: null                # 由模型 jnt_range 回填（唯一权威，不手抄 URDF）
+q_upper: null
+qdot_max: [18.8, 18.8, 33.4, 33.4, 33.4, 37.7, 37.7]  # URDF velocity 声明（provisional）
+qddot_max: [125.0, 125.0, 220.0, 220.0, 220.0, 250.0, 250.0]  # qdot/0.15s（provisional）
+torque_max: [60.0, 60.0, 33.0, 33.0, 33.0, 10.0, 10.0]  # URDF effort 声明（provisional）
+max_tcp_speed: 1.8           # TCP 速度上限 m/s（全尺寸拍重标定，provisional）
+scene:
+  base_position: [-12.5, -0.8, 0.155]      # 近端底线，面向 +X（落地高度 0.155）
+  base_quaternion: [1.0, 0.0, 0.0, 0.0]  # wxyz 单位四元数
+  lift_displacement: 0.4225               # 双级升降单级 bake 值（m，provisional）
+  court_profile: itf_2026_v1           # ITF 2026 标准 12 线（纯视觉，不影响物理）
+  fixed_joint_poses: {}                   # {} = 工厂默认被动臂姿态；键=对侧 7 关节名（rad）
+  torso_position: [-0.25, 0.0, 0.72]  # 相对固定基座的简化机身 box 中心（provisional）
+  torso_half_size: [0.15, 0.20, 0.30]  # 简化 box，不是整机外形
+provisional_fields: [dt, init_q,
+                     base_position, base_quaternion, lift_displacement,
+                     torso_position, torso_half_size,
+                     kp, kd, qdot_max, qddot_max, torque_max, max_tcp_speed]

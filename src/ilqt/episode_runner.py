@@ -16,7 +16,6 @@ if TYPE_CHECKING:
         ExecutorComponent,
         SafetyComponent,
     )
-    from src.ilqt.step_context import StepContext
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +83,10 @@ class EpisodeRunner:
                 再进入主循环 —— 计算延迟被计入任务时间。
 
         Returns:
-            metrics dict，含 total_steps/safe_steps/mpc_done + executor 指标 + hook 追加。
+            metrics dict，含 total_steps/safe_steps/mpc_done/stop_reason/unsafe
+            + executor 指标 + hook 追加。``stop_reason`` 只取以下四种：
+            ``"mpc_done"``（MPC 正常完成）、``"max_steps"``（达到步数上限）、
+            ``"no_ball"``（球状态不可用）、``"unsafe"``（安全滤波拒绝）。
         """
         from src.ilqt.step_context import StepContext
 
@@ -97,7 +99,13 @@ class EpisodeRunner:
         ball = self._perception.get_ball_state(step=0)
         if ball is None:
             logger.error("EpisodeRunner: 初始球状态不可用")
-            return {"total_steps": 0, "safe_steps": 0, "error": "no_ball"}
+            return {
+                "total_steps": 0,
+                "safe_steps": 0,
+                "error": "no_ball",
+                "stop_reason": "no_ball",
+                "unsafe": False,
+            }
 
         # 2. 启动 MPC（首次同步规划；计时供不冻结模式折算球飞行步数）
         t_first_plan = time.perf_counter()
@@ -116,6 +124,9 @@ class EpisodeRunner:
         safe_steps = 0
         step_count = 0
         hook_metrics: dict = {}  # hook 追加的持久化指标
+        # 广播式终止原因（R01）：安全拒绝不得被后续逻辑当成正常完成
+        stopped_unsafe = False
+        ball_unavailable = False
 
         while not self._mpc.done and step_count < max_steps:
             # 感知（step 透传给观测门控做观测间隔判定）
@@ -124,6 +135,7 @@ class EpisodeRunner:
 
             if ball is None:
                 logger.warning(f"步 {step_count}: 球状态不可用，退出")
+                ball_unavailable = True
                 break
 
             # 构建上下文（metrics 指向持久化 dict，跨步累积）
@@ -155,6 +167,7 @@ class EpisodeRunner:
 
             if not is_safe:
                 logger.warning(f"步 {step_count}: 安全检查失败，停止 episode")
+                stopped_unsafe = True
                 for hook in self._on_unsafe_hooks:
                     hook(ctx)
                 break
@@ -168,6 +181,20 @@ class EpisodeRunner:
 
             safe_steps += 1
             step_count += 1
+
+        # 3.5 判定终止原因（R01）：unsafe 优先于 mpc_done，避免击球步安全拒绝
+        # 被后续 post-hit 逻辑当成正常完成；其余按循环退出条件归类
+        if stopped_unsafe:
+            stop_reason = "unsafe"
+        elif self._mpc.done:
+            stop_reason = "mpc_done"
+        elif step_count >= max_steps:
+            stop_reason = "max_steps"
+        elif ball_unavailable:
+            stop_reason = "no_ball"
+        else:
+            # 理论不可达（循环只能通过上述条件退出），防御性兜底
+            stop_reason = "mpc_done"
 
         # 4. 清理
         self._mpc.stop()
@@ -183,6 +210,8 @@ class EpisodeRunner:
             "safe_steps": safe_steps,
             "mpc_done": self._mpc.done,
             "first_plan_ms": round(first_plan_s * 1000.0, 1),
+            "stop_reason": stop_reason,
+            "unsafe": bool(stop_reason == "unsafe"),
         }
         if hasattr(self._executor, "get_metrics"):
             metrics.update(self._executor.get_metrics())
@@ -190,10 +219,11 @@ class EpisodeRunner:
             metrics.update(hook_metrics)
 
         logger.info(
-            "EpisodeRunner 完成: total_steps=%s safe_steps=%s mpc_done=%s",
+            "EpisodeRunner 完成: total_steps=%s safe_steps=%s mpc_done=%s stop_reason=%s",
             metrics.get("total_steps"),
             metrics.get("safe_steps"),
             metrics.get("mpc_done"),
+            metrics.get("stop_reason"),
         )
         logger.debug("EpisodeRunner metrics 详情: %s", metrics)
         return metrics

@@ -29,6 +29,9 @@
 from __future__ import annotations
 
 import argparse
+import csv
+import math
+import re
 import sys
 import json
 from pathlib import Path
@@ -89,22 +92,111 @@ MODE_ORDER = ["full", "tube_only", "softmin_only", "none"]
 # 工具
 # ---------------------------------------------------------------------------
 
+# table3 隔离预览的固定标注：数据来自 R1D smoke 链路时只能作链路预览，不得当论文统计
+TABLE3_ANNOTATION = (
+    "R1D smoke 小样本，仅链路预览，不作论文统计结论"
+    "（缺格显式留空；legacy / physical 两种口径分表呈现）")
+# PDF 面板用英文标注：matplotlib 默认 STIX 字体不含 CJK 字形，直接画中文会出豆腐块
+TABLE3_ANNOTATION_EN = (
+    "R1D smoke, small n; link-preview only; not a paper statistic "
+    "(missing cells left blank, no imputation).")
+
+# column_map 不可用时的 tier 兜底顺序（与 paired_stats.build_tables 保持一致）
+_TABLE3_TIERS_FALLBACK = (
+    ("full", "full"),
+    ("tube_only", "tube-only"),
+    ("softmin_only", "candidate-set-only"),
+    ("none", "point-target"),
+)
+
+
+def resolve_data_root(path: Path | None, project: Path | None = None) -> Path:
+    """解析数据根：None → `<project>/experiment_data`；相对路径相对 `project` 解析。
+
+    Args:
+        path: 命令行 --data-root（None 表示沿用旧默认根）。
+        project: 仓库根目录（None → 模块级 PROJECT；测试可注入临时目录）。
+
+    Returns:
+        绝对路径形式的数据根。
+
+    Raises:
+        FileNotFoundError: 解析后的数据根不存在（显式报错，不静默回退旧根）。
+    """
+    project = PROJECT if project is None else Path(project)
+    if path is None:
+        root = project / "experiment_data"
+    else:
+        root = Path(path)
+        if not root.is_absolute():
+            root = project / root
+    root = root.resolve()
+    if not root.exists():
+        raise FileNotFoundError(f"数据根不存在: {root}")
+    return root
+
+
+def _data_path(rel: str | Path) -> Path:
+    """固定数据资产路径（exp18 npz / exp26 csv / timing.json）统一走当前 DATA 根。
+
+    Args:
+        rel: 相对数据根的资产路径。
+
+    Returns:
+        数据根下的绝对路径（不检查存在性，由调用方决定缺失时的语义）。
+    """
+    return Path(DATA) / rel
+
+
 def resolve_stats_json(explicit: Path | None = None,
-                       project: Path = PROJECT) -> Path:
-    """解析统计 JSON：显式路径 > paper 工作区 > 主仓库内副本。"""
+                       project: Path | None = None,
+                       data_root: Path | None = None) -> Path:
+    """解析统计 JSON：显式路径 > 数据根候选 > 旧 paper 工作区/主仓库副本。
+
+    Args:
+        explicit: `--stats` 显式路径（最优先）。
+        project: 仓库根（旧默认语义用）。
+        data_root: `--data-root` 解析后的数据根；给出时只在根内候选查找，
+            找不到即显式报错并列出候选路径（不得静默回退旧根）。
+
+    Returns:
+        统计 JSON 路径。
+
+    Raises:
+        FileNotFoundError: 显式路径不存在，或数据根/旧位置均无统计 JSON。
+    """
     if explicit is not None:
-        return explicit
-    for cand in (project / "paper" / "planning" / "06-stats-active.json",
-                 project / "experiment_data" / "paper_stats_active.json"):
-        if cand.exists():
+        p = Path(explicit)
+        if not p.is_file():
+            raise FileNotFoundError(f"统计 JSON 不存在: {p}")
+        return p
+    project = PROJECT if project is None else Path(project)
+    if data_root is not None:
+        root = Path(data_root)
+        candidates = [root / "paper_stats_active.json",
+                      root / "06-stats-active.json",
+                      root / "stats" / "paper_stats_active.json",
+                      root / "stats" / "06-stats-active.json",
+                      root.parent / "stats" / "paper_stats_active.json",
+                      root.parent / "stats" / "06-stats-active.json"]
+        hint = "在数据根内未找到统计 JSON；候选路径:\n  " + "\n  ".join(
+            str(c) for c in candidates)
+    else:
+        candidates = [project / "paper" / "planning" / "06-stats-active.json",
+                      project / "experiment_data" / "paper_stats_active.json"]
+        hint = "未找到统计 JSON；候选路径:\n  " + "\n  ".join(
+            str(c) for c in candidates)
+    for cand in candidates:
+        if cand.is_file():
             return cand
-    raise FileNotFoundError(
-        "未找到统计 JSON；请先运行 scripts/extract/paired_stats.py")
+    raise FileNotFoundError(hint + "\n请先运行 scripts/extract/paired_stats.py")
 
 
-def load_stats(explicit: Path | None = None) -> dict:
+def load_stats(explicit: Path | None = None,
+               data_root: Path | None = None) -> dict:
     """读取配对统计 JSON（active-hit 口径，图与正文同源）。"""
-    path = resolve_stats_json(explicit)
+    path = resolve_stats_json(explicit, data_root=data_root)
+    print(f"统计 JSON: {path}")
     return json.loads(path.read_text(encoding="utf-8"))
 
 
@@ -161,7 +253,7 @@ def _corridor_band(ball: np.ndarray, hit: int, r_half: float = 0.12):
     return u, seg, v, w
 
 
-def fig1_hero(npz_path: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz") -> None:
+def fig1_hero(npz_path: Path | None = None) -> None:
     """Fig.1（hero 概念示意图，顶视）: (a) 单点目标 vs (b) 候选窗口终端 + 走廊。
 
     chat10 审稿意见：坐标框边线像调试图、灰→橙轨迹有断口、空心圆不像球拍、
@@ -178,6 +270,8 @@ def fig1_hero(npz_path: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz") ->
     所有几何（切向、法向、拍面角度）都在绘图坐标下计算。画布高度按内容
     长宽比反推，保证内容填满面板、两面板完全一致。
     """
+    npz_path = (Path(npz_path) if npz_path is not None
+                else _data_path("exp18_fig_assets/raw/a_hit_clean.npz"))
     from matplotlib.patches import Ellipse
 
     d = np.load(npz_path)
@@ -314,13 +408,15 @@ def fig1_hero(npz_path: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz") ->
     save(fig, "fig1_hero.pdf")
 
 
-def fig3_3d(npz_path: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz") -> None:
+def fig3_3d(npz_path: Path | None = None) -> None:
     """Fig.3（正文版）: 3D 球轨迹 + 球拍轨迹 + 连续走廊带 + 击球点。
 
     画布按**单栏**尺寸出图（3.40 in 宽，对应 \\columnwidth 3.5 in）：
     Axes3D 的投影盒受图高限制，若按 7.16 in 通栏铺开，墨迹只占画布 38%，
     两侧留出约 4.4 in 空白 —— 这正是旧版「页面正中一小块、大量浪费」的根因。
     """
+    npz_path = (Path(npz_path) if npz_path is not None
+                else _data_path("exp18_fig_assets/raw/a_hit_clean.npz"))
     d = np.load(npz_path)
     ball, tcp = d["ball_pos"], d["tcp_pos"]
     hit = int(d["hit_step"])
@@ -372,7 +468,7 @@ def fig3_3d(npz_path: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz") -> N
     print("已保存 paper/figures/fig3_tube_corridor.pdf （3D 正文版）")
 
 
-def fig3_alt_2d(npz_path: Path = DATA / "exp18_fig_assets/raw/d_hit_noise_kf.npz") -> None:
+def fig3_alt_2d(npz_path: Path | None = None) -> None:
     """Fig.3: 走廊几何（放大到候选窗口）——(a) 侧视 Y–Z (b) 顶视 Y–X。
 
     chat9 审稿意见：旧版坐标仍覆盖整段飞行、走廊缩在右端；"±50 ms window"
@@ -383,6 +479,8 @@ def fig3_alt_2d(npz_path: Path = DATA / "exp18_fig_assets/raw/d_hit_noise_kf.npz
     - 窗口范围用两端短竖线 + 窗口内双向箭头表示，取消长引线；
     - 图例 8 pt，条目标注统一为 "Reference point (best candidate)" / "Contact"。
     """
+    npz_path = (Path(npz_path) if npz_path is not None
+                else _data_path("exp18_fig_assets/raw/d_hit_noise_kf.npz"))
     d = np.load(npz_path)
     ball, tcp = d["ball_pos"], d["tcp_pos"]
     k_contact = int(d["hit_step"])
@@ -515,7 +613,7 @@ def fig3_alt_2d(npz_path: Path = DATA / "exp18_fig_assets/raw/d_hit_noise_kf.npz
     print(f"已保存 {OUT / 'fig3_alt_2d.pdf'} （走廊几何放大版）")
 
 
-def _fig3_alt_2d_old(npz_path: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz") -> None:
+def _fig3_alt_2d_old(npz_path: Path | None = None) -> None:
     """Fig.3（备选版）: 2D 双面板 —— (a) 侧视 (b) 俯视，走廊画成半透明带。
 
     与技术选型无关，只与版式有关：画布宽度与 3D 正文版一致（3.40 in = 单栏），
@@ -526,6 +624,8 @@ def _fig3_alt_2d_old(npz_path: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.n
     现改为：窗口外轨迹浅灰、窗口内橙色；直线带只覆盖窗口段（首尾连线 ± r_half）；
     标出窗口起止、走廊参考点（best 步球位置）与轴线方向箭头。
     """
+    npz_path = (Path(npz_path) if npz_path is not None
+                else _data_path("exp18_fig_assets/raw/a_hit_clean.npz"))
     d = np.load(npz_path)
     ball, tcp = d["ball_pos"], d["tcp_pos"]
     hit = int(d["hit_step"])
@@ -664,14 +764,18 @@ def _fig3_alt_2d_old(npz_path: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.n
 # fig4 关节偏差 + TCP 速度（含命中区放大）
 # =============================================================================
 
-def fig4(npz_a: Path = DATA / "exp18_fig_assets/raw/a_hit_clean.npz",
-         npz_b: Path = DATA / "exp18_fig_assets/raw/b_hit_space_perturb.npz") -> None:
+def fig4(npz_a: Path | None = None,
+         npz_b: Path | None = None) -> None:
     """Fig.4: (a) TCP 速度曲线（标称 vs 空间扰动 + 限速带）；(b) 命中邻域放大。
 
     chat12 审稿意见：原 (a) 关节余量面板相对贡献占幅偏大、信息量低
     （峰值 46% 限位余量一句话可概括），已整体移除；该数字并入图注文字，
     本图只保留与速度预算论点直接相关的 TCP 曲线。
     """
+    npz_a = (Path(npz_a) if npz_a is not None
+             else _data_path("exp18_fig_assets/raw/a_hit_clean.npz"))
+    npz_b = (Path(npz_b) if npz_b is not None
+             else _data_path("exp18_fig_assets/raw/b_hit_space_perturb.npz"))
     da, db = np.load(npz_a), np.load(npz_b)
     t_a = da["timestamps"] * 1000
     t_b = db["timestamps"] * 1000
@@ -834,7 +938,20 @@ def fig5(stats: dict) -> None:
     旧的 4 面板 6.24 in → 2 面板 3.80 in——(b) 两根柱折进 (a)（同 x 上下两点 +
     配对差箭头），(c)(d) 合并为 9 槽配对点图（同一槽内 7 / 9 m/s 两枚标记相连）。
     18 个增益值、84.4/35.9/−48.7 等数字一个不少，配色与统计量（配对 bootstrap CI）不变。"""
-    e1 = stats["E1_speed_sweep"]
+    e1 = stats.get("E1_speed_sweep") or {}
+    e2 = stats.get("E2_limit_cost") or {}
+    gains_csv = _data_path("exp26_tcp_grid/results.csv")
+    missing = []
+    if not e1:
+        missing.append("E1_speed_sweep")
+    if not (e2.get("TCP1.8") and e2.get("TCP1.0")):
+        missing.append("E2_limit_cost（TCP1.8/TCP1.0）")
+    if not gains_csv.is_file():
+        missing.append(str(gains_csv))
+    if missing:
+        print("[fig5] 跳过：数据不足，无法估计 Fig.5：" + "；".join(missing)
+              + "（如实留空，不补数）")
+        return
     speeds = sorted(int(k) for k in e1)
     rates = [e1[str(s)]["rate"] for s in speeds]
     errs = [ci_half(e1[str(s)]) for s in speeds]
@@ -897,7 +1014,7 @@ def fig5(stats: dict) -> None:
     # chat14 P6：每格每档补配对 bootstrap 95% CI 误差棒（原只有点估计）
     # chat25：18 柱横排在 3.39 in 下不可读（0.15 in/柱）→ chat27 改为配对点图，
     # 槽宽回到 0.317 in；面板加高到 1.30 in 让两枚标记拉开（9~21 pp ≈ 10~22 pt）。
-    gains = _exp26_gains_ci(DATA / "exp26_tcp_grid" / "results.csv")
+    gains = _exp26_gains_ci(gains_csv)
     tiers = [("full", "full"), ("tube_only", "tube-only"),
              ("softmin_only", "candidate-set-only")]
     tcps = (1.0, 1.4, 1.8)
@@ -954,7 +1071,12 @@ def fig5(stats: dict) -> None:
 def fig5_interaction(stats: dict) -> None:
     """Fig.5 单栏备选（chat25 变体 c2）：(c)(d) 改档位折线/点图
     （x=TCP 上限，配对 bootstrap CI 误差棒，按球速分面），预览对比用。"""
-    e1 = stats["E1_speed_sweep"]
+    e1 = stats.get("E1_speed_sweep") or {}
+    e2 = stats.get("E2_limit_cost") or {}
+    gains_csv = _data_path("exp26_tcp_grid/results.csv")
+    if not e1 or not (e2.get("TCP1.8") and e2.get("TCP1.0")) or not gains_csv.is_file():
+        print("[fig5alt] 跳过：数据不足（E1/E2 或 exp26 results.csv 缺失），不补数")
+        return
     speeds = sorted(int(k) for k in e1)
     rates = [e1[str(s)]["rate"] for s in speeds]
     errs = [ci_half(e1[str(s)]) for s in speeds]
@@ -1001,7 +1123,7 @@ def fig5_interaction(stats: dict) -> None:
     ax.set_title("(b) Robot-derived TCP constraint set (7 m/s)", fontsize=9)
     style_ax(ax)
 
-    gains = _exp26_gains_ci(DATA / "exp26_tcp_grid" / "results.csv")
+    gains = _exp26_gains_ci(gains_csv)
     tiers = [("full", "full"), ("tube_only", "tube-only"),
              ("softmin_only", "candidate-set-only")]
     from matplotlib.patches import Patch
@@ -1071,6 +1193,12 @@ def fig6(stats: dict) -> None:
     收紧 + 末页余量腾出），tight_layout 按比例把新增空间分给四个轴 → 轴高 ≈46.7 pt、
     热图行高 6.7→8.9 pt。数据/统计/配色仍零改动。
     """
+    _e3 = stats.get("E3_nominal") or {}
+    _e4 = stats.get("E4_grid") or {}
+    _e7 = stats.get("E7_corners") or {}
+    if not (_e3.get("paired") and _e4.get("per_cell_paired") and _e7.get("paired")):
+        print("[fig6] 跳过：数据不足（E3/E4/E7 配对统计缺失或为空），不补数")
+        return
     e3, e4, e7 = stats["E3_nominal"], stats["E4_grid"], stats["E7_corners"]
     # chat9 审稿意见：这是核心结果图，应获得更多面积（旧版 2.25 in 四子图明显变扁），
     # 面板标题缩短、方法/速度/单位移入坐标轴与图注
@@ -1170,10 +1298,12 @@ def fig6(stats: dict) -> None:
 # fig7 实时性能（三段耗时改紧凑数值表）
 # =============================================================================
 
-def fig_realtime(stats: dict, timing_path: Path = DATA / "exp18_fig_assets/timing.json") -> None:
+def fig_realtime(stats: dict, timing_path: Path | None = None) -> None:
     """打印 Fig.8（实时预算）: (a) 三段耗时数值表 (b) 逐步延迟 ECDF。"""
+    timing_path = (Path(timing_path) if timing_path is not None
+                   else _data_path("exp18_fig_assets/timing.json"))
     t = json.loads(Path(timing_path).read_text(encoding="utf-8"))
-    sync, async_ = t["sync"], t["async"]
+    sync = t["sync"]
 
     # chat21 审稿意见：面板 (a) 的 6 行数值表上下压缩过度（行距 5.09 pt / 字号
     # 7.5 pt，相邻行墨迹相接）→ 画布高度 1.15 → 1.45 in，行距同步放开。
@@ -1279,7 +1409,7 @@ def fig_diagnostic() -> None:
     for i, (title, curves) in enumerate(panels):
         ax = axes[i]
         for name, lab, col, ls, is_hit in curves:
-            d = np.load(DATA / "exp18_fig_assets/raw" / f"{name}.npz",
+            d = np.load(_data_path(f"exp18_fig_assets/raw/{name}.npz"),
                         allow_pickle=True)
             md = json.loads(d["metadata"].item())
             # 重算起始时刻预测的击球步（与 replan_core.do_replan 同源函数）
@@ -1337,23 +1467,154 @@ def fig_diagnostic() -> None:
 # Table I / II（统计量读 JSON，含 n 与配对 p）
 # =============================================================================
 
-def tables(stats: dict, out_dir: Path | None = None) -> None:
-    """生成 Table I（含 n）与 Table II（含配对 p 与 DiD p）。"""
-    e3, e4, e7, e8 = (stats["E3_nominal"], stats["E4_grid"],
-                      stats["E7_corners"], stats["E8_limit_mechanism"])
-    if out_dir is None:
-        out_dir = OUT / "table_data"
+def _fmt_dash(value: object, *, digits: int = 1, signed: bool = True) -> str:
+    """渲染可空数值：None / NaN / 非数值统一为 ``--``，绝不把缺失伪装成 0。"""
+    if value is None:
+        return "--"
+    try:
+        number = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return "--"
+    if math.isnan(number) or math.isinf(number):
+        return "--"
+    return f"{number:+.{digits}f}" if signed else f"{number:.{digits}f}"
+
+
+def _fmt_ci_dash(ci: object) -> str:
+    """渲染可空 95% 区间 ``[lo,hi]``；不可估计（None/NaN/坏结构）返回 ``--``。"""
+    if not isinstance(ci, (list, tuple)) or len(ci) != 2:
+        return "--"
+    lo, hi = ci[0], ci[1]
+    if lo is None or hi is None:
+        return "--"
+    try:
+        lo_f, hi_f = float(lo), float(hi)
+    except (TypeError, ValueError):
+        return "--"
+    if math.isnan(lo_f) or math.isnan(hi_f):
+        return "--"
+    return f"[{lo_f:.1f},{hi_f:.1f}]"
+
+
+def _fmt_p_dash(value: object) -> str:
+    """渲染可空 p 值：None → ``--``；否则沿用 ``fmt_pv`` 既有格式。"""
+    if value is None:
+        return "--"
+    try:
+        return fmt_pv(float(value))  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return "--"
+
+
+def _tex_escape(text: str) -> str:
+    """转义进入 LaTeX 正文的动态文本（M10）。
+
+    不可估计原因（``all_miss`` / ``no_common_seed`` 等）含裸下划线，直接拼进脚注会
+    让 xelatex 报 ``Missing $ inserted``。本函数只用于**动态文本**（原因、mode 名等），
+    表内固定文本与 JSON 原始值一律不改。
+
+    处理顺序：先把反斜杠换成占位符（避免后续替换引入的反斜杠被二次转义），再处理
+    ``& % $ # _ { }``，最后用文本命令表达 ``~`` 与 ``^``；占位符最后还原成
+    ``\\textbackslash{}``。
+
+    Args:
+        text: 任意动态文本（可含中文）。
+
+    Returns:
+        可直接嵌入 LaTeX 正文的转义字符串。
+    """
+    placeholder = "\x00"
+    escaped = str(text).replace("\\", placeholder)
+    for char, replacement in (
+        ("&", r"\&"),
+        ("%", r"\%"),
+        ("$", r"\$"),
+        ("#", r"\#"),
+        ("_", r"\_"),
+        ("{", r"\{"),
+        ("}", r"\}"),
+    ):
+        escaped = escaped.replace(char, replacement)
+    escaped = escaped.replace("~", r"\textasciitilde{}")
+    escaped = escaped.replace("^", r"\textasciicircum{}")
+    return escaped.replace(placeholder, r"\textbackslash{}")
+
+
+def _table_section(stats: dict, hit_semantics: str) -> dict:
+    """按命中口径选择表格数据源：legacy 用顶层，physical 用 ``stats['physical']``。
+
+    Args:
+        stats: paired_stats 生成的统计 JSON。
+        hit_semantics: ``legacy`` 或 ``physical``。
+
+    Returns:
+        供表格消费的统计字典（physical 时为物理口径段落）。
+
+    Raises:
+        FileNotFoundError: 请求 physical 但统计 JSON 没有 physical 段落。
+        ValueError: 未知命中口径。
+    """
+    if hit_semantics == "legacy":
+        return stats
+    if hit_semantics != "physical":
+        raise ValueError(f"未知命中口径：{hit_semantics!r}（可选 legacy / physical）")
+    physical = stats.get("physical")
+    if not isinstance(physical, dict) or "E8_limit_mechanism" not in physical:
+        raise FileNotFoundError(
+            "统计 JSON 缺少 physical 段落：请先用 paired_stats --mode <mode> 生成分模式统计，"
+            "再以 --hit-semantics physical 出表（不回退到混合口径）"
+        )
+    return physical
+
+
+def tables(stats: dict, out_dir: Path | None = None, *, hit_semantics: str = "legacy") -> None:
+    """生成 Table I（各档 active-hit 率与 n）与 Table II（配对差、McNemar p、DiD）。
+
+    空值契约：该档没有有效样本（``n_valid == 0``）或推断不可估计（``ci95`` /
+    ``p_sign`` 为 None）时，TeX 一律渲染 ``--``，并在表下注明原因，绝不显示 0。
+
+    Args:
+        stats: paired_stats 生成的统计 JSON。
+        out_dir: 输出目录，默认 ``OUT/table_data``。
+        hit_semantics: ``legacy``（默认，保持旧 RM65 输出）或 ``physical``
+            （读取 ``stats["physical"]``，缺失时抛 ``FileNotFoundError`` 由上层跳过）。
+
+    Raises:
+        FileNotFoundError: physical 口径缺少 ``physical`` 段落，或表格所需小节缺失。
+    """
+    source = _table_section(stats, hit_semantics)
+    try:
+        e3 = source["E3_nominal"]
+        e4 = source["E4_grid"]
+        e7 = source["E7_corners"]
+        e8 = source["E8_limit_mechanism"]
+    except KeyError as exc:
+        raise FileNotFoundError(f"统计 JSON 缺少表格所需小节：{exc}") from exc
+    out_dir = out_dir if out_dir is not None else OUT / "table_data"
     out_dir.mkdir(parents=True, exist_ok=True)
+    mode_text = str(stats.get("mode") or "未标注")
 
-    def cell(kind: str, key: str) -> float:
-        src = {"E3": e3["cells"], "E4": e4["merged_20cell"],
-               "E7": e7["cells"]}[kind]
-        return src[key]["rate"]
+    def _cells(kind: str) -> dict:
+        if kind == "E3":
+            return e3.get("cells") or {}
+        if kind == "E4":
+            return e4.get("merged_20cell") or {}
+        return e7.get("cells") or {}
 
-    def n_of(kind: str, key: str) -> int:
-        src = {"E3": e3["cells"], "E4": e4["merged_20cell"],
-               "E7": e7["cells"]}[kind]
-        return src[key]["n_valid"]
+    def cell(kind: str, key: str) -> float | None:
+        """取一格的命中率；缺档或 n_valid==0 返回 None（表格渲染为 --）。"""
+        entry = _cells(kind).get(key)
+        if not isinstance(entry, dict) or not entry.get("n_valid"):
+            return None
+        rate = entry.get("rate")
+        return None if rate is None else float(rate)
+
+    def n_of(kind: str, key: str) -> int | None:
+        """取一格的有效样本数；缺档返回 None。"""
+        entry = _cells(kind).get(key)
+        if not isinstance(entry, dict) or not entry.get("n_valid"):
+            return None
+        return int(entry["n_valid"])
 
     rows12 = [
         ("Nominal 7 m/s", "E3", *[f"7|{m}" for m in MODE_ORDER]),
@@ -1366,8 +1627,7 @@ def tables(stats: dict, out_dir: Path | None = None) -> None:
                     *[f"12|s0.2|t0|{m}" for m in MODE_ORDER])]
     rows_all = rows12 + rows_grid + rows_corner
 
-    # chat21 审稿意见：题注压缩（自然句、去堆叠括号）。原先题注里那串由 stats
-    # JSON 算出的 Wilson 区间半宽已不再写进题注，相应计算一并删除
+    # chat21 的行内注释压缩后已随 caption 一起删去，避免行内注释过大
     lines = [r"\begin{table*}[t]", r"\centering",
              r"\caption{Active-hit rate (\%) of the four configurations by "
              r"condition; $n$ counts valid runs per configuration and is given "
@@ -1380,55 +1640,92 @@ def tables(stats: dict, out_dir: Path | None = None) -> None:
     kind_label = {"E3": "nominal four-tier", "E4": "perturbation grid",
                   "E7": "high-power corners"}
     for label, kind, *keys in rows_all:
-        vals = " & ".join(f"{cell(kind, k):.1f}" for k in keys)
-        ns = [n_of(kind, k) for k in keys]
-        n_str = f"{min(ns)}" if min(ns) == max(ns) else f"{min(ns)}--{max(ns)}"
+        vals = " & ".join(_fmt_dash(cell(kind, k), signed=False) for k in keys)
+        ns = [n for n in (n_of(kind, k) for k in keys) if n is not None]
+        n_str = "--" if not ns else (f"{min(ns)}" if min(ns) == max(ns) else f"{min(ns)}--{max(ns)}")
         lines.append(f"{label} & {vals} & {n_str} & {kind_label[kind]} \\\\")
-    lines += [r"\bottomrule", r"\end{tabular}", r"\end{table*}", ""]
+    lines += [r"\bottomrule", r"\end{tabular}"]
+    if hit_semantics == "physical":
+        lines.append(
+            r"\par\footnotesize 命中口径：physical（v12 首个物理拍面接触，face speed "
+            r"$>0.3$\,m/s），mode=" + _tex_escape(mode_text)
+            + r"；\texttt{--} 表示该档无有效样本、未估计。"
+        )
+        lines.append(r"\end{table*}")
+    else:
+        lines.append(r"\end{table*}")
+    lines.append("")
     (out_dir / "table1_comparison.tex").write_text("\n".join(lines), encoding="utf-8")
 
-    # Table II：TCP 限速层内配对 p + 跨层配对 DiD
-    # （chat15：DiD 三行通栏文本改对齐子表、caption 压短——表格更密）
+    # Table II：TCP 限速的配对差 + p + 双差 DiD；缺失/不可估计一律 -- 并注明原因
     lines = [r"\begin{table}[t]", r"\centering",
              r"\caption{Paired gain ({\upshape pp}) over point-target at "
              r"$7$\,{\upshape m/s} ($n{=}394$ seeds); $p$: unadjusted "
              r"McNemar. Lower block: between-cap shifts.}",
              r"\label{tab:limits}",
              r"\setlength{\tabcolsep}{3.5pt}",
-             # 下面两行是写进 TeX 的注释（chat22 手改版），必须留在输出里，
-             # 否则重跑 tables() 会把磁盘上的说明删掉
-             r"% chat22：行距 1.0 → 0.92（约省 8 pt），把 Fig.5(c) 加高占用的页面空间补回来，",
-             r"% 保证第 5 页左栏 §V-E 块不被挤出（否则出现 ~35 pt 空洞）",
+             # 以下两行是写给 TeX 的注释（chat22 恢复版）：保持原行，
+             # 不要因 tables() 改动顺手删除或改写
+             r"% chat22：将 1.0 改 0.92，约省 8 pt，用于 Fig.5(c) 高度占用的页底空间补偿。",
+             r"% 验证：5 页以内 与V-E 两不超（超版）时约 ~35 pt 空白",
              r"\renewcommand{\arraystretch}{0.92}",
              r"\begin{tabular}{lcccr}", r"\toprule",
              r"Config. & \multicolumn{2}{c}{Gain over point-target (pp)} & "
              r"\multicolumn{2}{c}{$p$} \\",
              r"\cmidrule(lr){2-3}\cmidrule(lr){4-5}",
              r" & TCP 1.8 & TCP 1.0 & TCP 1.8 & TCP 1.0 \\", r"\midrule"]
+    paired = e8.get("paired") or {}
     for mode in ("tube_only", "softmin_only", "full"):
-        p18 = e8["paired"].get(f"TCP1.8|{mode}_vs_none", {})
-        p10 = e8["paired"].get(f"TCP1.0|{mode}_vs_none", {})
+        p18 = paired.get(f"TCP1.8|{mode}_vs_none") or {}
+        p10 = paired.get(f"TCP1.0|{mode}_vs_none") or {}
         lines.append(
-            f"{MODE_LABELS[mode]} & ${p18.get('diff_pp', 0):+.1f}$ & "
-            f"${p10.get('diff_pp', 0):+.1f}$ & ${fmt_pv(p18.get('p_mcnemar', 1))}$ & "
-            f"${fmt_pv(p10.get('p_mcnemar', 1))}$ \\\\")
+            f"{MODE_LABELS[mode]} & ${_fmt_dash(p18.get('diff_pp'))}$ & "
+            f"${_fmt_dash(p10.get('diff_pp'))}$ & ${_fmt_p_dash(p18.get('p_mcnemar'))}$ & "
+            f"${_fmt_p_dash(p10.get('p_mcnemar'))}$ \\\\")
     lines += [r"\bottomrule", r"\end{tabular}", "",
               r"\begin{tabular}{lccc}", r"\toprule",
               r"DiD (TCP 1.8 $\to$ TCP 1.0) & DiD (pp) & $95\%$ CI & sign-test $p$ \\",
               r"\midrule"]
-    did = e8["did"]
+    did = e8.get("did") or {}
+    notes: list[str] = []
     for mode in ("tube_only", "softmin_only", "full"):
-        d = did.get(mode, {})
-        lo, hi = d.get("ci95", [np.nan, np.nan])
-        lines.append(f"{MODE_LABELS[mode]} & ${d.get('mean_did_pp', 0):+.1f}$ & "
-                     f"$[{lo:.1f},{hi:.1f}]$ & ${fmt_pv(d.get('p_sign', 1))}$ \\\\")
-    lines += [r"\bottomrule", r"\end{tabular}", r"\end{table}", ""]
+        for label in ("TCP1.8", "TCP1.0"):
+            pair = paired.get(f"{label}|{mode}_vs_none") or {}
+            if pair.get("unavailable_reason"):
+                notes.append(
+                    f"{MODE_LABELS[mode]}@{label}: {pair['unavailable_reason']}"
+                    f"（n={pair.get('n_paired', 0)}，观察差 {_fmt_dash(pair.get('diff_pp'))} pp）"
+                )
+    for mode in ("tube_only", "softmin_only", "full"):
+        d = did.get(mode) or {}
+        reason = d.get("unavailable_reason")
+        ci_text = _fmt_ci_dash(d.get("ci95"))
+        lines.append(
+            f"{MODE_LABELS[mode]} & ${_fmt_dash(d.get('mean_did_pp'))}$ & "
+            f"${ci_text}$ & ${_fmt_p_dash(d.get('p_sign'))}$ \\\\")
+        if reason:
+            notes.append(
+                f"{MODE_LABELS[mode]}: {reason}（n={d.get('n_pairs', 0)}）"
+            )
+    lines += [r"\bottomrule", r"\end{tabular}"]
+    if notes:
+        # 不可估计原因写进 TeX 注释与表下脚注，保证 -- 可追溯（M10：正文必须转义）
+        for note in notes:
+            # 注释行保留原始 reason，但折叠换行，避免下一行脱离 % 注释泄漏进正文
+            lines.append("% unavailable: " + " ".join(str(note).split()))
+        lines.append(
+            r"\par\footnotesize \texttt{--} 表示不可估计（观察差值仍保留样本数，"
+            r"不做零假设推断）：" + _tex_escape("；".join(notes)) + "。"
+        )
+    if hit_semantics == "physical":
+        lines.append(
+            r"\par\footnotesize 命中口径：physical，mode=" + _tex_escape(mode_text) + "。"
+        )
+    lines += [r"\end{table}", ""]
     (out_dir / "table2_ablation.tex").write_text("\n".join(lines), encoding="utf-8")
     print(f"已保存 {out_dir}/table1_comparison.tex + table2_ablation.tex")
 
 
-# =============================================================================
-# 入口
 # =============================================================================
 
 def fig3_hero(render_png: Path | None = None, meta_json: Path | None = None) -> None:
@@ -1518,30 +1815,262 @@ def fig3_hero(render_png: Path | None = None, meta_json: Path | None = None) -> 
     print(f"已保存 {OUT / 'fig3_swing_hero.pdf'} （实景 hero 版，{W}x{H} px 渲染，600 dpi 嵌入）")
 
 
+# =============================================================================
+# Table III 隔离预览（T8c：数据驱动，只读 tables.table3_shared_input + column_map）
+# =============================================================================
+
+def _fmt_pct(value: object) -> str:
+    """百分比数值格式化：None / NaN / 非数值 → `--`（缺格不画 0）。"""
+    if value is None:
+        return "--"
+    try:
+        v = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return "--"
+    if not np.isfinite(v):
+        return "--"
+    return f"{v:.1f}"
+
+
+def _fmt_p_raw(value: object) -> str:
+    """配对 p 值格式化：None / NaN / 非数值 → `--`。"""
+    if value is None:
+        return "--"
+    try:
+        p = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return "--"
+    if not np.isfinite(p):
+        return "--"
+    return "<0.001" if p < 0.001 else f"{p:.3f}"
+
+
+def build_table3_preview(stats: dict) -> dict:
+    """从 T8b 统计构建 table3 隔离预览数据（不触碰 E1–E8）。
+
+    设计要点：
+    - 只依赖 `tables.table3_shared_input`（rows[] 与 column_map），因此 R1D
+      smoke 小样本即使没有 exp22/exp24 数据也能出「链路预览」表；
+    - legacy / physical 两种口径分开返回，缺格按 `present=False` 或
+      None/NaN 显示 `--`，绝不补 0；
+    - tier 的列顺序与显示名从 column_map 的
+      `tables.table3_shared_input.rows[].cells.<tier>.legacy_rate` 反推；
+      column_map 缺失时退回 paired_stats 的固定 tier 顺序。
+
+    Args:
+        stats: T8b 统计 JSON（含 tables.table3_shared_input）。
+
+    Returns:
+        {"annotation", "description", "tiers", "rows"}；每行含
+        `legacy` / `physical` 两套格式化值、`present` 标记与 `missing` tier 列表。
+
+    Raises:
+        ValueError: 缺 `tables.table3_shared_input` 或 rows 为空（清晰报错，
+            而非裸 KeyError）。
+    """
+    tables = stats.get("tables") if isinstance(stats, dict) else None
+    table3 = (tables or {}).get("table3_shared_input")
+    if not isinstance(table3, dict):
+        raise ValueError(
+            "统计 JSON 缺少 tables.table3_shared_input：table3 隔离预览需要 T8b 统计"
+            "（先运行 scripts/extract/paired_stats.py 生成 paper_stats_active.json）")
+    rows_in = table3.get("rows") or []
+    if not rows_in:
+        raise ValueError("tables.table3_shared_input.rows 为空：没有可预览的 (t,s) 格")
+
+    column_map = (tables or {}).get("column_map") or {}
+    columns = (column_map.get("table3_shared_input.tex") or {}).get("columns") or {}
+    tiers: list[dict[str, str]] = []
+    for label, json_path in columns.items():
+        m = re.search(r"\.cells\.([A-Za-z0-9_]+)\.legacy_rate$", str(json_path))
+        if m:
+            tiers.append({"key": m.group(1), "label": str(label)})
+    if not tiers:
+        tiers = [{"key": k, "label": lab} for k, lab in _TABLE3_TIERS_FALLBACK]
+
+    rows = []
+    for src in rows_in:
+        cells = src.get("cells") or {}
+        legacy: dict[str, str] = {}
+        physical: dict[str, str] = {}
+        present: dict[str, bool] = {}
+        for tier in tiers:
+            key = tier["key"]
+            cell = cells.get(key) or {}
+            is_present = bool(cell.get("present"))
+            present[key] = is_present
+            legacy[key] = _fmt_pct(cell.get("legacy_rate")) if is_present else "--"
+            physical[key] = _fmt_pct(cell.get("physical_rate")) if is_present else "--"
+        rows.append({
+            "cell": str(src.get("cell", "")),
+            "t": src.get("t"),
+            "s": src.get("s"),
+            "legacy": legacy,
+            "physical": physical,
+            "present": present,
+            "p_raw_legacy": _fmt_p_raw(src.get("p_raw_legacy")),
+            "p_raw_physical": _fmt_p_raw(src.get("p_raw_physical")),
+            "n_paired_legacy": src.get("n_paired_legacy"),
+            "n_paired_physical": src.get("n_paired_physical"),
+            "missing": list(src.get("missing") or []),
+        })
+    return {"annotation": TABLE3_ANNOTATION,
+            "description": str(table3.get("description", "")),
+            "tiers": tiers, "rows": rows}
+
+
+def _table3_tex(preview: dict) -> str:
+    """把隔离预览渲染成 LaTeX（legacy / physical 上下两张表，缺格 `--`）。"""
+    tiers = preview["tiers"]
+    header = " & ".join(t["label"] for t in tiers)
+    lines = [
+        "% 自动生成（T8c table3 数据驱动隔离版；勿手改）",
+        f"% {preview['annotation']}",
+        f"% {preview['description']}",
+        r"\begin{table*}[t]", r"\centering",
+        r"\caption{Shared-input protocol preview (R1D smoke 小样本，仅链路预览，"
+        r"不作论文统计结论)。缺格以 \texttt{--} 显式留空（不补 0）；"
+        r"上表 legacy 口径，下表 physical 口径。}",
+        r"\label{tab:shared_input_preview}",
+        r"{\small Legacy hit rate (\%)} \\[2pt]",
+        r"\begin{tabular}{l" + "c" * len(tiers) + "r}", r"\toprule",
+        f"$ (t,s) $ cell & {header} & $p_{{raw}}$ \\\\", r"\midrule",
+    ]
+    for row in preview["rows"]:
+        vals = " & ".join(row["legacy"][t["key"]] for t in tiers)
+        lines.append(f"{row['cell']} & {vals} & {row['p_raw_legacy']} \\\\")
+    lines += [r"\bottomrule", r"\end{tabular}", r"\par\vspace{6pt}",
+              r"{\small Physical hit rate (\%)} \\[2pt]",
+              r"\begin{tabular}{l" + "c" * len(tiers) + "r}", r"\toprule",
+              f"$ (t,s) $ cell & {header} & $p_{{raw}}$ \\\\", r"\midrule"]
+    for row in preview["rows"]:
+        vals = " & ".join(row["physical"][t["key"]] for t in tiers)
+        lines.append(f"{row['cell']} & {vals} & {row['p_raw_physical']} \\\\")
+    lines += [r"\bottomrule", r"\end{tabular}", r"\end{table*}", ""]
+    return "\n".join(lines)
+
+
+def _table3_pdf(preview: dict, path: Path) -> None:
+    """把隔离预览渲染成 PDF（matplotlib 两面板表 + 固定标注）。"""
+    tiers = preview["tiers"]
+    n_rows = len(preview["rows"])
+    fig_h = max(2.8, 1.6 + 0.30 * (2 * n_rows + 4))
+    fig = plt.figure(figsize=(7.16, fig_h))
+    fig.suptitle("Shared-input protocol preview — R1D smoke (link-only, small n)",
+                 fontsize=9)
+    for panel, metric in enumerate(("legacy", "physical")):
+        ax = fig.add_axes([0.02, 0.50 - panel * 0.47, 0.96, 0.40])
+        ax.axis("off")
+        ax.set_title(f"({'a' if panel == 0 else 'b'}) {metric.capitalize()} "
+                     "hit rate (%)", fontsize=8, loc="left")
+        col_labels = ["(t,s)"] + [t["label"] for t in tiers] + ["p_raw"]
+        cell_text = [
+            [row["cell"]]
+            + [row[metric][t["key"]] for t in tiers]
+            + [row[f"p_raw_{metric}"]]
+            for row in preview["rows"]
+        ]
+        tab = ax.table(cellText=cell_text, colLabels=col_labels,
+                       loc="upper center", cellLoc="center")
+        tab.auto_set_font_size(False)
+        tab.set_fontsize(7)
+        tab.scale(1.0, 1.22)
+    fig.text(0.02, 0.012, TABLE3_ANNOTATION_EN, fontsize=7, color="0.35")
+    fig.savefig(path, bbox_inches="tight")
+    plt.close(fig)
+
+
+def table3_shared_input(stats: dict, out_dir: Path | None = None) -> dict[str, Path]:
+    """生成 table3 隔离预览三件套（tex + csv + pdf）。
+
+    Args:
+        stats: T8b 统计 JSON（含 tables.table3_shared_input）。
+        out_dir: 输出目录；None → `OUT/table_data`（与 Table I/II 同目录约定）。
+
+    Returns:
+        {"tex": Path, "csv": Path, "pdf": Path}（绝对路径）。
+
+    Raises:
+        ValueError: 统计 JSON 缺 table3 键（由 build_table3_preview 抛出）。
+    """
+    preview = build_table3_preview(stats)
+    base = Path(out_dir) if out_dir is not None else OUT / "table_data"
+    base.mkdir(parents=True, exist_ok=True)
+    tex_path = (base / "table3_shared_input_preview.tex").resolve()
+    csv_path = (base / "table3_shared_input_preview.csv").resolve()
+    pdf_path = (base / "table3_shared_input_preview.pdf").resolve()
+
+    tex_path.write_text(_table3_tex(preview), encoding="utf-8")
+
+    tiers = preview["tiers"]
+    with csv_path.open("w", encoding="utf-8", newline="") as fh:
+        writer = csv.writer(fh)
+        writer.writerow(["cell", "t", "s"]
+                        + [f"{t['key']}_{metric}" for t in tiers
+                           for metric in ("legacy", "physical")]
+                        + ["p_raw_legacy", "p_raw_physical", "missing_tiers"])
+        for row in preview["rows"]:
+            values: list[object] = [row["cell"], row["t"], row["s"]]
+            for tier in tiers:
+                for metric in ("legacy", "physical"):
+                    values.append("" if row[metric][tier["key"]] == "--"
+                                  else row[metric][tier["key"]])
+            values += ["" if row["p_raw_legacy"] == "--" else row["p_raw_legacy"],
+                       "" if row["p_raw_physical"] == "--" else row["p_raw_physical"],
+                       ";".join(row["missing"])]
+            writer.writerow(values)
+
+    _table3_pdf(preview, pdf_path)
+    print(f"已保存 {tex_path} + {csv_path} + {pdf_path}")
+    return {"tex": tex_path, "csv": csv_path, "pdf": pdf_path}
+
 
 def main() -> None:
-    global OUT
+    global OUT, DATA
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--fig", nargs="*", default=["3", "3alt", "4", "5", "6", "7", "8", "table"])
+    ap.add_argument("--fig", nargs="*",
+                    default=["3", "3alt", "4", "5", "6", "7", "8", "table"])
+    ap.add_argument("--data-root", type=Path, default=None,
+                    help="数据根（默认 PROJECT/experiment_data）；exp18 npz / "
+                         "exp26 csv / timing.json 与自动解析的统计 JSON 均从该根读取")
     ap.add_argument("--stats", type=Path, default=None,
-                    help="统计 JSON 路径（默认自动解析 paper/planning 或 experiment_data）")
+                    help="统计 JSON 路径（默认从数据根自动解析）")
     ap.add_argument("--out", type=Path, default=None,
                     help="输出目录（默认 paper/figures；表格写入 <out>/table_data）")
+    ap.add_argument("--hit-semantics", choices=("legacy", "physical"), default="legacy",
+                    help="表格命中口径：legacy（默认，旧 RM65 输出）或 physical（读 stats['physical']）")
     args = ap.parse_args()
+
+    data_root_given = args.data_root is not None
+    if data_root_given:
+        DATA = resolve_data_root(args.data_root)
+        print(f"数据根: {DATA}")
     if args.out is not None:
-        OUT = args.out
+        out = Path(args.out)
+        OUT = (out if out.is_absolute() else PROJECT / out).resolve()
+        print(f"输出目录: {OUT}")
     want = set(args.fig)
-    stats = load_stats(args.stats)
+    stats = load_stats(args.stats, data_root=DATA if data_root_given else None)
+
+    def _run(name: str, fn, *fn_args, **fn_kwargs) -> None:
+        """执行单个图项；数据缺失时如实跳过（打印原因，不伪造结果）。"""
+        try:
+            fn(*fn_args, **fn_kwargs)
+        except FileNotFoundError as exc:
+            print(f"[{name}] 跳过：缺少数据文件（{exc}）；未验收，不补数")
+        except KeyError as exc:
+            print(f"[{name}] 跳过：统计 JSON 缺少键 {exc}；未验收，不补数")
+
     if "1hero" in want:
-        fig1_hero()
+        _run("fig1", fig1_hero)
     if "3" in want:
-        fig3_3d()
+        _run("fig3", fig3_3d)
     if "3alt" in want:
-        fig3_alt_2d()
+        _run("fig3alt", fig3_alt_2d)
     if "3hero" in want:
-        fig3_hero()
+        _run("fig3hero", fig3_hero)
     if "4" in want:
-        fig4()
+        _run("fig4", fig4)
     if "5" in want:
         fig5(stats)
     if "5alt" in want:
@@ -1549,11 +2078,13 @@ def main() -> None:
     if "6" in want:
         fig6(stats)
     if "7" in want:
-        fig_diagnostic()
+        _run("fig7", fig_diagnostic)
     if "8" in want:
-        fig_realtime(stats)
+        _run("fig8", fig_realtime, stats)
     if "table" in want:
-        tables(stats)
+        _run("table", tables, stats, hit_semantics=args.hit_semantics)
+    if "table3" in want:
+        table3_shared_input(stats)
 
 
 if __name__ == "__main__":

@@ -8,6 +8,10 @@ SDK 或 MPC。
 - 模型/绑定/参数全部来自 Task 2.5b/2.6 交接收口（只读消费）：
   ``load_robot_profile`` → ``load_runtime_parameters`` → ``load_robot_model``
   → ``ModelKinematics``；
+- 可选的 ``--racket-config`` 提供球拍档案（``load_racket_profile`` →
+  ``load_robot_model(..., racket_profile=...)``）：几何/质量/惯量/安装/
+  连接件的唯一物理来源，报告新增 ``racket`` 节记录配置哈希与装配事实；
+  不传时保持旧 API 兼容语义（模板默认球拍，``racket.mode = "legacy-template"``）；
 - 冻结部件、SDK 整机索引、数据冲突四项引用自审计报告
   ``docs/experiments/reports/2026-11-15-r1a7d-model-interface-audit.md``
   （§2/§4/§5，只记录不裁断）；SDK 索引是 DDS 通信地址，不进模型、不进
@@ -22,9 +26,10 @@ viewer 失败（此时 JSON 已写出并保留）。
 用法（从仓库根目录）::
 
     python scripts/tools/inspect_robot_model.py \\
-        --robot-config configs/robots/r1d_left.yaml \\
-        --runtime-config configs/robots/r1d_runtime_left.yaml \\
-        --output-dir results/r1d_inspect/left --render
+        --robot-config configs/robots/r1d_right.yaml \\
+        --runtime-config configs/robots/r1d_v12_runtime_right.yaml \\
+        --racket-config configs/rackets/blade100_v9_reference.yaml \\
+        --output-dir results/r1d_v12_parity/t2_preview --render
 """
 
 from __future__ import annotations
@@ -53,6 +58,10 @@ from PIL import Image  # noqa: E402
 
 from src.robot.model_factory import RobotModelBundle, load_robot_model  # noqa: E402
 from src.robot.model_kinematics import ModelKinematics  # noqa: E402
+from src.robot.racket_profile import (  # noqa: E402
+    RacketProfile,
+    load_racket_profile,
+)
 from src.robot.robot_profile import RobotProfile, load_robot_profile  # noqa: E402
 from src.robot.runtime_parameters import load_runtime_parameters  # noqa: E402
 
@@ -341,10 +350,11 @@ def _resource_hashes(
     robot_config: Path,
     runtime_config: Path,
     repo_root: Path,
+    racket_config: Path | None = None,
 ) -> dict[str, Any]:
     """收集配置与模型资源 SHA256（复现本次检查的完整输入集）。
 
-    覆盖：robot/runtime YAML、场景模板、arm/env/assets 三片段、
+    覆盖：robot/runtime/racket YAML、场景模板、arm/env/assets 三片段、
     官方 URDF、模板引用的全部 mesh（按 mesh file 属性解析）。
 
     Args:
@@ -352,6 +362,7 @@ def _resource_hashes(
         robot_config: 描述 YAML 路径。
         runtime_config: 运行参数 YAML 路径。
         repo_root: 仓库根目录（显示键用）。
+        racket_config: 可选的球拍档案 YAML 路径（唯一物理来源）。
 
     Returns:
         {"files": {显示键: sha256}, "template_meshes": {mesh 名: sha256}}。
@@ -368,6 +379,8 @@ def _resource_hashes(
         repo_root / "src" / "robot" / "r1d_assets.xml",
         repo_root / "assets" / "unitree_r1d" / "r1d.urdf",
     ]
+    if racket_config is not None:
+        candidates.insert(2, Path(racket_config))
     for path in candidates:
         if path.is_file():
             files[_display_key(path, repo_root)] = _sha256_of(path)
@@ -390,6 +403,76 @@ def _resource_hashes(
     return {"files": files, "template_meshes": meshes}
 
 
+def _racket_report_section(
+    bundle: RobotModelBundle,
+    *,
+    racket_config: Path | None,
+    racket_profile: RacketProfile | None,
+) -> dict[str, Any]:
+    """组装报告 racket 节：档案哈希 + 装配事实 + TCP site 局部位置。
+
+    档案模式的数值全部来自 ``bundle.racket``（RacketProfile 装配事实，
+    与模型同源）；旧 API 兼容模式只记录模板默认拍在模型中的质量/惯量，
+    并在 note 中说明物理来源缺失。
+    """
+    repo_root = _repo_root()
+    model = bundle.model
+    tcp_site_id = int(bundle.binding.tcp_site_id)
+    section: dict[str, Any] = {
+        "mode": "profile" if racket_profile is not None else "legacy-template",
+        "note": (
+            "档案模式：几何/质量/惯量/安装/连接件唯一物理来源是 RacketProfile，"
+            "本节的 total_mass/com/face/mount/connector 为该档案装配事实"
+            if racket_profile is not None
+            else "旧 API 兼容模式：未提供 racket-config，球拍为模板默认/legacy "
+            "scene.racket_* 参数，无档案装配事实"
+        ),
+        "config_path": None,
+        "config_sha256": None,
+        "racket_id": None,
+        "source_path": None,
+        "model_path": str(bundle.profile.model_path),
+        "active_joint_count": len(bundle.profile.active_joint_names),
+        "tcp_site": bundle.profile.tcp_site_name,
+        "tcp_local_position": _floats(model.site_pos[tcp_site_id]),
+        "total_mass": None,
+        "com": None,
+        "inertia_diagonal": None,
+        "face_center": None,
+        "face_semi_axes": None,
+        "mount_position": None,
+        "mount_wxyz": None,
+        "connector_mass": None,
+    }
+    if racket_config is not None:
+        config_path = Path(racket_config)
+        section["config_path"] = _display_key(config_path, repo_root)
+        section["config_sha256"] = _sha256_of(config_path)
+    if racket_profile is not None:
+        section["racket_id"] = racket_profile.racket_id
+        section["source_path"] = str(racket_profile.source_path)
+    racket = bundle.racket
+    if racket is not None:
+        section.update(
+            {
+                "total_mass": float(racket.total_mass),
+                "com": _floats(racket.com),
+                "inertia_diagonal": _floats(racket.inertia_diagonal),
+                "face_center": _floats(racket.face_center),
+                "face_semi_axes": _floats(racket.face_semi_axes),
+                "mount_position": _floats(racket.mount_position),
+                "mount_wxyz": _floats(racket.mount_wxyz),
+                "connector_mass": float(racket.connector_mass),
+            }
+        )
+    else:
+        body_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "r1d_racket")
+        if body_id != -1:
+            section["legacy_body_mass"] = float(model.body_mass[body_id])
+            section["legacy_body_inertia"] = _floats(model.body_inertia[body_id])
+    return section
+
+
 def _build_report(
     profile: RobotProfile,
     bundle: RobotModelBundle,
@@ -398,16 +481,20 @@ def _build_report(
     *,
     render_requested: bool,
     view_requested: bool,
+    racket_config: Path | None = None,
+    racket_profile: RacketProfile | None = None,
 ) -> dict[str, Any]:
     """组装完整 JSON 报告（数组可序列化、未知 null、禁 NaN/Infinity）。
 
     Args:
         profile: 机器人描述。
-        bundle: 同源组装结果（model/binding/parameters）。
+        bundle: 同源组装结果（model/binding/parameters/racket）。
         robot_config: 描述 YAML 路径（复现命令用）。
         runtime_config: 运行参数 YAML 路径。
         render_requested: 是否请求了三视图渲染。
         view_requested: 是否请求了交互 viewer。
+        racket_config: 可选球拍档案 YAML 路径（传入时进入 racket 节与哈希）。
+        racket_profile: 可选球拍档案对象（唯一物理来源；None 为旧兼容模式）。
 
     Returns:
         报告字典（可直接 json.dumps(allow_nan=False)）。
@@ -463,7 +550,12 @@ def _build_report(
             "reproduce_hint": (
                 "python scripts/tools/inspect_robot_model.py --robot-config "
                 f"{robot_config} --runtime-config {runtime_config} "
-                "--output-dir <目录>"
+                + (
+                    f"--racket-config {racket_config} "
+                    if racket_config is not None
+                    else ""
+                )
+                + "--output-dir <目录>"
             ),
         },
         "profile": {
@@ -474,6 +566,9 @@ def _build_report(
             "tcp_site_name": profile.tcp_site_name,
             "model_path": str(profile.model_path),
         },
+        "racket": _racket_report_section(
+            bundle, racket_config=racket_config, racket_profile=racket_profile
+        ),
         "model": {
             "nq": int(model.nq),
             "nv": int(model.nv),
@@ -540,26 +635,34 @@ def _build_report(
         "provisional_fields": list(parameters.provisional_fields),
         "frozen_components": {
             "wheels": {
-                "handling": "not_in_scene",
+                "handling": "landing_visual",
                 "description": (
-                    "轮×2（Left/Right_Wheel_joint，continuous）不进入场景模板"
-                    "（N0-3c）"
+                    "轮×2（Left/Right_Wheel_joint，continuous）作为底座落地视觉"
+                    "geom 写入 base_link（r1d_wheel_left/right，contype=0），"
+                    "不进入主动关节链"
                 ),
             },
             "casters": {
-                "handling": "not_in_scene",
+                "handling": "landing_visual",
                 "description": (
-                    "4 组被动脚轮（各 Yaw+Roll continuous，无 <limit> 标签，"
-                    "能力未声明，N0-9）不进入场景模板"
+                    "4 组被动脚轮（r1d_caster_0..3，sphere 视觉）与轮共同决定"
+                    "底座落地高度 0.155 m；无 joint/无碰撞（contype=0）"
                 ),
             },
             "lift": {
-                "handling": "baked_fixed_offset",
+                "handling": "baked_default_plus_runtime_offset",
                 "q_L_m": float(q_L),
                 "derivation": (
-                    "两级 prismatic 同值 bake（mimic multiplier=1）；q_L 由模型 "
-                    "body_pos 推导：z(stage1)+z(stage2)=2·q_L−0.1688（审计 §4）"
+                    "r1d_env.xml 恒定 bake 默认 q_L=0.4225（两级 prismatic 同值）；"
+                    "运行时按 scene.lift_displacement 在模板副本内存中重烘，"
+                    "磁盘模板字节不变。q_L 由模型 body_pos 推导："
+                    "z(stage1)+z(stage2)=2·q_L−0.1688（审计 §4）"
                 ),
+                "scene_lift_displacement_m": float(
+                    bundle.parameters.scene.lift_displacement
+                )
+                if bundle.parameters.scene is not None
+                else None,
                 "travel_range_m_per_stage": list(_LIFT_TRAVEL_RANGE_M),
                 "total_travel_m": 2.0 * (_LIFT_TRAVEL_RANGE_M[1] - _LIFT_TRAVEL_RANGE_M[0]),
             },
@@ -572,13 +675,18 @@ def _build_report(
                 ),
             },
             "head": {
-                "handling": "not_in_scene",
-                "description": "head_pitch/head_yaw 冻结 0，不进入场景模板",
+                "handling": "frozen_static_in_env_fragment",
+                "description": (
+                    "head_pitch_Link/head_yaw_Link 作为无关节静态链进入 "
+                    "r1d_env.xml（冻结 0，仅完整外观；网格随片段自带 <asset>）"
+                ),
             },
             "opposite_arm": {
-                "handling": "not_in_scene",
+                "handling": "frozen_static_body",
                 "description": (
-                    "对侧臂整体不在场景；profile held_joint_names=[]（held=[]）"
+                    "对侧臂按 r1d_arm_{passive}.xml 烘焙固定姿态后删除全部关节"
+                    "/法兰 site，作为静态 body 挂在 waist_yaw_link 下（仅渲染；"
+                    "scene.fixed_joint_poses 可重烘，缺省为 passive 默认姿态）"
                 ),
             },
         },
@@ -608,7 +716,11 @@ def _build_report(
             ),
         },
         "resource_hashes": _resource_hashes(
-            profile, robot_config, runtime_config, repo_root
+            profile,
+            robot_config,
+            runtime_config,
+            repo_root,
+            racket_config=racket_config,
         ),
         "official_source": {
             "repo_url": "https://github.com/unitreerobotics/unitree_ros",
@@ -632,6 +744,7 @@ def run_inspection(
     *,
     render: bool = False,
     view: bool = False,
+    racket_config: Path | None = None,
 ) -> tuple[dict[str, Any], Path, RobotModelBundle]:
     """执行无头检查并写出 JSON 报告（渲染/viewer 由 main 单独编排）。
 
@@ -641,6 +754,8 @@ def run_inspection(
         output_dir: 输出目录（不存在则创建）。
         render: 是否请求三视图（仅记录进 invocation，渲染在 JSON 写出后）。
         view: 是否请求交互 viewer（同上）。
+        racket_config: 可选球拍档案 YAML（传入时球拍几何/质量/惯量/安装
+            全部来自 RacketProfile；None 保持旧 API 兼容语义）。
 
     Returns:
         (报告字典, JSON 路径, 同源 bundle)。
@@ -651,7 +766,12 @@ def run_inspection(
     """
     profile = load_robot_profile(Path(robot_config))
     parameters = load_runtime_parameters(Path(runtime_config), profile)
-    bundle = load_robot_model(profile, parameters)
+    racket_profile = (
+        load_racket_profile(Path(racket_config))
+        if racket_config is not None
+        else None
+    )
+    bundle = load_robot_model(profile, parameters, racket_profile=racket_profile)
     side = parse_side(profile)
 
     report = _build_report(
@@ -661,6 +781,8 @@ def run_inspection(
         Path(runtime_config),
         render_requested=render,
         view_requested=view,
+        racket_config=Path(racket_config) if racket_config is not None else None,
+        racket_profile=racket_profile,
     )
     output_dir.mkdir(parents=True, exist_ok=True)
     json_path = output_dir / f"inspect_r1d_{side}.json"
@@ -775,6 +897,16 @@ def _build_parser() -> argparse.ArgumentParser:
         help="输出目录（JSON 报告与三视图 PNG，必传）",
     )
     parser.add_argument(
+        "--racket-config",
+        type=Path,
+        default=None,
+        help=(
+            "可选球拍档案 YAML（configs/rackets/*.yaml，如 "
+            "blade100_v9_reference.yaml）；提供时球拍几何/质量/惯量/安装/"
+            "连接件全部来自档案，报告含 racket 节；缺省保持旧 API 兼容语义"
+        ),
+    )
+    parser.add_argument(
         "--render",
         action="store_true",
         help="渲染 front/side/oblique 三视图 PNG（MuJoCo offscreen）",
@@ -810,6 +942,7 @@ def main(argv: list[str] | None = None) -> int:
             args.output_dir,
             render=args.render,
             view=args.view,
+            racket_config=args.racket_config,
         )
     except (OSError, ValueError, yaml.YAMLError) as exc:
         logger.error("配置错误（退出码 2）: %s", exc)
@@ -823,6 +956,16 @@ def main(argv: list[str] | None = None) -> int:
     )
     print(f"TCP({report['tcp_pose']['site']}) 位置: {report['tcp_pose']['position_xyz_m']}")
     print(f"冻结: 升降 q_L={report['frozen_components']['lift']['q_L_m']} m, 腰=0, 头=0")
+    racket = report["racket"]
+    if racket["mode"] == "profile":
+        print(
+            f"球拍档案: {racket['racket_id']} "
+            f"(总质量 {racket['total_mass']} kg, "
+            f"tcp_local={racket['tcp_local_position']}, "
+            f"sha256={str(racket['config_sha256'])[:12]}…)"
+        )
+    else:
+        print("球拍: 旧 API 兼容模式（未传 --racket-config）")
     print(f"数据冲突: {len(report['data_conflicts']['items'])} 项（审计 §5 引用）")
     print(f"JSON 报告: {json_path}")
 

@@ -6,8 +6,9 @@
   r1d_assets 资产），生成完整可加载的 r1d_model_{side}.xml：
   ground + ``r1d_mount``（固定基座，pos/quat 来自 scene.base_*）→
   环境链（含已 bake 的 q_L，0 关节）→ 选定侧裸臂（r1d_base 锚在
-  waist_yaw_link）→ ``r1d_flange`` 上挂球拍（racket body/geom/site=
-  ``racket_center``，单一实心圆盘显式惯量）+ 简化 torso box +
+  waist_yaw_link）→ ``r1d_flange`` 上挂球拍（模板默认 T0 兼容圆盘拍；
+  传 ``racket_profile`` 时按档案重建 racket body/geom/site，site=
+  ``racket_center``）+ 简化 torso box +
   7 个 unit-gear motor（名称与 profile.actuator_names 一一对应）。
 - ``load_robot_model``：读取磁盘模板 → 仅在副本上应用本次参数（经
   ``load_mujoco_model`` 的 xml_text 通道，不改磁盘模板）→ 绑定名称 →
@@ -25,9 +26,17 @@
 - motor 仅供名称绑定（gear=1）：R1D URDF 的 effort/velocity 声明值
   未经实机验证（N0-9），不配置 ctrlrange/forcerange 为安全限值。
 - 官方臂/环境层级与惯量来自 2.5a 片段逐字保留（含右腕俯仰上界
-  +0.5326 的官方不对称）；临时球拍/torso 属性只写入本工厂创建的元素，
-  绝不回写官方臂惯量。r1d_flange 位置从臂片段按名读取，不重复抄数值。
-- 升降高度只由 r1d_env 的 q_L bake 表达，本工厂不提供第二套升降偏移。
+  +0.5326 的官方不对称）；球拍物理（几何/质量/惯量/安装/连接件）唯一
+  来源是 ``RacketProfile``，本工厂只把装配事实写入模型；旧 API 模式
+  （未传档案且 scene 带 racket_* 字段）保留 T0 圆盘拍兼容语义。
+  r1d_flange 位置从臂片段按名读取，不重复抄数值。
+- 升降位移双轨：r1d_env 片段恒定 bake 默认 q_L=0.4225（模板磁盘字节
+  不变）；运行时按 ``scene.lift_displacement`` 在模板副本内存中重烘两级
+  lift body 的 z。底座落地高度（0.155 m，由轮/脚轮几何推导）与升降位移
+  来自同一物理配置，工厂校验二者不矛盾（不允许悬浮/穿地）。
+- 头部两节（head_pitch_Link/head_yaw_Link）与对侧被动臂都是无关节静态
+  链，只提供完整外观；头部网格声明随 r1d_env 片段自带 ``<asset>`` 合并
+  进模板唯一 ``<asset>`` 节（r1d_assets.xml 不重复声明），避免重复 mesh。
 - mesh 路径先按片段父目录解析为绝对路径，再重写为相对 output_path.parent
   的路径；跨盘符等无法相对化时把 mesh 文件重定位复制到导出目录
   meshes/ 子目录并改写为相对引用（绝对路径会被 MuJoCo C 层拒绝打开）。
@@ -35,12 +44,16 @@
 
 from __future__ import annotations
 
+import base64
 import copy
+import hashlib
 import logging
 import math
 import os
+import re
 import shutil
 import xml.etree.ElementTree as ET
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Callable, Literal
@@ -48,7 +61,13 @@ from typing import Any, Callable, Literal
 import mujoco
 import numpy as np
 
+from src.robot.court_geometry import (
+    COURT_LINE_Z_M,
+    COURT_PROFILES,
+    build_court_lines,
+)
 from src.robot.model_binding import ModelBinding, bind_robot_model
+from src.robot.racket_profile import RacketProfile
 from src.robot.robot_profile import RobotProfile
 from src.robot.runtime_parameters import (
     RobotRuntimeParameters,
@@ -79,9 +98,9 @@ _TORSO_GEOM = "torso_box"
 _TCP_SITE = "racket_center"
 _GROUND_GEOM = "ground"
 
-# RM65 球场资产的逐字复制（用户要求“场地直接照搬 RM65”）
+# 旧 RM65 场地口径（R6）：地面材质/纹理/尺寸与 10 条白线逐字复制自
+# src/robot/rm65_model.xml；不使用用户尝试中的标准 ITF 球场/球网/四灯。
 _COURT_TEXTURE = "court_grid"
-_COURT_MATERIAL = "court_floor"
 _COURT_TEXTURE_ATTRS = {
     "name": _COURT_TEXTURE,
     "type": "2d",
@@ -93,6 +112,7 @@ _COURT_TEXTURE_ATTRS = {
     "mark": "edge",
     "markrgb": "0.9 0.95 0.85",
 }
+_COURT_MATERIAL = "court_floor"
 _COURT_MATERIAL_ATTRS = {
     "name": _COURT_MATERIAL,
     "texture": _COURT_TEXTURE,
@@ -100,33 +120,67 @@ _COURT_MATERIAL_ATTRS = {
     "reflectance": "0.15",
     "rgba": "0.28 0.42 0.22 1",
 }
-# RM65 球场白线（视觉装饰，不参与碰撞）
-_COURT_LINE_GEOMS: tuple[dict[str, str], ...] = (
-    {"size": "12 0.05 0.001"},
-    {"size": "0.05 12 0.001"},
-    {"size": "0.05 6 0.001", "pos": "-6 0 0.001"},
-    {"size": "0.05 6 0.001", "pos": "6 0 0.001"},
-    {"size": "0.05 5 0.001", "pos": "-3 0 0.001"},
-    {"size": "0.05 5 0.001", "pos": "3 0 0.001"},
-    {"size": "3 0.05 0.001", "pos": "-4.5 0 0.001"},
-    {"size": "3 0.05 0.001", "pos": "4.5 0 0.001"},
-    {"size": "0.05 12 0.001", "pos": "0 -5 0.001"},
-    {"size": "0.05 12 0.001", "pos": "0 5 0.001"},
+_COURT_GROUND_SIZE = "25 25 0.1"
+_COURT_GROUND_RGBA = "0.28 0.42 0.22 1"
+# 球场白线几何唯一定义在 ``src/robot/court_geometry.py``（V01/I2）：
+# - legacy_v1：旧 RM65 的 10 条白线（0.10 m 线宽，逐字保留）；
+# - itf_2026_v1：ITF 2026 第 1 条的 12 条标准线（0.05 m 线宽）。
+# 工厂只按 ``parameters.scene.court_profile`` 选择，不在此重复抄几何数值。
+# 旧场地光源（pre-attempt 单灯，R6 要求删除用户尝试新增的四灯）
+_LIGHT_ATTRS = {"pos": "0 0 8", "dir": "0 0 -1", "diffuse": "1.2 1.25 1.3"}
+
+# 落地/升降物理契约（T2 A2）：轮半径 0.0625、轮心局部 z=-0.0925，故底座
+# 落地高度 = 0.0625 - (-0.0925) = 0.155 m；双级升降单级 bake 位移默认
+# 0.4225 m（r1d_env.xml 已按此烘焙），单级行程 [0, 0.425]。
+_BASE_LANDING_HEIGHT_M = 0.155
+_ENV_BAKED_LIFT_M = 0.4225
+_LIFT_STAGE_RANGE_M = (0.0, 0.425)
+_LIFT_STAGE_BODIES: tuple[str, ...] = ("lift_stage1_link", "lift_stage2_link")
+
+# 落地视觉：基座真实落地高度 0.155 m（轮/脚轮触地），原先用于把基座
+# 托到 z=1.0 的立柱已删除；这里补轮/脚轮的低成本图元，避免底盘悬空 35 mm。
+_WHEEL_RADIUS = 0.0625
+_WHEEL_HALF_WIDTH = 0.035
+_WHEEL_X = -0.037284
+_WHEEL_Y = 0.1968
+_WHEEL_Z = -0.0925
+_CASTER_RADIUS = 0.03245
+_CASTER_Z = -0.1225
+_CASTER_XY = (
+    (0.17272, 0.13024),
+    (0.17272, -0.13024),
+    (-0.24953, 0.1495),
+    (-0.24953, -0.1495),
 )
 
-# 落地支撑：固定基座在世界 z=base_z，立柱从地面托到基座底面
-_PEDESTAL_BODY = "r1d_pedestal"
-_PEDESTAL_GEOM = "r1d_pedestal_column"
-_PEDESTAL_BASE_GEOM = "r1d_pedestal_base"
-_PEDESTAL_HALF_WIDTH = 0.16
-_PEDESTAL_BASE_HALF = 0.26
-_PEDESTAL_BASE_HEIGHT = 0.04
-
-# 球拍视觉：保留 racket_face 作为唯一碰撞几何；另加不参与碰撞的
-# 拍面椭球与拍柄，避免“悬空黄盘”的观感（RM65 为拍柄+椭球拍面）。
+# 球拍视觉：保留 racket_face 作为唯一碰撞几何；另加拍面椭球、拍框、
+# 拍喉与拍柄，按成人拍“柄沿 Z、拍面法向 X”的 RM65 拓扑生成。
 _RACKET_FACE_VISUAL_GEOM = "racket_face_visual"
 _RACKET_HANDLE_GEOM = "racket_handle"
-_RACKET_HANDLE_RADIUS = 0.012
+_RACKET_THROAT_GEOMS = ("racket_throat_left", "racket_throat_right")
+_RACKET_FRAME_GEOMS = (
+    "racket_frame_top",
+    "racket_frame_bottom",
+    "racket_frame_left",
+    "racket_frame_right",
+)
+_RACKET_HANDLE_RADIUS = 0.014
+_RACKET_HANDLE_LENGTH = 0.19
+_RACKET_FACE_HALF_LENGTH = 0.165
+_RACKET_FACE_HALF_WIDTH = 0.12
+_RACKET_FACE_HALF_THICKNESS = 0.011
+_RACKET_THROAT_RADIUS = 0.009
+_RACKET_FRAME_RADIUS = 0.007
+# RacketProfile 装配路径的 geom 命名与配色（面/框/柄标签必须互不相同，
+# 供 tennis_scene 按名开启碰撞与测试独立核对）
+_RACKET_CONNECTOR_GEOM = "racket_connector"
+_RACKET_THROAT_GEOM_FORMAT = "racket_throat_{index}"
+_RACKET_FRAME_GEOM_FORMAT = "racket_frame_{index}"
+_RACKET_FACE_VISUAL_RGBA = "0.92 0.92 0.84 0.30"
+_RACKET_HANDLE_RGBA = "0.16 0.17 0.20 1"
+_RACKET_THROAT_RGBA = "0.10 0.11 0.13 1"
+_RACKET_FRAME_RGBA = "0.08 0.09 0.11 1"
+_RACKET_CONNECTOR_RGBA = "0.30 0.31 0.34 1"
 # 被动臂的静态“待机姿态”（度）：不引入关节，只把角度烘进 body quat，
 # 避免对侧臂零位时折进躯干、在查看器里几乎看不见。
 _PASSIVE_ARM_POSE_DEG = {
@@ -151,6 +205,46 @@ _ENV_CHAIN_BODIES: tuple[str, ...] = (
 
 # 跨盘符导出时 mesh 资源的重定位子目录（相对 output_path.parent）
 _EXPORT_MESH_DIRNAME = "meshes"
+
+# ---- 装配依赖闭包（F08）-------------------------------------------------
+# 清单版本：产物快照据此区分"记录了闭包"与"旧 artifact 未记录"。
+DEPENDENCY_MANIFEST_VERSION = 1
+
+# 依赖清单中的角色（写进快照条目，回放按角色决定物化方式）
+DEPENDENCY_ROLE_MODEL = "model"
+DEPENDENCY_ROLE_INCLUDE = "include"
+DEPENDENCY_ROLE_ARM_FRAGMENT = "arm_fragment"
+DEPENDENCY_ROLE_MESH = "mesh"
+DEPENDENCY_ROLE_TEXTURE = "texture"
+
+# 需要把内容写进快照的 XML 片段角色（网格/纹理体积大，只记哈希）
+DEPENDENCY_XML_ROLES = frozenset(
+    {
+        DEPENDENCY_ROLE_MODEL,
+        DEPENDENCY_ROLE_INCLUDE,
+        DEPENDENCY_ROLE_ARM_FRAGMENT,
+    }
+)
+
+# 资产目录属性：``<compiler meshdir>`` 管 mesh，``<compiler texturedir>`` 管 texture
+_ASSET_DIR_ATTRS: dict[str, str] = {
+    DEPENDENCY_ROLE_MESH: "meshdir",
+    DEPENDENCY_ROLE_TEXTURE: "texturedir",
+}
+
+# MJCF 依赖解析用的正则（与 src/sim/episode_artifacts.py 的资产扫描同源：
+# 只按真实解析路径收集，不做无边界递归扫描）。用一个"多标签"正则是为了
+# 拿到**真正的文档顺序**——compiler 的全局覆盖语义依赖这个顺序。
+_MJCF_TAG_PATTERN = re.compile(
+    r"<(?P<tag>compiler|include|mesh|texture)\b(?P<attrs>[^>]*?)/?>",
+    re.IGNORECASE,
+)
+
+# XML 注释（MuJoCo 解析器会整体丢弃；正则扫描前必须先掩码，见 R03）
+_XML_COMMENT_PATTERN = re.compile(r"<!--.*?-->", re.DOTALL)
+
+# include 展开的最大深度（防止环状 include 无界递归）
+_MAX_INCLUDE_DEPTH = 8
 
 
 def _side_chain_bodies(side: str) -> tuple[str, ...]:
@@ -228,7 +322,11 @@ def _passive_joint_angle(joint_name: str, side: str) -> float:
     return 0.0
 
 
-def _static_arm_copy(root_body: ET.Element, side: str) -> ET.Element:
+def _static_arm_copy(
+    root_body: ET.Element,
+    side: str,
+    pose_overrides: dict[str, float] | None = None,
+) -> ET.Element:
     """把对侧裸臂复制成无关节静态视觉链。
 
     仅用于“双臂一起渲染、只控制右臂”：先把待机姿态角烘进各级 body 的
@@ -239,19 +337,54 @@ def _static_arm_copy(root_body: ET.Element, side: str) -> ET.Element:
     Args:
         root_body: 对侧 ``r1d_arm_{side}.xml`` 的根 body 元素。
         side: 该被动臂的侧别（用于唯一命名与诊断）。
+        pose_overrides: 可选的固定关节姿态覆盖 ``{关节名: 角度 rad}``；
+            键必须出现在该臂片段中（否则报错），未覆盖的关节沿用
+            默认待机姿态。
 
     Returns:
         可直接挂到 ``waist_yaw_link`` 下的静态 body 元素。
+
+    Raises:
+        ValueError: 覆盖字典含片段中不存在的关节名。
     """
+    overrides = dict(pose_overrides or {})
+    fragment_joint_names = {
+        joint.attrib.get("name", "")
+        for body in root_body.iter("body")
+        for joint in body
+        if joint.tag == "joint"
+    }
+    unknown = sorted(set(overrides) - fragment_joint_names)
+    if unknown:
+        raise ValueError(
+            f"固定关节姿态含被动臂片段中不存在的关节 {unknown}"
+            f"（side={side}，片段合法关节 {sorted(fragment_joint_names)}）"
+        )
     passive = copy.deepcopy(root_body)
     passive.set("name", f"{_ARM_ROOT_BODY}_{side}_passive")
-    # 先把每个关节的待机角烘进 body quat；关节轴在 body 局部系。
+    # 先把每个关节的待机角（或显式固定姿态）烘进 body quat；关节轴在 body 局部系。
     for body in passive.iter("body"):
         joint = next((child for child in body if child.tag == "joint"), None)
         if joint is None:
             continue
+        joint_name = joint.attrib.get("name", "")
         axis = joint.attrib.get("axis", "0 0 1").split()
-        angle = _passive_joint_angle(joint.attrib.get("name", ""), side)
+        if joint_name in overrides:
+            angle = float(overrides[joint_name])
+            range_attr = joint.attrib.get("range")
+            if range_attr is not None:
+                lower_deg, upper_deg = (
+                    float(token) for token in range_attr.split()[:2]
+                )
+                lower, upper = math.radians(lower_deg), math.radians(upper_deg)
+                if angle < lower - 1e-9 or angle > upper + 1e-9:
+                    raise ValueError(
+                        f"固定关节姿态 {joint_name}={angle} rad 超出关节限位 "
+                        f"[{lower}, {upper}] rad（片段角度制，"
+                        f"range={range_attr!r}）"
+                    )
+        else:
+            angle = _passive_joint_angle(joint_name, side)
         old_quat = body.attrib.get("quat", "1 0 0 0").split()
         new_quat = _quat_mul(old_quat, _axis_angle_quat(axis, angle))
         body.set("quat", " ".join(f"{value:.12g}" for value in new_quat))
@@ -274,6 +407,41 @@ def _find_geom(root: ET.Element, name: str) -> ET.Element:
         if geom.attrib.get("name") == name:
             return geom
     raise ValueError(f"模板中缺少 geom {name}（模板漂移）")
+
+
+def _add_landing_visuals(root: ET.Element) -> None:
+    """在 base_link 下补轮/脚轮图元（纯视觉，不参与碰撞）。
+
+    基座真实落地高度按轮/脚轮触地取 0.155 m；底盘网格本身最低点只到
+    -0.120 m，若没有轮子视觉会看起来仍悬空 35 mm。这里用两个驱动轮
+    圆柱 + 四个脚轮球体近似，几何位置逐值取自 URDF 的轮/脚轮 origin。
+    """
+    base = _find_body(root, "base_link")
+    for label, y in (("left", _WHEEL_Y), ("right", -_WHEEL_Y)):
+        ET.SubElement(
+            base,
+            "geom",
+            name=f"r1d_wheel_{label}",
+            type="cylinder",
+            size=f"{_WHEEL_RADIUS} {_WHEEL_HALF_WIDTH}",
+            pos=f"{_WHEEL_X} {y} {_WHEEL_Z}",
+            quat="0.7071067811865476 0.7071067811865476 0 0",
+            rgba="0.08 0.09 0.11 1",
+            contype="0",
+            conaffinity="0",
+        )
+    for index, (x, y) in enumerate(_CASTER_XY):
+        ET.SubElement(
+            base,
+            "geom",
+            name=f"r1d_caster_{index}",
+            type="sphere",
+            size=f"{_CASTER_RADIUS}",
+            pos=f"{x} {y} {_CASTER_Z}",
+            rgba="0.12 0.13 0.16 1",
+            contype="0",
+            conaffinity="0",
+        )
 
 
 def _connected_excludes(side: str) -> tuple[tuple[str, str], ...]:
@@ -311,6 +479,38 @@ def _connected_excludes(side: str) -> tuple[tuple[str, str], ...]:
 
 
 @dataclass(frozen=True)
+class RacketAssembly:
+    """球拍装配事实（RacketProfile → 模型 body 后的独立核对记录）。
+
+    由工厂在装配时按档案推导，供 inspect 报告与上层（T4/T5）消费；字段
+    全部为只读 float64 数组，不随模型对象生命周期变化。
+
+    Attributes:
+        racket_id: 档案标识（如 ``rm65_legacy`` / ``blade100_v9_reference``）。
+        source_path: 档案文件路径。
+        total_mass: 拍体总质量（kg，= 球拍质量 + 连接件质量，连接件只计一次）。
+        com: 拍体质心在拍体局部系中的位置（m）。
+        inertia_diagonal: 绕质心的主惯量（kg·m²，升序）。
+        face_center: 拍面碰撞中心（拍体局部系，m）。
+        face_semi_axes: 拍面碰撞椭球半轴（m，第一项为法向半厚）。
+        mount_position: 法兰系中柄底位置（m）。
+        mount_wxyz: 拍体局部系在法兰系中的姿态（wxyz 单位四元数）。
+        connector_mass: 连接件质量（kg；无连接件为 0）。
+    """
+
+    racket_id: str
+    source_path: Path
+    total_mass: float
+    com: np.ndarray
+    inertia_diagonal: np.ndarray
+    face_center: np.ndarray
+    face_semi_axes: np.ndarray
+    mount_position: np.ndarray
+    mount_wxyz: np.ndarray
+    connector_mass: float
+
+
+@dataclass(frozen=True)
 class RobotModelBundle:
     """同源组装结果 — 描述、参数、模型与绑定出自同一次配置。
 
@@ -319,12 +519,20 @@ class RobotModelBundle:
         parameters: 运行参数；q_lower/q_upper 已从模型 jnt_range 填充。
         model: 按 parameters 组装并加载的 MuJoCo 模型（每次调用独立实例）。
         binding: model 的名称 → 地址绑定结果。
+        racket: 球拍档案装配事实；旧 API（未提供档案）为 None。
+        dependency_manifest: 本次装配**实际读取**的文件闭包（模型 XML、
+            ``<include>`` 片段、对侧臂片段、mesh/texture）。每条含
+            ``role/relative_path/source/sha256/size``，XML 片段另含
+            ``content_base64``；由 :func:`collect_model_dependencies` 生成，
+            供产物快照完整记录装配依赖（F08）。空元组表示未记录。
     """
 
     profile: RobotProfile
     parameters: RobotRuntimeParameters
     model: mujoco.MjModel
     binding: ModelBinding
+    racket: RacketAssembly | None = None
+    dependency_manifest: tuple[dict[str, Any], ...] = ()
 
 
 def write_r1d_model_template(
@@ -379,7 +587,10 @@ def write_r1d_model_template(
 
 
 def load_robot_model(
-    profile: RobotProfile, parameters: RobotRuntimeParameters
+    profile: RobotProfile,
+    parameters: RobotRuntimeParameters,
+    *,
+    racket_profile: RacketProfile | None = None,
 ) -> RobotModelBundle:
     """组装并加载 R1D 单侧主动臂 + 对侧静态渲染臂模型。
 
@@ -394,6 +605,10 @@ def load_robot_model(
         parameters: 运行参数（须含 scene；q_lower/q_upper 通常为 None，
             由模型 jnt_range 回填；若显式提供则必须与模型一致，不一致
             即拒绝，不接受"收紧/放宽"覆盖）。
+        racket_profile: 可选球拍档案（``RacketProfile``）。提供时球拍几何/
+            质量/惯量/安装变换全部来自档案，且 ``parameters.scene`` 不得
+            再给 legacy ``racket_*`` 字段；省略（None）时保持旧 API 语义：
+            球拍几何由 scene 的 legacy 字段或模板默认值决定。
 
     Returns:
         同源组装结果；parameters 为填充关节限位后的新对象（输入不被改写）。
@@ -401,7 +616,8 @@ def load_robot_model(
     Raises:
         ValueError: robot_id 不支持、scene 缺失、校验失败、模板结构漂移、
             模型维数与描述不符、初态超出模型限位，或显式 q_lower/q_upper
-            与模型 jnt_range 不一致。
+            与模型 jnt_range 不一致；档案模式与 scene legacy 球拍字段同时
+            出现也在此拒绝（球拍物理唯一来源是档案）。
     """
     if profile.robot_id != SUPPORTED_ROBOT_ID:
         raise ValueError(
@@ -414,14 +630,18 @@ def load_robot_model(
     validate_runtime_parameters(parameters, profile, purpose="kinematics")
 
     bundle = _assemble_bound_model(
-        profile, parameters, validate_shape=_validate_model_shape
+        profile,
+        parameters,
+        validate_shape=_validate_model_shape,
+        racket_profile=racket_profile,
     )
     logger.info(
-        "R1D 模型组装完成: nq=%d nv=%d nu=%d TCP site=%s（参数来源: %s）",
+        "R1D 模型组装完成: nq=%d nv=%d nu=%d TCP site=%s 球拍=%s（参数来源: %s）",
         bundle.model.nq,
         bundle.model.nv,
         bundle.model.nu,
         profile.tcp_site_name,
+        bundle.racket.racket_id if bundle.racket is not None else "legacy",
         bundle.parameters.source,
     )
     return bundle
@@ -433,6 +653,7 @@ def _assemble_bound_model(
     *,
     validate_shape: Callable[[mujoco.MjModel, RobotProfile], None],
     mutate: Callable[[ET.Element], None] | None = None,
+    racket_profile: RacketProfile | None = None,
 ) -> RobotModelBundle:
     """共享组装管线（load_robot_model 与 3.2 带球场景 build_tennis_scene 共用）。
 
@@ -448,6 +669,7 @@ def _assemble_bound_model(
             完整仿真预检由 3.1 validate_simulation_inputs 负责）。
         validate_shape: 模型形状校验回调（裸/带球维数契约不同）。
         mutate: 模板副本的追加组装回调（元素级修改，须保持可编译）。
+        racket_profile: 可选球拍档案；None 保持旧 API 的模板/legacy 语义。
 
     Returns:
         同源组装结果；parameters 为填充关节限位后的新对象（输入不改写）。
@@ -460,7 +682,29 @@ def _assemble_bound_model(
 
     # 仅在模板副本上应用参数：磁盘模板只读，数值经 xml_text 编译
     template_root = ET.fromstring(profile.model_path.read_bytes())
-    _apply_scene_parameters(template_root, parameters)
+    # 白线口径来自 scene.court_profile（V01/I2）：磁盘模板固定 legacy，
+    # 运行时按需在内存副本替换为 ITF 标准 12 条（纯视觉，不参与碰撞）。
+    _apply_court_profile(template_root, parameters)
+    # 侧别只在需要重烘对侧固定姿态时推导：合成夹具/旧调用不传 fixed poses，
+    # 仍须能完成装配（不因关节命名不是 left_/right_ 而拒绝）
+    scene = parameters.scene
+    side = (
+        _model_side(profile)
+        if scene is not None and scene.fixed_joint_poses
+        else None
+    )
+    # F08：装配过程中真实读取的兄弟片段（仅 fixed_joint_poses 非空的分支
+    # 会读取对侧臂片段），由 _apply_fixed_joint_poses 在读到文件时追加。
+    arm_fragments: list[Path] = []
+    racket = _apply_scene_parameters(
+        template_root,
+        parameters,
+        side=side,
+        profile=profile,
+        racket_profile=racket_profile,
+        template_mode=False,
+        fragments=arm_fragments,
+    )
     if mutate is not None:
         mutate(template_root)
     xml_text = ET.tostring(template_root, encoding="unicode")
@@ -473,8 +717,18 @@ def _assemble_bound_model(
     filled = _populate_joint_limits(parameters, model, binding)
     # 填充限位后复核：init_q 必须落在模型 jnt_range 界内
     validate_runtime_parameters(filled, profile, purpose="kinematics")
+    # F08：记录本次装配实际读取的文件闭包（含按真实分支读到的对侧臂片段），
+    # 供产物快照完整保存装配依赖；不改变模型/绑定/参数任何既有语义。
+    dependency_manifest = collect_model_dependencies(
+        profile, filled, arm_fragments=arm_fragments
+    )
     return RobotModelBundle(
-        profile=profile, parameters=filled, model=model, binding=binding
+        profile=profile,
+        parameters=filled,
+        model=model,
+        binding=binding,
+        racket=racket,
+        dependency_manifest=dependency_manifest,
     )
 
 
@@ -558,6 +812,115 @@ def _read_arm_chain(root_body: ET.Element, side: str, arm_path: Path) -> tuple[s
     return tuple(joint_names)
 
 
+def _court_profile_of(parameters: RobotRuntimeParameters) -> str:
+    """返回场景白线 profile（无 scene 的旧风格按 legacy_v1，保持旧渲染）。
+
+    Args:
+        parameters: R1D 运行参数（scene 可为 None，如历史 RM65 风格输入）。
+
+    Returns:
+        ``legacy_v1`` 或 ``itf_2026_v1``；未知值立即抛 ValueError。
+    """
+    scene = parameters.scene
+    profile = "legacy_v1" if scene is None else str(scene.court_profile)
+    if profile not in COURT_PROFILES:
+        raise ValueError(
+            f"未知球场 profile {profile!r}（合法: {COURT_PROFILES}）"
+        )
+    return profile
+
+
+def _neutralize_court_ground(root: ET.Element) -> None:
+    """把旧 RM65 的棋盘/白色网格纹理地面改为中性纯色（ITF profile 用）。
+
+    旧 ``court_grid`` 纹理带 ``mark="edge"``，在俯视图上会形成球场外的
+    浅色网格伪线。标准 profile 只保留中性绿色地面，因此移除棋盘边缘
+    标记与地面材质的纹理引用；白线本身另由 ``court_geometry`` 生成。
+    只改视觉资产，不改任何碰撞/物理属性。
+    """
+    ground_rgb = " ".join(_COURT_GROUND_RGBA.split()[:3])
+    for texture in root.findall("asset/texture"):
+        if texture.get("name") != _COURT_TEXTURE:
+            continue
+        texture.set("rgb1", ground_rgb)
+        texture.set("rgb2", ground_rgb)
+        texture.attrib.pop("mark", None)
+        texture.attrib.pop("markrgb", None)
+    for material in root.findall("asset/material"):
+        if material.get("name") != _COURT_MATERIAL:
+            continue
+        material.attrib.pop("texture", None)
+        material.attrib.pop("texrepeat", None)
+
+
+def _is_court_line_geom(element: ET.Element) -> bool:
+    """判断 worldbody 下的 geom 是否为球场白线（视觉 plane，贴地、无材质）。"""
+    if element.tag != "geom" or element.get("type") != "plane":
+        return False
+    if element.get("material"):
+        return False
+    size = element.get("size", "").split()
+    if len(size) != 3 or size[0] == "25":
+        return False
+    try:
+        z = float(element.get("pos", "0 0 0").split()[2])
+    except (IndexError, ValueError):
+        return False
+    return (
+        abs(z - COURT_LINE_Z_M) <= 1e-12
+        and element.get("rgba", "1 1 1 1") == "1 1 1 1"
+        and element.get("contype", "0") == "0"
+        and element.get("conaffinity", "0") == "0"
+    )
+
+
+def _apply_court_profile(root: ET.Element, parameters: RobotRuntimeParameters) -> None:
+    """按 ``scene.court_profile`` 在模板副本上重建白线（磁盘模板不变）。
+
+    模板磁盘字节固定以 legacy 10 条白线生成；若运行时要求 ITF 标准
+    12 条，则在同一位置替换白线 geom（全部 contype=conaffinity=0，
+    纯视觉）。legacy 目标且模板已是旧 10 条时直接返回，保持零改动。
+
+    Raises:
+        ValueError: 模板缺少 worldbody 或白线替换后仍不符合目标 profile。
+    """
+    profile = _court_profile_of(parameters)
+    if profile == "itf_2026_v1":
+        # 标准 profile 同时要求中性地面（旧棋盘纹理的浅色边缘会被误读为线）。
+        _neutralize_court_ground(root)
+    worldbody = root.find("worldbody")
+    if worldbody is None:
+        raise ValueError("R1D 模板缺少 <worldbody>，无法按 court_profile 装配白线")
+    victims = [el for el in list(worldbody) if _is_court_line_geom(el)]
+    already_legacy = bool(victims) and all(
+        el.get("name") is None for el in victims
+    ) and len(victims) == 10
+    already_itf = bool(victims) and all(
+        el.get("name") is not None for el in victims
+    ) and len(victims) == 12
+    if (profile == "legacy_v1" and already_legacy) or (
+        profile == "itf_2026_v1" and already_itf
+    ):
+        return
+    anchor = list(worldbody).index(victims[0]) if victims else len(worldbody)
+    for element in victims:
+        worldbody.remove(element)
+    for offset, line in enumerate(build_court_lines(profile)):
+        attrs = line.geom_attributes()
+        if profile == "legacy_v1":
+            attrs = {
+                "type": "plane",
+                "size": attrs["size"],
+                "rgba": attrs["rgba"],
+                "contype": "0",
+                "conaffinity": "0",
+                "pos": attrs["pos"],
+            }
+        element = ET.Element("geom", attrs)
+        element.tail = "\n    "
+        worldbody.insert(anchor + offset, element)
+
+
 def _build_template_element(
     parameters: RobotRuntimeParameters,
     *,
@@ -610,9 +973,29 @@ def _build_template_element(
     asset_src = next((el for el in assets_root if el.tag == "asset"), None)
     if asset_src is None or not asset_src.findall("mesh"):
         raise ValueError(f"资产片段缺少含 mesh 的 <asset>（片段: {assets_path}）")
-    # 球场纹理/材质：逐字照搬 RM65（用户要求直接复用其场地配置）
+    # 旧 RM65 场地材质/纹理（R6）：地面为 court_grid 棋盘纹理 + court_floor 材质
     ET.SubElement(asset_src, "texture", _COURT_TEXTURE_ATTRS)
     ET.SubElement(asset_src, "material", _COURT_MATERIAL_ATTRS)
+
+    # 环境片段可自带 <asset>（头部网格属于机体，但 r1d_assets.xml 不在 T2
+    # 白名单内；因此头部 mesh 声明随 r1d_env.xml 交付，这里合并进模板的唯一
+    # <asset> 节。mesh 名必须全局唯一，重复即视为模板漂移）。
+    env_asset = next((el for el in env_root if el.tag == "asset"), None)
+    env_asset_children: list[ET.Element] = []
+    if env_asset is not None:
+        existing_mesh_names = {
+            mesh.attrib.get("name") for mesh in asset_src.findall("mesh")
+        }
+        for child in env_asset:
+            if child.tag == "mesh":
+                name = child.attrib.get("name")
+                if name in existing_mesh_names:
+                    raise ValueError(
+                        f"环境片段自带 mesh '{name}' 与资产片段重名"
+                        f"（片段: {env_path}）"
+                    )
+                existing_mesh_names.add(name)
+            env_asset_children.append(child)
 
     # 关节名按片段层级逐级读取（motor 命名不硬编码，防与片段漂移）
     joint_names = _read_arm_chain(arm_root_body, side, arm_path)
@@ -624,69 +1007,56 @@ def _build_template_element(
     ET.SubElement(
         root, "option", timestep="0.005", gravity="0 0 -9.81", integrator="implicitfast"
     )
-    root.append(copy.deepcopy(asset_src))
+    asset_el = copy.deepcopy(asset_src)
+    for child in env_asset_children:
+        asset_el.append(copy.deepcopy(child))
+    root.append(asset_el)
 
     contact = ET.SubElement(root, "contact")
     for body1, body2 in _connected_excludes(side):
         ET.SubElement(contact, "exclude", body1=body1, body2=body2)
 
     worldbody = ET.SubElement(root, "worldbody")
-    ET.SubElement(
-        worldbody, "light", pos="0 0 8", dir="0 0 -1", diffuse="1.2 1.25 1.3"
-    )
+    # 旧场地光源（pre-attempt 单灯，R6 要求删除用户尝试新增的四灯）
+    ET.SubElement(worldbody, "light", _LIGHT_ATTRS)
+    # 地面：RM65 逐字口径（court_grid 棋盘纹理 + court_floor 材质，25×25 m）
     ET.SubElement(
         worldbody,
         "geom",
         name=_GROUND_GEOM,
         type="plane",
-        size="25 25 0.1",
-        rgba="0.28 0.42 0.22 1",
+        size=_COURT_GROUND_SIZE,
+        rgba=_COURT_GROUND_RGBA,
         material=_COURT_MATERIAL,
         contype="0",
         conaffinity="0",
     )
-    # 白线：与 RM65 逐条一致，纯视觉、不参与碰撞
-    for line in _COURT_LINE_GEOMS:
-        attrs = {
-            "type": "plane",
-            "size": line["size"],
-            "rgba": "1 1 1 1",
-            "contype": "0",
-            "conaffinity": "0",
-        }
-        if "pos" in line:
-            attrs["pos"] = line["pos"]
+    # 球场白线：几何来自 court_geometry，profile 由 runtime.scene 决定。
+    court_profile = _court_profile_of(parameters)
+    if court_profile == "itf_2026_v1":
+        _neutralize_court_ground(root)
+    for line in build_court_lines(court_profile):
+        if court_profile == "legacy_v1":
+            # 旧输出没有 name，且属性顺序为 type/size/rgba/contype/
+            # conaffinity[/pos]：逐字保持生成模板字节不变。
+            attrs = {
+                "type": "plane",
+                "size": line.geom_attributes()["size"],
+                "rgba": line.geom_attributes()["rgba"],
+                "contype": "0",
+                "conaffinity": "0",
+            }
+            attrs["pos"] = line.geom_attributes()["pos"]
+        else:
+            attrs = line.geom_attributes()
         ET.SubElement(worldbody, "geom", attrs)
     mount = ET.SubElement(
         worldbody, "body", name=_MOUNT_BODY, pos="0 0 0", quat="1 0 0 0"
     )
-    # 落地支撑：立柱 + 底盘，挂在固定基座下；尺寸随 base z 调整
-    pedestal = ET.SubElement(
-        mount, "body", name=_PEDESTAL_BODY, pos="0 0 -0.5", quat="1 0 0 0"
-    )
-    ET.SubElement(
-        pedestal,
-        "geom",
-        name=_PEDESTAL_GEOM,
-        type="box",
-        size=f"{_PEDESTAL_HALF_WIDTH} {_PEDESTAL_HALF_WIDTH} 0.5",
-        rgba="0.20 0.22 0.26 1",
-        contype="0",
-        conaffinity="0",
-    )
-    ET.SubElement(
-        pedestal,
-        "geom",
-        name=_PEDESTAL_BASE_GEOM,
-        type="box",
-        size=f"{_PEDESTAL_BASE_HALF} {_PEDESTAL_BASE_HALF} {_PEDESTAL_BASE_HEIGHT}",
-        pos=f"0 0 {-0.5 + _PEDESTAL_BASE_HEIGHT}",
-        rgba="0.12 0.13 0.16 1",
-        contype="0",
-        conaffinity="0",
-    )
     # 环境链挂在固定基座下（含已 bake 的 q_L；升降高度唯一表达处）
     mount.append(copy.deepcopy(env_root_body))
+    # 落地视觉：基座真实落地后，轮/脚轮触地；不参与碰撞/规划
+    _add_landing_visuals(mount)
     # 选定侧裸臂锚在环境链顶部 waist_yaw_link（虚拟固定安装点）
     env_tip = _find_body(mount, _ENV_TIP_BODY)
     # 对侧臂作为无关节静态视觉挂件：只渲染、不参与控制/物理。
@@ -732,6 +1102,8 @@ def _build_template_element(
         name=_RACKET_GEOM,
         type="cylinder",
         size="0 0",
+        # 圆盘细轴 = 拍体局部 +X（T4 get_ee_normal 契约；绕 Y 旋转 90°）
+        quat="0.7071067811865476 0 0.7071067811865476 0",
         rgba="0.9 0.9 0.25 1",
         contype="0",
         conaffinity="0",
@@ -759,6 +1131,32 @@ def _build_template_element(
         contype="0",
         conaffinity="0",
     )
+    # 拍喉：两根斜杆把拍柄上端连到拍框下缘
+    for name in _RACKET_THROAT_GEOMS:
+        ET.SubElement(
+            racket,
+            "geom",
+            name=name,
+            type="capsule",
+            fromto="0 0 0 0 0 0",
+            size=_fmt_float(_RACKET_THROAT_RADIUS),
+            rgba="0.10 0.11 0.13 1",
+            contype="0",
+            conaffinity="0",
+        )
+    # 拍框：上下横杆 + 左右竖杆，包住半透明拍面
+    for name in _RACKET_FRAME_GEOMS:
+        ET.SubElement(
+            racket,
+            "geom",
+            name=name,
+            type="capsule",
+            fromto="0 0 0 0 0 0",
+            size=_fmt_float(_RACKET_FRAME_RADIUS),
+            rgba="0.08 0.09 0.11 1",
+            contype="0",
+            conaffinity="0",
+        )
     ET.SubElement(racket, "site", name=_TCP_SITE, pos="0 0 0", size="0.005")
 
     # 简化机身 box：保留为保护几何，但视觉透明，露出真实 waist 网格
@@ -784,8 +1182,10 @@ def _build_template_element(
             gear="1",
         )
 
-    # 参数数值真值统一写入（生成与加载共用同一入口，防两套代码漂移）
-    _apply_scene_parameters(root, parameters)
+    # 参数数值真值统一写入（生成与加载共用同一入口，防两套代码漂移）；
+    # 模板生成即默认 scene（默认升降/默认固定姿态/旧 API 球拍），
+    # 因此 template_mode=True 时保留 r1d_env.xml 的 bake 高度不重烘。
+    _apply_scene_parameters(root, parameters, side=side, template_mode=True)
     return root
 
 
@@ -796,9 +1196,14 @@ def _template_comment(side: str) -> str:
         f"::write_r1d_model_template（输入：configs/robots/r1d_runtime_{side}.yaml + "
         f"src/robot/r1d_arm_{side}.xml + src/robot/r1d_env.xml + "
         "src/robot/r1d_assets.xml）。官方臂/环境层级与惯量来自 Task 2.5a "
-        "片段逐字保留（含右腕俯仰上界 +0.5326 的官方不对称）；升降高度只由 "
-        "r1d_env.xml 的 q_L bake 表达（当前 q_L=0）；场景/球拍/torso 数值"
-        f"真值为 r1d_runtime_{side}.yaml。"
+        "片段逐字保留（含右腕俯仰上界 +0.5326 的官方不对称）；头部网格随 "
+        "r1d_env.xml 交付（环境片段自带 asset，合并进唯一 <asset> 节）；"
+        f"升降高度由 r1d_env.xml 以 q_L=0.4225 bake 表达，运行时按 "
+        "scene.lift_displacement 在内存中重烘；场地恢复旧 RM65 口径"
+        "（court_grid 纹理 + court_floor 材质 + 10 条白线 + 单灯，无球网）。"
+        f"场景/torso 数值真值为 r1d_runtime_{side}.yaml；球拍几何/质量/"
+        "惯量/安装的唯一物理来源是 configs/rackets/*.yaml（RacketProfile），"
+        "旧 API 模式下模板默认值为 scene.racket_*。"
     )
 
 
@@ -817,77 +1222,897 @@ def _flange_position(parent: ET.Element) -> np.ndarray:
     raise ValueError(f"模板中缺少 site {_FLANGE_SITE}（模板漂移）")
 
 
-def _apply_scene_parameters(
-    root: ET.Element, parameters: RobotRuntimeParameters
-) -> None:
-    """把运行参数写入模板元素（option/mount/racket/torso 属性）。
-
-    球拍挂接点 = r1d_flange（从树内读取，该侧值已随片段固化）+ 拍面中心
-    偏移（racket_position 语义为相对 r1d_flange）。
+def _model_side(profile: RobotProfile) -> str:
+    """从主动关节名前缀推导场景侧别（left/right）。
 
     Raises:
-        ValueError: scene 缺失或模板缺少期望的元素（模板漂移）。
+        ValueError: 主动关节名前缀不是 left/right（无法确定场景侧别）。
     """
-    _require_scene(parameters, "_apply_scene_parameters")
-    scene = parameters.scene
+    names = profile.active_joint_names
+    if not names:
+        raise ValueError(f"机器人描述 {profile.robot_id} 缺少主动关节名")
+    first = str(names[0])
+    prefix = first.split("_", 1)[0]
+    if prefix not in SIDES:
+        raise ValueError(
+            f"主动关节 {first} 的侧向前缀 {prefix!r} 不是 left/right，"
+            f"无法确定场景侧别（robot_id: {profile.robot_id}）"
+        )
+    return prefix
 
-    option = root.find("option")
-    if option is None:
-        raise ValueError("模板缺少 <option> 元素（模板漂移）")
-    option.set("timestep", _fmt_float(parameters.dt))
 
-    mount = _find_body(root, _MOUNT_BODY)
-    mount.set("pos", _fmt_vec(scene.base_position))
-    mount.set("quat", _fmt_vec(scene.base_quaternion))
+def _require_profile(
+    profile: RobotProfile | None, poses: Any
+) -> RobotProfile:
+    """返回重烘固定姿态所需的机器人描述（缺失时明确报错）。
 
-    # 落地支撑：基座在 z=base_z，立柱从地面托到基座底面，底盘落在地面。
-    # 合成/旧模板可能没有该 body（仅为向后兼容测试夹具），缺失时跳过。
-    pedestal = next(
-        (body for body in root.iter("body") if body.get("name") == _PEDESTAL_BODY),
-        None,
+    Raises:
+        ValueError: 未提供 profile，无法推导场景侧别。
+    """
+    if profile is None:
+        raise ValueError(
+            f"固定关节姿态 {sorted(poses)} 需要机器人描述来推导对侧臂侧别，"
+            "但当前未提供 profile"
+        )
+    return profile
+
+
+def _has_legacy_racket(scene: Any) -> bool:
+    """判断 scene 是否提供了旧 API 球拍字段（5 项全有才算提供）。"""
+    fields = (
+        scene.racket_position,
+        scene.racket_quaternion,
+        scene.racket_radius,
+        scene.racket_half_thickness,
+        scene.racket_mass,
     )
-    if pedestal is not None:
-        base_z = max(float(scene.base_position[2]), 0.05)
-        pedestal.set("pos", _fmt_vec((0.0, 0.0, -0.5 * base_z)))
-        pedestal_column = _find_geom(root, _PEDESTAL_GEOM)
-        pedestal_column.set(
-            "size",
-            _fmt_vec(
-                (
-                    _PEDESTAL_HALF_WIDTH,
-                    _PEDESTAL_HALF_WIDTH,
-                    0.5 * base_z,
-                )
-            ),
+    return all(value is not None for value in fields)
+
+
+def _require_no_legacy_racket(scene: Any) -> None:
+    """RacketProfile 模式下禁止 scene 再给球拍几何/质量（单一物理来源）。
+
+    Raises:
+        ValueError: scene 仍带任一 racket_* 字段。
+    """
+    leftovers = [
+        name
+        for name in (
+            "racket_position",
+            "racket_quaternion",
+            "racket_radius",
+            "racket_half_thickness",
+            "racket_mass",
         )
-        pedestal_base = _find_geom(root, _PEDESTAL_BASE_GEOM)
-        pedestal_base.set(
-            "pos",
-            _fmt_vec((0.0, 0.0, -0.5 * base_z + _PEDESTAL_BASE_HEIGHT)),
+        if getattr(scene, name) is not None
+    ]
+    if leftovers:
+        raise ValueError(
+            f"提供 racket_profile 时 scene.racket_* 必须全部为 None"
+            f"（球拍几何/质量/安装的唯一物理来源是 RacketProfile；"
+            f"冲突字段: {leftovers}）"
         )
 
-    # 球拍挂接点 = 法兰安装参考 + 拍面中心偏移（均在末端连杆参考系）
+
+def _check_scene_landing(root: ET.Element, scene: Any) -> None:
+    """校验 R1D 底座落在轮/脚轮上（防支撑柱移除后悬浮或穿地）。
+
+    只有模板含轮/脚轮视觉时才检查；合成夹具（无落地视觉）跳过。
+
+    Raises:
+        ValueError: 底座高度与轮/脚轮推导的落地高度不一致。
+    """
+    base = _find_body_optional(root, "base_link")
+    if base is None:
+        # 合成夹具/外部模板没有本仓库环境链根 body：跳过落地校验
+        return
+    landing_geoms = [
+        geom
+        for geom in base.iter("geom")
+        if geom.attrib.get("name", "").startswith(("r1d_wheel_", "r1d_caster_"))
+    ]
+    if not landing_geoms:
+        return
+    actual = float(scene.base_position[2])
+    if abs(actual - _BASE_LANDING_HEIGHT_M) > 1e-6:
+        raise ValueError(
+            f"scene.base_position z={actual} 与落地高度 "
+            f"{_BASE_LANDING_HEIGHT_M} 不一致（R1D 底座必须落在轮/脚轮上，"
+            f"不允许悬浮或穿地；落地高度由轮/脚轮几何推导）"
+        )
+
+
+def _rebase_lift(root: ET.Element, lift_displacement: float) -> None:
+    """把模板中已 bake 的升降高度改写为配置的显式升降位移。
+
+    模板 r1d_env.xml 以 ``_ENV_BAKED_LIFT_M`` 烘焙两级 prismatic 位移；
+    装配时按差值在内存中重烘，磁盘模板保持不变。
+
+    Raises:
+        ValueError: 模板 bake 高度与 ``_ENV_BAKED_LIFT_M`` 不一致（模板漂移）。
+    """
+    base_offsets = {"lift_stage1_link": 0.0427, "lift_stage2_link": -0.2115}
+    bodies: list[tuple[ET.Element, float]] = []
+    for body_name, base_z in base_offsets.items():
+        body = _find_body_optional(root, body_name)
+        if body is None:
+            # 合成夹具/外部模板没有本仓库升降链：无 bake 可重烘，跳过
+            return
+        bodies.append((body, base_z))
+    for body, base_z in bodies:
+        pos = body.attrib.get("pos")
+        if pos is None:
+            raise ValueError(
+                f"模板 body {body.attrib.get('name')} 缺少 pos（模板漂移）"
+            )
+        current_z = float(pos.split()[2])
+        if abs(current_z - (base_z + _ENV_BAKED_LIFT_M)) > 1e-6:
+            raise ValueError(
+                f"模板 body {body.attrib.get('name')} 的 z={current_z} 与预期 "
+                f"bake 高度 {base_z + _ENV_BAKED_LIFT_M} 不一致（模板漂移："
+                f"r1d_env.xml 未按 {_ENV_BAKED_LIFT_M} 烘焙）"
+            )
+        body.set(
+            "pos", _fmt_vec((float(pos.split()[0]), float(pos.split()[1]),
+                             base_z + lift_displacement))
+        )
+
+
+def _find_body_with_parent(
+    root: ET.Element, name: str
+) -> tuple[ET.Element, ET.Element]:
+    """按名称查找 body 及其父元素（用于原位替换）。
+
+    Raises:
+        ValueError: 树中不存在该名称的 body。
+    """
+    for parent in root.iter():
+        for child in list(parent):
+            if child.tag == "body" and child.attrib.get("name") == name:
+                return parent, child
+    raise ValueError(f"模板中缺少 body '{name}'（模板漂移）")
+
+
+def _apply_fixed_joint_poses(
+    root: ET.Element,
+    parameters: RobotRuntimeParameters,
+    side: str,
+    profile: RobotProfile | None = None,
+    *,
+    fragments: list[Path] | None = None,
+) -> None:
+    """按配置重新烘焙对侧固定臂姿态（替换模板中的静态臂 body）。
+
+    片段从模型模板同目录的 ``r1d_arm_{passive}.xml`` 读取；只重建被动臂
+    子树，主动臂/环境链/头部不受影响，磁盘模板与片段均不被改写。
+
+    Args:
+        root: 模板 XML 根元素（原地修改）。
+        parameters: 运行参数（``scene.fixed_joint_poses`` 非空才生效）。
+        side: 主动臂侧别（``left`` / ``right``）。
+        profile: 机器人描述（决定片段的首选目录）。
+        fragments: 可选输出列表；本函数实际读到片段文件时把路径追加进去，
+            供 :func:`collect_model_dependencies` 记录装配闭包（F08）。
+
+    Raises:
+        ValueError: 覆盖关节不在片段中或角度超出该关节限位。
+        FileNotFoundError: 对侧臂片段缺失。
+    """
+    scene = parameters.scene
+    if scene is None or not scene.fixed_joint_poses:
+        return
+    passive_side = _passive_side(side)
+    fragment_path = _arm_fragment_path(profile, side)
+    # F08：只有这里会读取兄弟片段——就地登记，避免调用方猜测
+    if fragments is not None:
+        fragments.append(Path(fragment_path).resolve())
+    passive_root = _parse_fragment(fragment_path, "mujocoinclude")
+    passive_worldbody = _fragment_worldbody(passive_root, fragment_path)
+    passive_root_body = next(
+        (el for el in passive_worldbody if el.tag == "body"), None
+    )
+    if passive_root_body is None:
+        raise ValueError(f"对侧裸臂片段缺少根 body（片段: {fragment_path}）")
+    new_body = _static_arm_copy(
+        passive_root_body, passive_side, dict(scene.fixed_joint_poses)
+    )
+    body_name = new_body.attrib.get("name")
+    parent, old_body = _find_body_with_parent(root, str(body_name))
+    index = list(parent).index(old_body)
+    parent.remove(old_body)
+    parent.insert(index, new_body)
+
+
+def _arm_fragment_path(profile: RobotProfile | None, side: str) -> Path:
+    """定位对侧臂 MJCF 片段路径（优先模型模板同目录，回退仓库 src/robot）。
+
+    Raises:
+        FileNotFoundError: 两种路径都找不到片段。
+    """
+    passive_side = _passive_side(side)
+    name = f"r1d_arm_{passive_side}.xml"
+    candidates: list[Path] = []
+    if profile is not None:
+        candidates.append(Path(profile.model_path).parent / name)
+    candidates.append(Path(__file__).resolve().parent / name)
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    raise FileNotFoundError(
+        f"对侧臂片段缺失，无法重烘固定关节姿态（查找: "
+        f"{[str(c) for c in candidates]}）"
+    )
+
+
+def _dependency_repo_root() -> Path:
+    """仓库根目录（``src/robot/model_factory.py`` 的上两级）。"""
+    return Path(__file__).resolve().parents[2]
+
+
+def _sha256_file(path: Path) -> str:
+    """按块读取文件并返回 SHA256 十六进制摘要。"""
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _dependency_relative_path(source: Path) -> str:
+    """依赖文件的稳定相对路径（仓库内保留相对路径，仓库外 ``external/<sha12>/``）。"""
+    resolved = Path(source).resolve()
+    try:
+        return resolved.relative_to(_dependency_repo_root()).as_posix()
+    except ValueError:
+        digest = _sha256_file(resolved)[:12] if resolved.is_file() else "missing"
+        return f"external/{digest}/{resolved.name}"
+
+
+def _dependency_entry(
+    role: str,
+    path: Path,
+    *,
+    reference: str = "",
+) -> dict[str, Any]:
+    """构造一条依赖条目（XML 片段附带 base64 内容，网格只记哈希）。
+
+    Args:
+        role: 依赖角色（``model`` / ``include`` / ``arm_fragment`` /
+            ``mesh`` / ``texture``）。
+        path: 依赖文件绝对路径（须存在）。
+        reference: 模型 XML 中引用该文件的原始字符串（网格/includes 用；
+            回放据此把 ``file=`` 属性绑定到已校验条目，而非按路径猜）。
+
+    Returns:
+        ``role/relative_path/source/sha256/size``（XML 片段另含
+        ``content_base64``；``reference`` 非空时一并记录）。
+    """
+    resolved = Path(path).resolve()
+    data = resolved.read_bytes()
+    entry: dict[str, Any] = {
+        "role": role,
+        "relative_path": _dependency_relative_path(resolved),
+        "source": str(resolved),
+        "sha256": hashlib.sha256(data).hexdigest(),
+        "size": len(data),
+    }
+    if reference:
+        entry["reference"] = reference
+    if role in DEPENDENCY_XML_ROLES:
+        # F08：XML 片段必须把内容写进快照，回放才能在外部来源缺失时
+        # 重建同一装配输入（网格体积大，仍按哈希从仓库/外部来源解析）。
+        entry["content_base64"] = base64.b64encode(data).decode("ascii")
+    return entry
+
+
+def mask_xml_comments(text: str) -> str:
+    """把 XML 注释覆盖为等长空白掩码（保留字符位置与换行）。
+
+    MuJoCo 的 MJCF 解析器会**整体丢弃** XML 注释，但直接对原文做正则扫描会
+    把注释里的 ``<compiler>``/``<include>``/``<mesh>`` 当成真实标签（R03
+    根因：注释里的诱饵 ``meshdir`` 被合并，回放网格被放大）。本函数用空白
+    覆盖注释区间，使掩码文本与原文**逐字符等长**：``finditer`` 得到的 span
+    可直接映射回原文定位/替换，注释内容在原文中保持不动。
+
+    局限：按 XML 词法假定注释不会出现在属性值内部（``file="a<!--b-->c"``
+    这类病态写法不在支持范围）。
+
+    Args:
+        text: 原始 XML 文本。
+
+    Returns:
+        与 ``text`` 等长的掩码文本（仅注释区间变成空白，换行保留）。
+    """
+
+    def _blank(match: re.Match[str]) -> str:
+        """把一段注释替换为同长度的空白（换行不吞掉）。"""
+        return "".join("\n" if char == "\n" else " " for char in match.group(0))
+
+    return _XML_COMMENT_PATTERN.sub(_blank, text)
+
+
+def _attribute_value(attrs: str, name: str) -> str | None:
+    """取出 XML 标签属性值（单/双引号均可），未声明时返回 ``None``。
+
+    Args:
+        attrs: 标签内的属性串（``<tag`` 与 ``/>`` 之间的部分）。
+        name: 属性名（大小写不敏感）。
+
+    Returns:
+        去掉引号后的原始取值；属性不存在时返回 ``None``——与"显式声明空
+        值"（返回空串）区分，后者在 compiler 覆盖语义里是有效重置。
+    """
+    match = re.search(
+        rf"""\b{name}\s*=\s*(?:"([^"]*)"|'([^']*)')""",
+        attrs,
+        re.IGNORECASE,
+    )
+    if match is None:
+        return None
+    value = match.group(1)
+    if value is None:
+        value = match.group(2) or ""
+    return value
+
+
+def _resolve_reference_path(base_dir: Path, dir_prefix: str, raw: str) -> Path:
+    """把 ``file=`` 引用解析为绝对路径（相对基准 = ``base_dir`` 叠加前缀目录）。
+
+    绝对路径直接使用；相对路径先拼目录前缀（``meshdir``/``texturedir``）。
+
+    Args:
+        base_dir: 相对基准目录。
+        dir_prefix: 目录前缀（空串表示无前缀；本身可为绝对路径）。
+        raw: 原始引用字符串。
+
+    Returns:
+        解析后的绝对路径（不保证文件存在）。
+    """
+    reference = Path(raw.strip().replace("\\", "/"))
+    if reference.is_absolute():
+        return reference.resolve()
+    base = (base_dir / dir_prefix).resolve() if dir_prefix else base_dir
+    return (base / reference).resolve()
+
+
+@dataclass(slots=True)
+class _AssetReference:
+    """一条待解析的 mesh/texture 引用（第一阶段收集，第二阶段统一解析）。
+
+    Attributes:
+        kind: 引用标签（``mesh`` 或 ``texture``）。
+        raw: ``file=`` 原始字符串（已去首尾空白）。
+        declaring_file: 直接写该引用的 XML 文件绝对路径（候选 2 的基准目录）。
+    """
+
+    kind: str
+    raw: str
+    declaring_file: Path
+
+
+def _asset_candidate_paths(
+    reference: _AssetReference,
+    *,
+    model_dir: Path,
+    asset_dirs: Mapping[str, str],
+) -> tuple[Path, Path]:
+    """按 MuJoCo 语义给出资产的两个候选路径（顺序即查找顺序）。
+
+    候选 1 = ``<顶层模型目录>/<全局 meshdir|texturedir>/<file>``（目录前缀
+    为绝对路径时直接生效）；候选 2 = ``<声明该引用的 XML 文件目录>/<file>``
+    （**不再拼目录前缀**，与 MuJoCo 的兜底查找一致）。绝对路径引用两个候选
+    相同。
+
+    Args:
+        reference: 待解析的资产引用。
+        model_dir: 顶层模型文件所在目录（全局目录前缀的基准，不是声明目录）。
+        asset_dirs: 最终全局 ``{kind: 目录前缀}`` 表。
+
+    Returns:
+        ``(第一候选, 第二候选)``。
+    """
+    prefix = asset_dirs.get(reference.kind, "")
+    first = _resolve_reference_path(model_dir, prefix, reference.raw)
+    second = _resolve_reference_path(reference.declaring_file.parent, "", reference.raw)
+    return first, second
+
+
+def _include_candidate_paths(
+    raw: str,
+    *,
+    model_dir: Path,
+    declaring_dir: Path,
+) -> tuple[Path, Path]:
+    """按 MuJoCo 语义给出 ``<include file>`` 的两个候选路径。
+
+    实测（3.9.0）：include 先按**顶层模型目录**解析，不存在时才回退到
+    **声明该 include 的文件目录**——与资产的两候选顺序一致。绝对路径引用
+    两个候选相同。
+
+    Args:
+        raw: ``file=`` 原始字符串。
+        model_dir: 顶层模型文件所在目录（第一候选基准）。
+        declaring_dir: 声明该 include 的 XML 文件目录（第二候选基准）。
+
+    Returns:
+        ``(顶层候选, 声明目录候选)``。
+    """
+    first = _resolve_reference_path(model_dir, "", raw)
+    second = _resolve_reference_path(declaring_dir, "", raw)
+    return first, second
+
+
+def _walk_model_file(
+    path: Path,
+    *,
+    role: str,
+    reference: str,
+    model_dir: Path,
+    entries: list[dict[str, Any]],
+    asset_refs: list[_AssetReference],
+    asset_dirs: dict[str, str],
+    missing: list[str],
+    seen: set[Path],
+    depth: int,
+) -> None:
+    """第一阶段：按文档顺序展开 MJCF，收集文件条目、资产引用与全局编译目录。
+
+    与旧实现的关键差异：
+
+    * 扫描前先用 :func:`mask_xml_comments` 掩码注释——注释里的标签不生效；
+    * ``<compiler>`` 在这里**只记录不解析**——它是全局设置，include 片段里
+      的声明同样生效，同名属性按文档顺序后者覆盖前者；``assetdir`` 是
+      ``meshdir``/``texturedir`` 的别名（同一标签内显式属性覆盖它）；
+    * ``<include>`` 先按顶层模型目录解析，不存在再回退声明目录；
+    * 资产路径一律留给第二阶段用最终目录表统一解析。MuJoCo 同样是在解析完
+      整个文档后才加载资产，因此这个顺序与真实加载行为一致。
+
+    Args:
+        path: 待展开的 XML 文件。
+        role: 该文件的角色（首层 ``model``，嵌套层 ``include``）。
+        reference: 上层引用该文件的原始字符串（首层为空）。
+        model_dir: 顶层模型文件所在目录（include 第一候选的基准，递归不变）。
+        entries: 输出文件条目列表（原地追加，按首次访问去重）。
+        asset_refs: 输出资产引用列表（原地追加，保持文档顺序）。
+        asset_dirs: 全局 ``{kind: 目录前缀}`` 表（原地更新，后者覆盖）。
+        missing: 输出缺失引用列表（原地追加；含 include 与 XML 文件缺失）。
+        seen: 已访问文件集合（防重复/环）。
+        depth: 当前 include 深度（超过 :data:`_MAX_INCLUDE_DEPTH` 直接报错）。
+    """
+    resolved = Path(path).resolve()
+    if resolved in seen:
+        return
+    if depth > _MAX_INCLUDE_DEPTH:
+        raise ValueError(
+            f"模型 include 嵌套超过 {_MAX_INCLUDE_DEPTH} 层，拒绝继续展开"
+            f"（可能是环状 include）：{resolved}"
+        )
+    seen.add(resolved)
+    if not resolved.is_file():
+        missing.append(str(resolved))
+        return
+    try:
+        text = resolved.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        missing.append(str(resolved))
+        return
+    entries.append(_dependency_entry(role, resolved, reference=reference))
+    # 注释整体忽略：注释里的 compiler/include/mesh 都不参与解析（R03）
+    masked = mask_xml_comments(text)
+    for match in _MJCF_TAG_PATTERN.finditer(masked):
+        tag = str(match.group("tag")).lower()
+        attrs = match.group("attrs")
+        if tag == "compiler":
+            # 全局编译设置：逐属性合并，未声明的属性保留上一条取值。
+            # assetdir 同时设置 meshdir/texturedir，同一标签内的显式属性
+            # 覆盖它（与属性书写顺序无关）；跨标签按文档顺序后者覆盖前者。
+            assetdir = _attribute_value(attrs, "assetdir")
+            if assetdir is not None:
+                for kind in _ASSET_DIR_ATTRS:
+                    asset_dirs[kind] = assetdir.strip()
+            for kind, attr_name in _ASSET_DIR_ATTRS.items():
+                value = _attribute_value(attrs, attr_name)
+                if value is not None:
+                    asset_dirs[kind] = value.strip()
+            continue
+        raw = (_attribute_value(attrs, "file") or "").strip()
+        if not raw:
+            continue
+        if tag == "include":
+            # include：顶层模型目录优先，声明目录兜底（R04，实测 3.9.0）
+            first, second = _include_candidate_paths(
+                raw,
+                model_dir=model_dir,
+                declaring_dir=resolved.parent,
+            )
+            target = first if first.is_file() else second
+            _walk_model_file(
+                target,
+                role=DEPENDENCY_ROLE_INCLUDE,
+                reference=raw,
+                model_dir=model_dir,
+                entries=entries,
+                asset_refs=asset_refs,
+                asset_dirs=asset_dirs,
+                missing=missing,
+                seen=seen,
+                depth=depth + 1,
+            )
+            continue
+        asset_refs.append(
+            _AssetReference(kind=tag, raw=raw, declaring_file=resolved)
+        )
+
+
+def collect_model_file_dependencies(
+    model_path: Path,
+    *,
+    asset_missing: list[str] | None = None,
+) -> tuple[tuple[dict[str, Any], ...], tuple[str, ...]]:
+    """收集一个 MJCF 模型的**文件级**依赖闭包（模型/嵌套 include/网格纹理）。
+
+    两阶段实现（对齐 MuJoCo 语义）：
+
+    1. 按文档顺序展开 include 树，收集文件条目、每条 ``<mesh>/<texture>``
+       引用（含声明目录）与**最终** ``<compiler>`` 目录表——compiler 是
+       全局设置，include 片段里的声明同样生效，同名属性后者覆盖前者，
+       ``assetdir`` 同时设置 meshdir/texturedir；注释整体忽略。include
+       自身先按顶层模型目录解析、再回退声明目录。
+    2. 用最终目录表统一解析资产：先 ``<顶层目录>/<全局 dir>/<file>``，不
+       存在再 ``<声明目录>/<file>``；绝对路径直接使用。缺失时报告第一候选。
+
+    模型条目会附带可选 ``asset_dirs``（最终 meshdir/texturedir），供回放
+    物化时按同一语义重写资产引用（旧产物无该字段时回退旧解析）。
+
+    Args:
+        model_path: 模型 XML 路径。
+        asset_missing: 可选的输出列表；传入时把**资产引用**的缺失路径追加
+            进去（``missing`` 返回值仍混合 include 缺失，供整体闭包报告）。
+
+    Returns:
+        ``(entries, missing)``：``entries`` 为按
+        ``(role, relative_path)`` 排序的依赖条目元组；``missing`` 为无法
+        读取的引用路径元组（不抛异常——缺失由产物 ``assets.missing`` 与
+        回放校验统一报告）。
+
+    Raises:
+        ValueError: include 嵌套超过 :data:`_MAX_INCLUDE_DEPTH` 层。
+    """
+    model_file = Path(model_path).resolve()
+    entries: list[dict[str, Any]] = []
+    asset_refs: list[_AssetReference] = []
+    asset_dirs: dict[str, str] = {}
+    missing: list[str] = []
+    seen: set[Path] = set()
+    _walk_model_file(
+        model_file,
+        role=DEPENDENCY_ROLE_MODEL,
+        reference="",
+        model_dir=model_file.parent,
+        entries=entries,
+        asset_refs=asset_refs,
+        asset_dirs=asset_dirs,
+        missing=missing,
+        seen=seen,
+        depth=0,
+    )
+    seen_assets: set[str] = set()
+    for reference in asset_refs:
+        first, second = _asset_candidate_paths(
+            reference,
+            model_dir=model_file.parent,
+            asset_dirs=asset_dirs,
+        )
+        target = first if first.is_file() else second
+        if not target.is_file():
+            # 缺失时报告第一候选路径（与 MuJoCo 的报错口径一致）
+            if str(first) not in seen_assets:
+                seen_assets.add(str(first))
+                missing.append(str(first))
+                if asset_missing is not None:
+                    asset_missing.append(str(first))
+            continue
+        key = str(target)
+        if key in seen_assets:
+            continue
+        seen_assets.add(key)
+        entries.append(_dependency_entry(reference.kind, target, reference=reference.raw))
+    if asset_dirs:
+        for entry in entries:
+            if entry["role"] == DEPENDENCY_ROLE_MODEL:
+                entry["asset_dirs"] = dict(asset_dirs)
+                break
+    ordered = tuple(sorted(entries, key=lambda item: (item["role"], item["relative_path"])))
+    return ordered, tuple(missing)
+
+
+def collect_model_dependencies(
+    profile: RobotProfile,
+    parameters: RobotRuntimeParameters,
+    *,
+    arm_fragments: Sequence[Path] = (),
+) -> tuple[dict[str, Any], ...]:
+    """汇总一次装配实际读取的完整依赖闭包。
+
+    文件级闭包来自 :func:`collect_model_file_dependencies`（模型 +
+    ``<include>`` + 网格纹理）；对侧臂片段由调用方按**真实装配分支**传入
+    ``arm_fragments``（只有 ``scene.fixed_joint_poses`` 非空时工厂才会读取
+    ``r1d_arm_{passive}.xml``，F08 根因即该片段此前未进快照）。
+
+    Args:
+        profile: 机器人描述（``model_path`` 为实际加载的模板）。
+        parameters: 运行参数（当前不参与闭包判定，保留以表达"同一次装配"）。
+        arm_fragments: 装配过程中真实读取的对侧臂片段路径。
+
+    Returns:
+        依赖条目元组（按 ``role/relative_path`` 排序，按绝对路径去重）。
+    """
+    entries, _ = collect_model_file_dependencies(profile.model_path)
+    merged: list[dict[str, Any]] = list(entries)
+    for fragment in arm_fragments:
+        merged.append(
+            _dependency_entry(DEPENDENCY_ROLE_ARM_FRAGMENT, Path(fragment).resolve())
+        )
+    deduped: dict[tuple[str, str], dict[str, Any]] = {}
+    for item in merged:
+        deduped.setdefault((str(item["role"]), str(item["source"])), item)
+    return tuple(
+        sorted(deduped.values(), key=lambda item: (item["role"], item["relative_path"]))
+    )
+
+
+def _racket_inertial(
+    profile: RacketProfile,
+) -> tuple[float, np.ndarray, np.ndarray]:
+    """合并球拍与连接件质量/COM/惯量（相对合并 COM，球拍局部系）。
+
+    连接件只在安装时计入一次；连接件惯量按其自身质心给出，合并时用
+    平行轴定理搬到合并质心。
+    """
+    mass = float(profile.mass)
+    com = np.asarray(profile.com, dtype=np.float64)
+    inertia = np.asarray(profile.inertia.as_matrix(), dtype=np.float64)
+    connector = profile.connector
+    if connector is None:
+        return mass, com, inertia
+    connector_mass = float(connector.mass)
+    connector_com = np.asarray(connector.com, dtype=np.float64)
+    connector_inertia = np.asarray(connector.inertia.as_matrix(), dtype=np.float64)
+    total = mass + connector_mass
+    merged_com = (mass * com + connector_mass * connector_com) / total
+
+    def _shift(
+        local_inertia: np.ndarray,
+        local_mass: float,
+        local_com: np.ndarray,
+        target_com: np.ndarray,
+    ) -> np.ndarray:
+        offset = local_com - target_com
+        return local_inertia + local_mass * (
+            float(np.dot(offset, offset)) * np.eye(3) - np.outer(offset, offset)
+        )
+
+    merged_inertia = _shift(
+        inertia, mass, com, merged_com
+    ) + _shift(connector_inertia, connector_mass, connector_com, merged_com)
+    return total, merged_com, merged_inertia
+
+
+def _racket_assembly(profile: RacketProfile) -> RacketAssembly:
+    """把 RacketProfile 的装配事实固化为 bundle 暴露的只读记录。"""
+    total_mass, com, inertia = _racket_inertial(profile)
+    connector_mass = 0.0 if profile.connector is None else float(
+        profile.connector.mass
+    )
+    geometry = profile.geometry
+    return RacketAssembly(
+        racket_id=str(profile.racket_id),
+        source_path=Path(profile.source_path),
+        total_mass=total_mass,
+        com=np.array(com, dtype=np.float64, copy=True),
+        inertia_diagonal=np.array(np.diag(inertia), dtype=np.float64, copy=True),
+        face_center=np.array(geometry.face.center, dtype=np.float64, copy=True),
+        face_semi_axes=np.array(geometry.face.semi_axes, dtype=np.float64, copy=True),
+        mount_position=np.array(
+            profile.mount.position, dtype=np.float64, copy=True
+        ),
+        mount_wxyz=np.array(profile.mount.wxyz, dtype=np.float64, copy=True),
+        connector_mass=connector_mass,
+    )
+
+
+def _quat_aligning_z(axis: Any) -> np.ndarray:
+    """求把局部 +Z 轴对齐到给定方向的单位四元数（wxyz）。
+
+    Raises:
+        ValueError: 轴向为零向量。
+    """
+    direction = np.asarray(axis, dtype=np.float64)
+    norm = float(np.linalg.norm(direction))
+    if norm < 1e-12:
+        raise ValueError("连接件安装轴为零向量（RacketProfile 非法）")
+    direction = direction / norm
+    dot = float(direction[2])
+    if dot > 1.0 - 1e-12:
+        return np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float64)
+    if dot < -1.0 + 1e-12:
+        return np.array([0.0, 1.0, 0.0, 0.0], dtype=np.float64)
+    cross = np.cross(np.array([0.0, 0.0, 1.0]), direction)
+    quat = np.array([1.0 + dot, cross[0], cross[1], cross[2]], dtype=np.float64)
+    return quat / float(np.linalg.norm(quat))
+
+
+def _append_visual_geom(
+    body: ET.Element,
+    *,
+    name: str,
+    geom_type: str,
+    size: str,
+    rgba: str,
+    pos: str | None = None,
+    fromto: str | None = None,
+    quat: str | None = None,
+) -> ET.Element:
+    """追加一个不参与碰撞（contype=0/conaffinity=0）的视觉 geom。"""
+    attrs: dict[str, str] = {
+        "name": name,
+        "type": geom_type,
+        "size": size,
+        "rgba": rgba,
+        "contype": "0",
+        "conaffinity": "0",
+    }
+    if pos is not None:
+        attrs["pos"] = pos
+    if fromto is not None:
+        attrs["fromto"] = fromto
+    if quat is not None:
+        attrs["quat"] = quat
+    return ET.SubElement(body, "geom", attrs)
+
+
+def _apply_racket_profile(
+    root: ET.Element, profile: RacketProfile, flange_pos: np.ndarray
+) -> None:
+    """按 RacketProfile 重建球拍 body 子树（几何/质量/惯量/安装单一来源）。
+
+    视觉/碰撞/TCP 同源：拍面碰撞椭球与视觉椭球都以 face.center 为中心、
+    semi_axes 为半轴，细轴（半厚）沿球拍局部 +X，即 ``get_ee_normal`` 的
+    拍面法向契约；TCP site 位于 face.center。
+
+    Raises:
+        ValueError: 模板缺少球拍 body 或 profile 质心/惯量非法。
+    """
+    _parent, body = _find_body_with_parent(root, _RACKET_BODY)
+    for child in list(body):
+        body.remove(child)
+    mount = profile.mount
+    body.set("pos", _fmt_vec(np.asarray(flange_pos) + np.asarray(mount.position)))
+    body.set("quat", _fmt_vec(mount.wxyz))
+
+    total_mass, com, inertia = _racket_inertial(profile)
+    diagonal = np.diag(inertia)
+    off_diagonal = inertia - np.diag(diagonal)
+    inertial_attrs: dict[str, str] = {
+        "pos": _fmt_vec(com),
+        "mass": _fmt_float(total_mass),
+    }
+    if float(np.max(np.abs(off_diagonal))) < 1e-12:
+        inertial_attrs["diaginertia"] = _fmt_vec(diagonal)
+    else:
+        inertial_attrs["fullinertia"] = _fmt_vec(
+            (
+                inertia[0, 0],
+                inertia[1, 1],
+                inertia[2, 2],
+                inertia[0, 1],
+                inertia[0, 2],
+                inertia[1, 2],
+            )
+        )
+    ET.SubElement(body, "inertial", inertial_attrs)
+
+    geometry = profile.geometry
+    face = geometry.face
+    # 拍面碰撞几何：椭球，细轴（半厚）沿局部 +X ⇒ 法向 = 局部 +X
+    ET.SubElement(
+        body,
+        "geom",
+        {
+            "name": _RACKET_GEOM,
+            "type": "ellipsoid",
+            "pos": _fmt_vec(face.center),
+            "size": _fmt_vec(face.semi_axes),
+            "rgba": "0.9 0.9 0.25 1",
+            "contype": "0",
+            "conaffinity": "0",
+        },
+    )
+    _append_visual_geom(
+        body,
+        name=_RACKET_FACE_VISUAL_GEOM,
+        geom_type="ellipsoid",
+        pos=_fmt_vec(face.center),
+        size=_fmt_vec(face.semi_axes),
+        rgba=_RACKET_FACE_VISUAL_RGBA,
+    )
+    handle = geometry.handle
+    _append_visual_geom(
+        body,
+        name=_RACKET_HANDLE_GEOM,
+        geom_type="capsule",
+        fromto=_fmt_vec((*handle.start, *handle.end)),
+        size=_fmt_float(handle.radius),
+        rgba=_RACKET_HANDLE_RGBA,
+    )
+    for index, capsule in enumerate(geometry.throat):
+        _append_visual_geom(
+            body,
+            name=_RACKET_THROAT_GEOM_FORMAT.format(index=index),
+            geom_type="capsule",
+            fromto=_fmt_vec((*capsule.start, *capsule.end)),
+            size=_fmt_float(capsule.radius),
+            rgba=_RACKET_THROAT_RGBA,
+        )
+    for index, capsule in enumerate(geometry.frame):
+        _append_visual_geom(
+            body,
+            name=_RACKET_FRAME_GEOM_FORMAT.format(index=index),
+            geom_type="capsule",
+            fromto=_fmt_vec((*capsule.start, *capsule.end)),
+            size=_fmt_float(capsule.radius),
+            rgba=_RACKET_FRAME_RGBA,
+        )
+    connector = profile.connector
+    if connector is not None:
+        _append_visual_geom(
+            body,
+            name=_RACKET_CONNECTOR_GEOM,
+            geom_type="cylinder",
+            pos=_fmt_vec(connector.center),
+            quat=_fmt_vec(_quat_aligning_z(connector.axis)),
+            size=_fmt_vec((connector.radius, connector.length / 2.0)),
+            rgba=_RACKET_CONNECTOR_RGBA,
+        )
+    ET.SubElement(
+        body, "site", name=_TCP_SITE, pos=_fmt_vec(face.center), size="0.005"
+    )
+
+
+def _apply_legacy_racket(
+    root: ET.Element, parameters: RobotRuntimeParameters, flange_pos: np.ndarray
+) -> None:
+    """旧 API 球拍参数化（无 RacketProfile 时的 T0 语义，保持向后兼容）。
+
+    圆盘碰撞面 + 0.30 kg 缩放惯量；拍面细轴（局部 Z）经 quat 对齐到
+    body 局部 +X（``get_ee_normal`` 契约）。
+
+    Raises:
+        ValueError: scene 未提供旧球拍字段或模板缺少期望元素。
+    """
+    scene = parameters.scene
+    if scene is None or not _has_legacy_racket(scene):
+        raise ValueError("旧 API 球拍参数缺失：需要 scene 提供完整 racket_* 字段")
     racket = _find_body(root, _RACKET_BODY)
-    racket_pos = _flange_position(root) + scene.racket_position
-    racket.set("pos", _fmt_vec(racket_pos))
+    racket.set("pos", _fmt_vec(flange_pos + np.asarray(scene.racket_position)))
     racket.set("quat", _fmt_vec(scene.racket_quaternion))
     inertial = racket.find("inertial")
     racket_geom = racket.find("geom")
     if inertial is None or racket_geom is None:
         raise ValueError("模板球拍 body 缺少 inertial/geom（模板漂移）")
-    inertial.set("mass", _fmt_float(scene.racket_mass))
+    inertial.set("mass", _fmt_float(float(scene.racket_mass)))
+    # 复合体惯量（拍头+拍柄）：轴向 X 约 0.0018、横向 Y/Z 约 0.004
+    # （0.30 kg 成人拍的迷你化近似；避免腕部动力学被放大 10 倍）。
+    scale = float(scene.racket_mass) / 0.30
     inertial.set(
         "diaginertia",
-        _fmt_vec(
-            _disk_inertia(scene.racket_mass, scene.racket_radius, scene.racket_half_thickness)
-        ),
+        _fmt_vec((0.0018 * scale, 0.0040 * scale, 0.0040 * scale)),
     )
     racket_geom.set(
-        "size", _fmt_vec((scene.racket_radius, scene.racket_half_thickness))
+        "size",
+        _fmt_vec((float(scene.racket_radius), float(scene.racket_half_thickness))),
     )
 
-    # 视觉拍面（椭球）与拍柄（capsule）：只改视觉，不动碰撞面/惯量。
-    # 合成/旧模板可能没有这两个 geom（仅为向后兼容测试夹具），缺失时跳过。
     face_visual = next(
         (
             geom
@@ -900,9 +2125,15 @@ def _apply_scene_parameters(
         face_visual.set(
             "size",
             _fmt_vec(
-                (scene.racket_radius, scene.racket_radius, scene.racket_half_thickness)
+                (
+                    _RACKET_FACE_HALF_THICKNESS,
+                    _RACKET_FACE_HALF_WIDTH,
+                    _RACKET_FACE_HALF_LENGTH,
+                )
             ),
         )
+        face_visual.set("rgba", "0.92 0.92 0.84 0.30")
+
     handle = next(
         (
             geom
@@ -912,27 +2143,109 @@ def _apply_scene_parameters(
         None,
     )
     if handle is not None:
-        rotation = _quat_to_matrix(scene.racket_quaternion)
-        offset = np.asarray(scene.racket_position, dtype=np.float64)
-        handle_start = -rotation.T @ offset
-        handle_length = float(np.linalg.norm(handle_start))
-        if handle_length < 1e-6:
-            handle_start = np.zeros(3, dtype=np.float64)
-            handle_end = np.zeros(3, dtype=np.float64)
-        else:
-            handle_end = handle_start * (0.03 / handle_length)
+        handle_start_z = -float(scene.racket_position[2]) + 0.02
+        handle_end_z = handle_start_z + _RACKET_HANDLE_LENGTH
         handle.set(
             "fromto",
-            _fmt_vec((*handle_start.tolist(), *handle_end.tolist())),
+            _fmt_vec((0.0, 0.0, handle_start_z, 0.0, 0.0, handle_end_z)),
         )
         handle.set("size", _fmt_float(_RACKET_HANDLE_RADIUS))
 
+        throat_starts = (
+            (0.0, 0.035, handle_end_z, 0.0, 0.085, -_RACKET_FACE_HALF_LENGTH),
+            (0.0, -0.035, handle_end_z, 0.0, -0.085, -_RACKET_FACE_HALF_LENGTH),
+        )
+        for name, values in zip(_RACKET_THROAT_GEOMS, throat_starts):
+            _find_geom(root, name).set("fromto", _fmt_vec(values))
+
+        frame_values = (
+            (0.0, -_RACKET_FACE_HALF_WIDTH, _RACKET_FACE_HALF_LENGTH,
+             0.0, _RACKET_FACE_HALF_WIDTH, _RACKET_FACE_HALF_LENGTH),
+            (0.0, -_RACKET_FACE_HALF_WIDTH, -_RACKET_FACE_HALF_LENGTH,
+             0.0, _RACKET_FACE_HALF_WIDTH, -_RACKET_FACE_HALF_LENGTH),
+            (0.0, _RACKET_FACE_HALF_WIDTH, -_RACKET_FACE_HALF_LENGTH,
+             0.0, _RACKET_FACE_HALF_WIDTH, _RACKET_FACE_HALF_LENGTH),
+            (0.0, -_RACKET_FACE_HALF_WIDTH, -_RACKET_FACE_HALF_LENGTH,
+             0.0, -_RACKET_FACE_HALF_WIDTH, _RACKET_FACE_HALF_LENGTH),
+        )
+        for name, values in zip(_RACKET_FRAME_GEOMS, frame_values):
+            _find_geom(root, name).set("fromto", _fmt_vec(values))
+
+
+def _apply_scene_parameters(
+    root: ET.Element,
+    parameters: RobotRuntimeParameters,
+    *,
+    side: str | None = None,
+    profile: RobotProfile | None = None,
+    racket_profile: RacketProfile | None = None,
+    template_mode: bool = False,
+    fragments: list[Path] | None = None,
+) -> RacketAssembly | None:
+    """把运行参数写入模板元素（option/mount/lift/固定姿态/球拍/torso）。
+
+    Args:
+        root: 模板 XML 根元素（原地修改）。
+        parameters: 运行参数。
+        side: 主动臂侧别；None 时按固定姿态需要从描述推导。
+        profile: 机器人描述。
+        racket_profile: 可选球拍档案。
+        template_mode: 模板生成模式（跳过升降重烘）。
+        fragments: 可选输出列表；记录实际读取的对侧臂片段（F08 闭包）。
+
+    球拍挂接点 = r1d_flange（从树内读取，该侧值已随片段固化）：
+    - 档案模式：body pos = flange + mount.position、body quat = mount.wxyz，
+      几何/质量/惯量/连接件全部来自 RacketProfile；
+    - 旧 API 模式（无档案）：保留 T0 圆盘拍语义（scene.racket_* 参数化），
+      未提供旧字段时保持模板默认值（V12 默认配置路径）。
+    升降位移在内存中重烘（磁盘模板不变）；模板生成时保留 r1d_env.xml 的
+    默认 bake。侧别仅在重烘对侧固定姿态时需要，未提供时可从描述推导。
+
+    Raises:
+        ValueError: scene 缺失、升降/落地/固定姿态非法或模板元素漂移。
+    """
+    _require_scene(parameters, "_apply_scene_parameters")
+    scene = parameters.scene
+    assert scene is not None
+
+    option = root.find("option")
+    if option is None:
+        raise ValueError("模板缺少 <option> 元素（模板漂移）")
+    option.set("timestep", _fmt_float(parameters.dt))
+
+    mount = _find_body(root, _MOUNT_BODY)
+    mount.set("pos", _fmt_vec(scene.base_position))
+    mount.set("quat", _fmt_vec(scene.base_quaternion))
+
+    flange_pos = _flange_position(root)
     torso = _find_body(root, _TORSO_BODY)
     torso_geom = torso.find("geom")
     if torso_geom is None:
         raise ValueError("模板机身 body 缺少 geom（模板漂移）")
     torso.set("pos", _fmt_vec(scene.torso_position))
     torso_geom.set("size", _fmt_vec(scene.torso_half_size))
+
+    # 落地高度与升降位移由同一物理配置推导；模板生成时跳过升降重烘
+    # （模板恒定 bake 默认 q_L，运行时按配置在内存中重烘）。
+    _check_scene_landing(root, scene)
+    if not template_mode:
+        _rebase_lift(root, float(scene.lift_displacement))
+    if scene.fixed_joint_poses:
+        resolved_side = side if side is not None else _model_side(
+            _require_profile(profile, scene.fixed_joint_poses)
+        )
+        _apply_fixed_joint_poses(
+            root, parameters, resolved_side, profile, fragments=fragments
+        )
+
+    if racket_profile is not None:
+        _require_no_legacy_racket(scene)
+        _apply_racket_profile(root, racket_profile, flange_pos)
+        return _racket_assembly(racket_profile)
+
+    if template_mode or _has_legacy_racket(scene):
+        _apply_legacy_racket(root, parameters, flange_pos)
+    return None
 
 
 def _retarget_mesh_paths(
@@ -1090,18 +2403,6 @@ def _check_initial_state(
 # ---------------------------------------------------------------- 数值辅助
 
 
-def _disk_inertia(
-    mass: float, radius: float, half_thickness: float
-) -> tuple[float, float, float]:
-    """实心圆盘主惯量（近似惯量，不宣称实物球拍）：返回 (Ixx, Iyy, Izz)。
-
-    Izz = 0.5*m*r²；Ixx = Iyy = m*(3r² + (2h)²)/12，其中 2h 为全厚。
-    """
-    ixx = mass * (3.0 * radius**2 + (2.0 * half_thickness) ** 2) / 12.0
-    izz = 0.5 * mass * radius**2
-    return (ixx, ixx, izz)
-
-
 def _fmt_float(value: float) -> str:
     """把浮点数格式化为 12 位有效数字字符串（往返精度高于测试容差）。"""
     return f"{float(value):.12g}"
@@ -1110,6 +2411,14 @@ def _fmt_float(value: float) -> str:
 def _fmt_vec(values: Any) -> str:
     """把数值序列格式化为空格分隔字符串（逐项 12 位有效数字）。"""
     return " ".join(_fmt_float(item) for item in values)
+
+
+def _find_body_optional(root: ET.Element, name: str) -> ET.Element | None:
+    """按名称查找 body，不存在时返回 None（用于可选结构/合成夹具）。"""
+    for body in root.iter("body"):
+        if body.attrib.get("name") == name:
+            return body
+    return None
 
 
 def _find_body(root: ET.Element, name: str) -> ET.Element:

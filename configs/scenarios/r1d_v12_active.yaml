@@ -1,0 +1,128 @@
+# R1D 右臂 V12 parity 冻结固定案例 — T7 交付（2026-11-19）。
+#
+# 用途：
+#   1) T7 验收测试 tests/test_r1d_v12_acceptance.py 的输入：两模式固定 seed 42
+#      在本机以本文件冻结的物理配置 + 每模式 task_overrides 跑 run_v12_episode，
+#      断言 T6 产物 physical_hit/physical_hit_type/contact_events 真实拍面接触
+#      与同物理步拍速。
+#   2) 20 回合留出集（seeds 0–9 × torque/position）的冻结配置来源；
+#      见 experiment_data/r1d_v12_parity/validation/（原始产物 + 逐行表）。
+#
+# 冻结口径：
+#   - 共同物理配置：同一机器人描述/球拍档案/法兰安装/目标区/发球（7 m/s、serve-box、
+#     弹跳 restitution 0.75）/R1D V12 估计关节阻尼+armature/ProfileSimEnv 解析弹跳
+#     parity 修复（与 RM65Env.F 同口径）。两模式不按 seed 切换任何物理量。
+#   - 每模式只允许执行器/MPC 覆盖不同（本文件 modes.*.overrides）：torque 模式
+#     需要更小的 total_horizon 与 no_follow_through 以在触后腕部过冲前结束回合；
+#     position 模式用 PD 执行器阻尼，允许默认随挥。
+#   - 本文件不写入 src/；模型 XML/URDF/资产未修改（阻尼/armature 是 V12 R1D
+#     路径的显式估计仿真参数，见 src/sim/v12_robot_adapter.py 中常量注释）。
+schema_version: 1
+scenario_id: r1d_v12_active
+frozen_at: "2026-11-19"
+robot_id: unitree_r1d
+dev_seed: 42
+holdout_seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+
+common_physical:
+  robot_profile: configs/robots/r1d_right.yaml
+  runtime_config: configs/robots/r1d_v12_runtime_right.yaml
+  task_config: configs/r1d_v12.yaml
+  racket_config: configs/rackets/blade100_v9_reference.yaml
+  target_center: [-11.75, -0.9, 1.25]
+  workspace_radius: 0.80
+  serve:
+    mode: serve_box
+    ball_speed: 7.0
+    use_bounce: true
+    bounce_restitution: 0.75
+    serve_distance: 8.0
+    serve_height: 1.2
+    half_size: [0.1, 4.0, 0.15]
+  # V12 R1D 显式估计关节动力学（URDF 未声明；参考 RM65 同口径；estimated/provisional）
+  r1d_estimated_joint_damping: [2.0, 2.0, 1.0, 0.5, 0.3, 0.2, 0.1]
+  r1d_estimated_joint_armature: [0.2, 0.2, 0.1, 0.05, 0.03, 0.02, 0.01]
+  # ProfileSimEnv 解析弹跳与 RM65Env._handle_ball_bounce 同式：
+  #   z<r & vz<0 → z=r, vz=-vz*BOUNCE_RESTITUTION, vx/vy*=0.95
+  ball_bounce_model: analytic_parity_with_RM65Env
+  racket_mount_estimated: true
+
+modes:
+  torque:
+    actuator_mode: torque
+    overrides:
+      mpc.total_horizon: 270
+      mpc.fixed_horizon: 260
+      mpc.far_threshold: 300
+      mpc.racket_speed: 3.0
+      mpc.target_speed: 3.0
+      mpc.normal_weight: 0
+      mpc.no_follow_through: true
+    expected:
+      seed: 42
+      physical_hit: true
+      physical_hit_type: active
+      physical_hit_step: 259
+      contact_surface_kind: face
+      contact_other_geom_name: racket_face
+      contact_distance_m: -0.007511913687315908
+      face_speed_m_s: 1.7893074935443316
+      failure_reason: null
+      total_steps: 270
+  position:
+    actuator_mode: position
+    overrides:
+      mpc.total_horizon: 270
+      mpc.fixed_horizon: 260
+      mpc.racket_speed: 1.5
+      mpc.target_speed: 1.5
+      mpc.normal_weight: 0
+    expected:
+      seed: 42
+      physical_hit: true
+      physical_hit_type: active
+      physical_hit_step: 255
+      contact_surface_kind: face
+      contact_other_geom_name: racket_face
+      contact_distance_m: -0.00543653547638882
+      face_speed_m_s: 0.8411927736480601
+      failure_reason: null
+      total_steps: 318
+
+# 冻结运行产物中的输入配置哈希（T6 产物 input_sha256；同一组文件两模式一致）
+input_sha256:
+  robot_profile: b72796f0cac0f0e3339538486f1eafb84b35bbbf23bda22c21e38e29b1626c42
+  runtime: 8eafd10a505a5188eec4cfb52b13058971bd6ca5c581b51c936cda2a2b7169dc
+  task: 522c487c0b432abf7a462989969f15a374f1a910c24bccfa9b5b3ed2e619f426
+  racket: ca90186dbf7579bd640e4d8407e114ba563f9d135887593c8ab05665ce7a4554
+  model: 7a9116cfb1fbaf7863771d7ecd5e9f4219dfc67d7207321c829d95cd2171cec5
+  assets: 636a6560b5133a08b3a8dc195ac3b6cfabd5485d161bc861a3ef258e56f47f82
+  # 2026-11-19 R07 修正后重冻：唯一差异为 ball_initial.velocity[2]
+  # 0.12539641386780637 -> 0.17444641386780635（真实初速，+g*dt=+0.04905）。
+  scene_snapshot: 6562820bd5a2681779472f5037d231e47c6d1cdc1b8d1ff34f90a39e890c0573
+
+# 固定案例复现命令（两模式各一回合；--output 目录任意）
+reproduce_commands:
+  torque: >-
+    python scripts/rm65_mpc_v12.py --robot-config configs/robots/r1d_right.yaml
+    --seed 42 --no-plot --serve-box --ball-speed 7
+    --output <DIR> --task-overrides mpc.total_horizon=270
+    --task-overrides mpc.fixed_horizon=260 --task-overrides mpc.far_threshold=300
+    --task-overrides mpc.racket_speed=3.0 --task-overrides mpc.target_speed=3.0
+    --task-overrides mpc.normal_weight=0 --task-overrides mpc.no_follow_through=true
+  position: >-
+    python scripts/rm65_mpc_v12.py --robot-config configs/robots/r1d_right.yaml
+    --seed 42 --no-plot --serve-box --ball-speed 7 --position-mode
+    --output <DIR> --task-overrides mpc.total_horizon=270
+    --task-overrides mpc.fixed_horizon=260
+    --task-overrides mpc.racket_speed=1.5 --task-overrides mpc.target_speed=1.5
+    --task-overrides mpc.normal_weight=0
+
+# 备注：
+# - 判据来自 T6 v2 产物：physical_hit=true、physical_hit_type=active、
+#   contact_events 中 surface_kind=face & physical_contact=true & distance_m<=0，
+#   同一物理步 face_speed_m_s>0.3；failure_reason=null（触前无 safety_filter_stop，
+#   torque 模式 no_follow_through 使回合在 270 步（触后 11 步）结束，避开触后腕部
+#   过冲；position 模式默认随挥在 318 步自然 mpc_done）。
+# - 留出集不设命中率下限；任何 safety_stop/miss/passive/错误/超时都逐行保留在
+#   validation/results.csv 与 results.jsonl。

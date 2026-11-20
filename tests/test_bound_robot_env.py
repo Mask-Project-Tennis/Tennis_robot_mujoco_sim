@@ -838,9 +838,9 @@ def test_fk_normal_jacobian_match_model_kinematics(case_name: str) -> None:
         kin.set_state(x)
         pos, rot = kin.tcp_pose()
         np.testing.assert_allclose(env.get_ee_pos(), pos, atol=1e-8)
-        # 法向约定：TCP site 局部 +Z（对照 ModelKinematics 旋转第 3 列）
+        # 法向约定：TCP site 局部 +X（对照 ModelKinematics 旋转第 1 列）
         np.testing.assert_allclose(
-            env.get_ee_normal(), rot[:, 2] / np.linalg.norm(rot[:, 2]), atol=1e-8
+            env.get_ee_normal(), rot[:, 0] / np.linalg.norm(rot[:, 0]), atol=1e-8
         )
         jacp, jacr = kin.tcp_jacobian()
         np.testing.assert_allclose(env.get_ee_jacp(), jacp, atol=1e-8)

@@ -10,7 +10,6 @@
 from __future__ import annotations
 
 import numpy as np
-import mujoco
 
 from src.sim.rm65_env import RM65Env
 

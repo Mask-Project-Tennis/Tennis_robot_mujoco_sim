@@ -31,7 +31,7 @@ from typing import Any
 # 独立运行（打印矩阵清单）时保证可 import scripts.*
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from scripts.exp.batch_runner import ExperimentSpec
+from scripts.exp.batch_runner import ExperimentSpec, RunIdentity
 
 SEEDS_P1 = 200   # P1 主线统一 200 seeds（加菜 C）
 SEEDS_P2 = 100   # P2 网格实验 100 seeds
@@ -207,26 +207,67 @@ def _sensitivity_grid() -> list[dict[str, Any]]:
     return grid
 
 
-def _exp28_seed_pool(max_disc: int = 4) -> list[tuple[tuple[float, float] | None, list[int]]]:
-    """exp28（chat14 碰撞常开验证）代表 seed 选择：从 exp24 CSV 按格挑选。
+def _resolve_data_root(data_root: Path | str | None) -> Path:
+    """解析数据根目录（默认 <repo>/experiment_data）；不做旧路径回退。"""
+    return (Path(data_root) if data_root is not None
+            else Path(__file__).resolve().parent.parent.parent / "experiment_data")
+
+
+def _exp28_seed_pool(
+    max_disc: int = 4,
+    data_root: Path | str | None = None,
+) -> list[tuple[tuple[float, float] | None, list[int]]]:
+    """exp28（chat14 碰撞常开验证）代表 seed 选择：从当前 data-root 的 exp24 CSV 按格挑选。
+
+    延迟读取：调用时才访问 ``<data_root>/exp24_shared_full/results.csv``，
+    不退回仓库旧 ``experiment_data`` 固定路径（T8a 矩阵要求）。
 
     每格优先级：tube 命中/full 未命中的不一致 seed（走廊>full 点估计的根源样本）、
     point-target 命中、full 命中；另加一个名义（无扰动，9 m/s）组。
+
+    Args:
+        max_disc: 每格最多挑选的不一致 seed 数。
+        data_root: 数据根目录（默认 <repo>/experiment_data）。
+
+    Returns:
+        [(扰动格 (time_ms, space_m) 或 None, seed 列表), ...]（6 项，末项为名义组）。
+
+    Raises:
+        FileNotFoundError: 当前数据根下缺少 exp24_shared_full/results.csv。
+        ValueError: CSV 存在但没有可用行 / 所有扰动格都选不出 seed（数据不足）。
     """
     import csv
     import json as _json
 
-    data_dir = Path(__file__).resolve().parent.parent.parent / "experiment_data"
+    root = _resolve_data_root(data_root)
+    csv_path = root / "exp24_shared_full" / "results.csv"
+    if not csv_path.is_file():
+        raise FileNotFoundError(
+            f"exp28 seed 池需要 exp24 结果：{csv_path} 不存在。"
+            f"请先用 --data-root 指向含 exp24_shared_full/results.csv 的数据根，"
+            f"或先在当前数据根跑 exp24_shared_full。")
+
     rows: dict[tuple[tuple[float, float], str], dict[int, bool]] = {}
-    with (data_dir / "exp24_shared_full" / "results.csv").open(encoding="utf-8") as f:
+    n_rows = 0
+    with csv_path.open(encoding="utf-8") as f:
         for r in csv.DictReader(f):
             if r.get("error"):
                 continue
-            cfg = _json.loads(r["config_json"])
-            cell = (float(cfg.get("--time-perturb-ms") or 0.0),
-                    float(cfg["--space-perturb-m"]))
-            rows.setdefault((cell, cfg["--ablation"]), {})[int(r["seed"])] = (
+            try:
+                cfg = _json.loads(r["config_json"])
+                cell = (float(cfg.get("--time-perturb-ms") or 0.0),
+                        float(cfg["--space-perturb-m"]))
+                seed = int(r["seed"])
+                ablation = str(cfg["--ablation"])
+            except (KeyError, TypeError, ValueError, _json.JSONDecodeError):
+                continue
+            rows.setdefault((cell, ablation), {})[seed] = (
                 (r.get("hit_type") or "").strip() == "active")
+            n_rows += 1
+    if n_rows == 0:
+        raise ValueError(
+            f"exp28 seed 池数据不足：{csv_path} 没有解析出任何可用行"
+            f"（需要 config_json 含 --space-perturb-m/--ablation 且 error 为空）。")
 
     cells = [(0.0, 0.1), (0.0, 0.2), (0.0, 0.3), (25.0, 0.2), (50.0, 0.2)]
     pool: list[tuple[tuple[float, float] | None, list[int]]] = []
@@ -239,15 +280,70 @@ def _exp28_seed_pool(max_disc: int = 4) -> list[tuple[tuple[float, float] | None
         for s in seeds:                      # 1. 不一致 seed（走廊命中/full 未命中）
             if tube[s] and not full[s] and len(picked) < max_disc:
                 picked.append(s)
-        for key, cap in ((none_, 2), (full, 2)):   # 2/3. pt 命中、full 命中
+        for key in (none_, full):            # 2/3. pt 命中、full 命中
             for s in seeds:
                 if key[s] and s not in picked and len(picked) < max_disc + 4:
                     picked.append(s)
         if not picked:                       # 兜底：任何 seed 都没有就取前 6 个
             picked = seeds[:6]
         pool.append((cell, picked))
+
+    if not any(picked for _cell, picked in pool):
+        raise ValueError(
+            f"exp28 seed 池数据不足：{csv_path} 中五类扰动格均无共同 seed"
+            f"（tube_only/full/none 三档交集为空）。请先补跑 exp24_shared_full。")
     pool.append((None, list(range(1, 6))))   # 名义组（无扰动）
     return pool
+
+
+def _exp28_grid(data_root: Path | str | None = None) -> list[dict[str, Any]]:
+    """按当前数据根构造 exp28 参数网格（四档机制 × 代表 seed）。"""
+    return [
+        {**base, "--seed": seed}
+        for cell, seeds in _exp28_seed_pool(data_root=data_root)
+        for mode in MODES_MECHANISM
+        for base in [({
+            "--serve-box": None, "--ball-speed": 9,
+            "--ablation": mode, "--no-plot": None,
+            "--always-collision": None,
+        } if cell is None else {
+            "--serve-box": None, "--ball-speed": 9,
+            "--ablation": mode, "--no-plot": None,
+            "--always-collision": None,
+            "--random-perturb": None, "--perturb-sign": "random",
+            "--space-perturb-m": cell[1], "--space-perturb-min-m": 0.0,
+            "--spatial-perturb-target": "ballstate",
+            "--shared-input-full": None,
+            **({"--time-perturb-ms": cell[0], "--time-perturb-min-ms": 0}
+               if cell[0] > 0 else {}),
+        })]
+        for seed in seeds
+    ]
+
+
+def make_exp28_spec(data_root: Path | str | None = None) -> "ExperimentSpec":
+    """构造 exp28 实验定义（延迟读取 exp24 CSV，import 阶段不读盘）。
+
+    Args:
+        data_root: 数据根目录（默认 <repo>/experiment_data）。
+
+    Returns:
+        ExperimentSpec（grid_factory 在 execute 时按 data_root 解析）。
+    """
+    return ExperimentSpec(
+        name="exp28_always_collision",
+        script=V12,
+        report_ref="chat14 审稿 P4（最建议）: 碰撞常开验证 —— --always-collision 使"
+                   "击球前球-拍碰撞常开（绕过 k_hit/距离窗口判定），对 exp24 五格与"
+                   "名义条件的代表 seed 重跑四档，核对裁决是否与窗口口径一致。"
+                   "每格 ≤10 seeds（不一致/pt 命中/full 命中优先）× 4 档 + 名义 5 seeds。",
+        identity=RunIdentity(robot_id="rm65", racket_id="rm65_legacy",
+                             config_hash="legacy", metric_schema="v12_result_v1"),
+        # 延迟工厂在运行期接收 run_batch 解析好的 data-root；若调用方
+        # 显式给 data_root 则用它，否则回退到构造时参数（默认 None →
+        # 由 _exp28_grid 解析 <repo>/experiment_data）。
+        grid_factory=lambda root: _exp28_grid(root if root is not None else data_root),
+    )
 
 
 EXPERIMENTS: dict[str, ExperimentSpec] = {
@@ -559,42 +655,76 @@ EXPERIMENTS: dict[str, ExperimentSpec] = {
             for seed in range(1, SEEDS_P2 + 1)
         ],
     ),
-    "exp28_always_collision": ExperimentSpec(
-        name="exp28_always_collision",
-        script=V12,
-        report_ref="chat14 审稿 P4（最建议）: 碰撞常开验证 —— --always-collision 使"
-                   "击球前球-拍碰撞常开（绕过 k_hit/距离窗口判定），对 exp24 五格与"
-                   "名义条件的代表 seed 重跑四档，核对裁决是否与窗口口径一致。"
-                   "每格 ≤10 seeds（不一致/pt 命中/full 命中优先）× 4 档 + 名义 5 seeds。",
-        grid=[
-            {**base, "--seed": seed}
-            for cell, seeds in _exp28_seed_pool()
-            for mode in MODES_MECHANISM
-            for base in [({
-                "--serve-box": None, "--ball-speed": 9,
-                "--ablation": mode, "--no-plot": None,
-                "--always-collision": None,
-            } if cell is None else {
-                "--serve-box": None, "--ball-speed": 9,
-                "--ablation": mode, "--no-plot": None,
-                "--always-collision": None,
-                "--random-perturb": None, "--perturb-sign": "random",
-                "--space-perturb-m": cell[1], "--space-perturb-min-m": 0.0,
-                "--spatial-perturb-target": "ballstate",
-                "--shared-input-full": None,
-                **({"--time-perturb-ms": cell[0], "--time-perturb-min-ms": 0}
-                   if cell[0] > 0 else {}),
-            })]
-            for seed in seeds
-        ],
-    ),
+    "exp28_always_collision": make_exp28_spec(),
 }
 
 
+# ---------------------------------------------------------------------------
+# R1D 论文 smoke（T8a）：仅暴露延迟工厂，不并入 EXPERIMENTS
+# ---------------------------------------------------------------------------
+R1D_SMOKE_MANIFEST_PATH = (
+    Path(__file__).resolve().parent.parent.parent
+    / "configs" / "experiments" / "r1d_paper_smoke.yaml"
+)
+
+
+def make_r1d_paper_smoke_specs(
+    manifest_path: Path | str | None = None,
+    *,
+    data_root: Path | str | None = None,
+    output: Path | str | None = None,
+    seeds: list[int] | None = None,
+    mode: str = "torque",
+    limit: int | None = None,
+    timeout_s: float | None = None,
+    workers: int = 1,
+) -> list[ExperimentSpec]:
+    """延迟构建 R1D 论文 smoke 的 ExperimentSpec 列表（T8a/T8c 共享工厂）。
+
+    不并入旧 ``EXPERIMENTS``（默认 22 个键与旧 RM65 行为保持不变）；
+    仅由 ``run_r1d_paper_smoke.py`` 或显式调用方使用。
+
+    Args:
+        manifest_path: smoke manifest 路径（默认 configs/experiments/r1d_paper_smoke.yaml）。
+        data_root: batch CSV 数据根（默认 <output>/batch）。
+        output: 本次运行根目录（默认 experiment_data/r1d_v12_parity/paper_smoke）。
+        seeds: 只跑指定 seed 列表（None 用 manifest seeds）。
+        mode: torque/position/both 过滤。
+        limit: 只保留前 N 个 ready 任务。
+        timeout_s: 覆盖 manifest 默认超时（秒）。
+        workers: 记录到 spec 的预期 workers（供调用方校验）。
+
+    Returns:
+        ExperimentSpec 列表（每个 manifest 实验一个）。
+    """
+    from scripts.exp.run_r1d_paper_smoke import build_specs_from_manifest
+
+    path = Path(manifest_path) if manifest_path is not None else R1D_SMOKE_MANIFEST_PATH
+    return build_specs_from_manifest(
+        path,
+        data_root=data_root,
+        output=output,
+        seeds=seeds,
+        mode=mode,
+        limit=limit,
+        timeout_s=timeout_s,
+        workers=workers,
+    )
+
+
 if __name__ == "__main__":
+    # 显式解析当前数据根并传给延迟工厂，保证 --data-root 语义与 import
+    # 期打印一致（默认旧根，不读取不存在的目录）。
+    default_data_root = _resolve_data_root(None)
     total = 0
     for name, spec in EXPERIMENTS.items():
-        n = len(spec.grid)
+        try:
+            n = len(spec.materialize_grid(default_data_root))
+        except FileNotFoundError as exc:
+            print(f"{name:28s} {'lazy':>6} runs  [{exc}]")
+            continue
         total += n
-        print(f"{name:20s} {n:>6} runs  [{spec.report_ref[:50]}]")
-    print(f"{'合计':20s} {total:>6} runs")
+        print(f"{name:28s} {n:>6} runs  [{spec.report_ref[:40]}]")
+    print(f"{'合计':28s} {total:>6} runs")
+    print(f"\nR1D 论文 smoke 工厂: {R1D_SMOKE_MANIFEST_PATH}")
+    print("  python scripts/exp/run_r1d_paper_smoke.py --dry-run")

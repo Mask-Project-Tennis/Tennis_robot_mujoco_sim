@@ -94,6 +94,7 @@ mujoco_sim/
 │   │   ├── __init__.py                # 纯类型/解析函数重导出（RobotProfile/RuntimeParameters eager + ModelBinding 延迟；import src.robot 不加载 mujoco）
 │   │   ├── constants.py               # 共享常量（DT/INIT_Q/SHOULDER_POS/WORKSPACE_RADIUS/KP/KD，单一事实来源）
 │   │   ├── robot_profile.py           # RobotProfile 机器人描述加载器（configs/robots/*.yaml，纯配置层，不含数值参数）
+│   │   ├── racket_profile.py          # RacketProfile 独立球拍参数加载器（几何/质量/COM/惯量/安装/来源，SI；阶段 T1）
 │   │   ├── model_binding.py           # ModelBinding 模型名称绑定器（名称→qpos/qvel/执行器地址，只接受标量关节）
 │   │   ├── runtime_parameters.py      # RobotRuntimeParameters/SceneParameters 运行参数纯参数层（YAML 解析+维数/单位/能力校验，阶段 2）
 │   │   ├── model_factory.py           # R1D 场景模型工厂（load_robot_model→RobotModelBundle，模板生成+参数化加载+jnt_range 回填，阶段 2）
@@ -165,7 +166,11 @@ mujoco_sim/
 │   │   ├── profile_sim_env.py         # ProfileSimEnv 带球执行环境（step_full/球状态/碰撞开关，阶段 3）
 │   │   ├── env_factory.py             # build_r1d_environments 执行/规划双环境组装（阶段 3）
 │   │   ├── collision_checks.py        # has_forbidden_contact / ForbiddenContactChecker（禁止机身接触，阶段 3）
-│   │   └── r1d_runner.py              # ★ run_r1d_episode R1D 单臂闭环入口（JSON/NPZ 产物，阶段 3）
+│   │   ├── r1d_runner.py              # run_r1d_episode 旧 R1D 闭环入口（JSON/NPZ 产物，阶段 3；T5 后保留兼容）
+│   │   ├── v12_config.py              # resolve_v12_config：V12 统一配置解析/R1D 注册表/稀疏覆盖（T3）
+│   │   ├── v12_robot_adapter.py       # build_v12_robot / V12RobotBundle / SimulationEnv：RM65/R1D 双环境适配（T4）
+│   │   ├── v12_episode.py             # run_v12_episode / V12EpisodeResult：V12 共享 Episode 管线（T5）
+│   │   └── episode_artifacts.py       # v12_episode_v2 产物、ContactEvent、快照/回放、资源哈希（T6）
 │   ├── perception/                    # 感知模块（噪声+滤波）
 │   │   ├── __init__.py
 │   │   ├── ball_estimator.py          # 6D 卡尔曼滤波器（位置+速度，匀速+重力过程模型）
@@ -208,6 +213,10 @@ mujoco_sim/
 │   ├── robots/r1d_sim_runtime_left.yaml / r1d_sim_runtime_right.yaml # R1D 仿真运行参数（仿真临时数值，全部 provisional，阶段 3）
 │   ├── r1d_sim_left.yaml / r1d_sim_right.yaml # R1D 仿真任务配置（来球/工作区/MPC/代价，阶段 3；3.11 定稿参数见文件头）
 │   ├── scenarios/r1d_stage3_reachable.yaml    # 阶段 3 固定可达来球案例（seed 42，expected_hit_type: active）
+│   ├── r1d_v12.yaml                   # R1D×V12 任务覆盖（target 等稀疏差异，T3/T7）
+│   ├── robots/r1d_v12_runtime_right.yaml  # R1D×V12 运行参数（init_q/PD/限位/底座/升降/躯干；provisional，T2/T7）
+│   ├── rackets/rm65_legacy.yaml / blade100_v9_reference.yaml  # 球拍档案（旧拍 XML 导出 / Wilson Blade 100 V9 实测参考，T1）
+│   ├── scenarios/r1d_v12_active.yaml  # R1D×V12 两模式固定案例冻结覆盖与复现命令（T7）
 │   ├── robots/d2_runtime.yaml         # D2 运行参数（历史资产，不作 R1-A7-D 配置，阶段 2）
 │   ├── mpc.yaml                       # MPC 专用参数
 │   ├── v4_follow_through.yaml         # V4 随挥策略配置
@@ -222,14 +231,14 @@ mujoco_sim/
 │   ├── run_real_robot.py                         # 真机入口
 │   ├── replay_trajectory.py                      # 轨迹回放脚本（含 --speed 安全检查）
 │   ├── sim/            # 独立仿真（fast/ilqt/train 等工具）
-│   ├── exp/            # 实验设施（活跃: exp9-15 包装·批量·运行器）
-│   ├── extract/        # 结果提取 9 个（日志→CSV）
-│   ├── plot/           # 论文图表 14 个
+│   ├── exp/            # 实验设施（活跃: exp9-15 包装·批量·运行器；含 run_r1d_paper_smoke.py）
+│   ├── extract/        # 结果提取（日志/产物→CSV/JSON；含 extract_r1d_smoke_stats.py）
+│   ├── plot/           # 论文图表（含 plot_r1d_smoke_stats.py per-case smoke 图）
 │   ├── tools/          # 独立工具 10 个（查看器·扫描·诊断·可视化）
 │   ├── test/           # 快速验证 10 个
 │   ├── archive/        # ★ 已归档脚本（V6-V10 + tube + 旧实验，详见 archive/README.md）
 │   └── README.md       # 完整清单与说明
-├── tests/                             # 单元测试（全量 1271 passed，0 skipped，89 个测试文件；C++ 扩展已本地编译，直接 pytest tests/ 即可）
+├── tests/                             # 单元测试（全量 pytest tests/ 当前 12 failed + 3 errors（T0 基线既有）、1579 passed；C++ 扩展已本地编译）
 │   ├── test_kinematics.py
 │   ├── test_linearize.py
 │   ├── test_mpc.py
@@ -280,6 +289,9 @@ mujoco_sim/
 │   ├── test_r1d_sim_pipeline.py            # R1D 仿真闭环管线测试（阶段 3）
 │   ├── test_multi_robot_sim_entrypoint.py  # V12 多机器人 CLI 分派/产物 schema 测试（阶段 3）
 │   ├── test_r1d_closed_loop.py             # ★ R1D 固定可达案例闭环验收 + RM65 seed42 逐位回归（阶段 3.11）
+│   ├── test_v12_config.py / test_v12_robot_adapter.py / test_v12_shared_pipeline.py  # V12 配置/适配/共享管线（T3–T5）
+│   ├── test_episode_artifacts.py / test_multi_robot_replay.py / test_r1d_paper_pipeline.py  # v2 产物/回放/论文链路（T6/T8c）
+│   ├── test_racket_profile.py / test_r1d_v12_scene.py / test_profile_sim_bounce.py / test_r1d_v12_damping.py / test_r1d_v12_acceptance.py  # R1D×V12 资产/物理/验收（T1/T2/T7）
 │   └── ... （完整清单见 tests/ 目录）
 ├── experiment_data/                  # 实验数据（按 exp1~exp12 组织）
 │   └── README.md                     # 数据存储规范
@@ -301,7 +313,8 @@ mujoco_sim/
 │   ├── rm65_mpc_ilqr_core.md         # MPC+iLQR 核心机制
 │   ├── rm65_mpc_ilqr_pipeline.md     # MPC+iLQR Pipeline
 │   ├── rm65_tennis_report.md         # 项目技术总览
-│   └── rm65_mpc_fast_group_report.md # 组会汇报材料
+│   ├── rm65_mpc_fast_group_report.md # 组会汇报材料
+│   └── r1d_v12_usage.md              # R1D×V12 使用/复现/限制（T9）
 ├── results/                          # 输出目录（日志、轨迹、视频）
 └── requirements.txt
 ```
@@ -459,6 +472,9 @@ mujoco_sim/
 - 关节安全扫描: `python scripts/scan_joint_safety.py`
 - R1D 右臂闭环仿真（阶段 3，离线，双侧渲染）: `python scripts/rm65_mpc_v12.py --robot-config configs/robots/r1d_right.yaml --runtime-config configs/robots/r1d_sim_runtime_right.yaml --sim-task-config configs/r1d_sim_right.yaml --output results/r1d_episode_right --seed 42 --no-plot`（加 `--viewer` 在产物写完后 0.2× 慢放循环回放；R1D 路径只接受 --robot-config/--runtime-config/--sim-task-config/--output/--seed/--no-plot/--viewer/--log-level，其余旧参数退出码 2；左侧把 right 换成 left，仅作渲染/短回合验证）
 - R1D 固定可达案例（阶段 3 验收，右臂）: `configs/scenarios/r1d_stage3_reachable.yaml`（右臂三路径、seed 42、expected_hit_type: active）
+- R1D×V12 固定案例（2026-11-19 硬验收，右臂，两模式真实拍面 active）: 见 `docs/r1d_v12_usage.md` §4；torque/position 均需 `--robot-config configs/robots/r1d_right.yaml --seed 42 --no-plot --serve-box --ball-speed 7` 加 `--task-overrides`（h270/fixed260 等）
+- R1D×V12 论文 smoke: `python scripts/exp/run_r1d_paper_smoke.py --manifest configs/experiments/r1d_paper_smoke.yaml --output experiment_data/r1d_v12_parity/paper_smoke`（详见 usage 文档 §8）
+- 多机器人关节查看器: `python scripts/tools/rm65_joint_viewer.py`（默认 RM65；加 `--robot-config configs/robots/r1d_right.yaml --racket-config configs/rackets/blade100_v9_reference.yaml` 查看 R1D 7 滑条）
 - 运行测试: `pytest tests/`
 - 代码检查: `ruff check src/ tests/ scripts/`
 - 类型检查: `mypy src/`
@@ -475,6 +491,39 @@ mujoco_sim/
 - 配置分层：描述 `configs/robots/r1d_{left,right}.yaml`（阶段 2，非临时数值）；运行参数 `configs/robots/r1d_sim_runtime_{left,right}.yaml`（仿真临时值，全部 provisional）；仿真任务 `configs/r1d_sim_{left,right}.yaml`（来球/工作区/MPC/代价）；固定可达案例 `configs/scenarios/r1d_stage3_reachable.yaml`（右臂三路径、seed 42、expected_hit_type: active）。
 - 本机实测（2026-11-18，Windows/py3.11/CPU）：右固定案例 seed 42 真实命中 `hit_type=active`（step 89、拍面接触速度 0.574 m/s > 0.3、击球帧球心—拍心距离 3.09 cm、111 控制步、`mpc_done=true`、禁止机身接触 0 帧），同配置同 seed 连跑 3 次逐位一致；左侧改为渲染/短回合验证（允许未命中）。规划耗时属离线仿真量级（右固定案例首 plan ≈6.5–8 s、整回合 ≈8–10 s），**不得称实时**。
 - 验收状态：阶段 3 初版于 2026-11-16 以左侧固定案例通过（历史证据见 `docs/experiments/reports/2026-11-16-unitree-stage3.md`）；2026-11-18 按“双侧渲染、右臂验收”重标定后，`tests/test_r1d_closed_loop.py` 4 passed（右固定案例 active + 3 次逐位一致、左短回合、RM65 回归），全量 `pytest tests/` **1271 passed, 0 skipped（148.67 s）**，`--viewer` 真实窗口标题 `MuJoCo : r1d_right_tennis_scene` 已验证；离屏渲染见 `results/r1d_episode_right/scene.png`。
+
+### R1D × V12 Parity（阶段 4 / T0–T9，2026-11-19）
+
+- 入口：同一 `scripts/rm65_mpc_v12.py`；`--robot-config configs/robots/r1d_right.yaml` 时经
+  `src/sim/v12_config.py`（T3）→ `src/sim/v12_robot_adapter.py`（T4）→ `src/sim/v12_episode.py`（T5）→
+  `src/sim/episode_artifacts.py`（T6）执行共享 V12 管线；`src/sim/r1d_runner.py` 旧 stage3 入口保留兼容。
+- 模型/维度：右臂 7 主动 DOF + 自由球；执行环境 `nq=14/nv=13`，规划环境 `nq=nv=7`，`nu=7`；
+  左臂固定姿态静态渲染。R1D 执行侧球弹跳在 `ProfileSimEnv.step()` 中与 RM65 解析规则逐式一致
+  （`z<r & vz<0 → z=r、vz=-vz*0.75、vx/vy*0.95`，r=0.033）。
+- 配置分层：描述 `configs/robots/r1d_right.yaml`；V12 runtime `configs/robots/r1d_v12_runtime_right.yaml`
+  （provisional）；任务覆盖 `configs/r1d_v12.yaml`；球拍 `configs/rackets/blade100_v9_reference.yaml`
+  （默认）/`rm65_legacy.yaml`（旧拍对照）；冻结案例 `configs/scenarios/r1d_v12_active.yaml`。
+  优先级：原 V12 解析 → R1D 稀疏覆盖 → 显式 CLI/`--task-overrides`。
+- 球拍：`RacketProfile` 为唯一物理来源（几何/质量/COM/惯量/安装/来源）；TCP=拍面几何中心；
+  视觉/碰撞/惯量同源。旧拍从 `src/robot/rm65_model.xml` 导出（provenance=`legacy_model`）；成人拍
+  参考 Wilson Blade 100 V9（穿线质量 0.316 kg，估计惯量/安装，T7 装配标定后改 measured）。
+- 产物：`v12_episode_v2` JSON/NPZ（含 `robot_id/mode/racket_id/joint_names/config_sha256/input_sha256/
+  seed/backend/hit.contact_events/failure_reason`）+ `snapshot/` 源配置/模型快照；旧 RM65 输出与旧
+  R1D `r1d_sim_episode_v1` 兼容。ContactEvent 仅 `distance_m<=0` 记 physical；正距离 margin 只进
+  proximity；失败回合也落盘。回放优先快照，模型哈希不符拒绝。
+- 硬验收（seed 42，固定场景）：torque step259 face 1.7893 m/s、position step255 face 0.8412 m/s，
+  两模式 `physical_hit_type=active`、`failure_reason=null`、禁止碰/紧急停止 0；`tests/test_r1d_v12_acceptance.py`
+  3 passed。两模式 wall 约 59–95 s，首 plan 36–61 s（Python FD），**不得称实时**。
+- 留出集（seeds 0–9 × 两模式，20/20 status=ok，无删行）：torque 10/10 active 但接触后 7–11 步
+  safety_stop；position 3/10 active；如实报告，不设下限、不反向调参。
+- 限制：R1D 关节阻尼/armature 在 V12 路径按 estimated 注入（R1D URDF 未声明，参考 RM65 同口径，
+  不改 XML/URDF；替换官方值需重跑验收/留出）；R1D X 墙未启用（由命名保护接触对承担）；左臂仅渲染；
+  未装 unitree_sdk2、未连真机。全量测试 12F+3E 为 T0 既有旧测试，逐 ID 见
+  `docs/experiments/reports/2026-11-18-r1d-v12-parity.md` 与 T9 报告。
+- 论文链路：`scripts/exp/run_r1d_paper_smoke.py`（manifest 驱动，19 组+3 额外依赖，每 cell ≥2 共同
+  seed 100/101）→ extract physical/legacy → `paper_figs.py --data-root/--out/--fig table3` /
+  `render_swing_hero.py`；本任务只做 smoke，未跑完整批量，不改 `paper/` 或旧 `experiment_data/exp*`。
+- 完整使用/复现/限制：`docs/r1d_v12_usage.md`。
 
 ## 批量实验架构
 
