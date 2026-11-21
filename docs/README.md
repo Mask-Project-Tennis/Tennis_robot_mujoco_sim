@@ -1,5 +1,13 @@
 # 项目文档索引
 
+## 可维护性与结构调整
+
+- 排查大文件、大类及职责集中问题：[2026-11-20 可维护性调查](architecture/2026-11-20-maintainability-survey.md)。
+- 评审仿真与实验链路的子包划分、兼容入口、README 按需发现及验收步骤：[子包拆分计划](architecture/2026-11-20-sim-experiment-decomposition.md)（已获确认并实施完成）。
+- 使用子代理并行实施上述拆分：[Subagent 并行执行计划](architecture/2026-11-20-sim-experiment-subagent-plan.md)（三轮调度、独占写集、契约冻结、审查与集成关卡；W2 已实施完成）。
+- 施工组织、基线冻结、worktree/Git 集成与每轮验收：[施工方案](architecture/2026-11-20-sim-experiment-construction-plan.md)（1 集成 + 3 任务 worktree、每轮全量 gate；2026-11-20 开始执行）。
+- 最终拆分结果与验收证据：[子包拆分结果](architecture/2026-11-20-sim-experiment-decomposition-result.md)（P1/R1/G1/R2/G2/R3/G3/F0；旧入口保持兼容）。
+
 ## 目录结构
 
 ```
@@ -17,7 +25,13 @@ docs/
 ├── rm65_tennis_report.md              ← 项目技术总览
 ├── rm65_mpc_fast_group_report.md      ← 组会汇报材料
 ├── r1d_v12_usage.md                   ← R1D×V12 使用/复现/限制（T9）
-└── r1d_v12_parallel_repair_plan.md    ← 复审修复与球场白线的 subagent 并行计划（已实施，见第 15 节）
+├── r1d_v12_parallel_repair_plan.md    ← 复审修复与球场白线的 subagent 并行计划（已实施，见第 15 节）
+└── architecture/
+    ├── 2026-11-20-maintainability-survey.md      ← 大文件/职责调查
+    ├── 2026-11-20-sim-experiment-decomposition.md ← 子包拆分设计
+    ├── 2026-11-20-sim-experiment-subagent-plan.md ← 并行执行计划
+    ├── 2026-11-20-sim-experiment-construction-plan.md ← 施工方案
+    └── 2026-11-20-sim-experiment-decomposition-result.md ← 最终结果/验收
 ```
 
 ## 参考文档

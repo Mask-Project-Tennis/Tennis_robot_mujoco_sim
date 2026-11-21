@@ -93,11 +93,13 @@ mujoco_sim/
 │   ├── robot/                         # 机器人模型定义（多机器人描述/参数/绑定/模型工厂）
 │   │   ├── __init__.py                # 纯类型/解析函数重导出（RobotProfile/RuntimeParameters eager + ModelBinding 延迟；import src.robot 不加载 mujoco）
 │   │   ├── constants.py               # 共享常量（DT/INIT_Q/SHOULDER_POS/WORKSPACE_RADIUS/KP/KD，单一事实来源）
+│   │   ├── model_assets/              # 模型文件级依赖扫描（references/dependencies/README；路径归一化+闭包+缺失清单）
+│   │   ├── model_building/            # 模型装配（types/template/racket/scene/loading/README；RacketAssembly/RobotModelBundle 唯一类定义）
 │   │   ├── robot_profile.py           # RobotProfile 机器人描述加载器（configs/robots/*.yaml，纯配置层，不含数值参数）
 │   │   ├── racket_profile.py          # RacketProfile 独立球拍参数加载器（几何/质量/COM/惯量/安装/来源，SI；阶段 T1）
 │   │   ├── model_binding.py           # ModelBinding 模型名称绑定器（名称→qpos/qvel/执行器地址，只接受标量关节）
 │   │   ├── runtime_parameters.py      # RobotRuntimeParameters/SceneParameters 运行参数纯参数层（YAML 解析+维数/单位/能力校验，阶段 2）
-│   │   ├── model_factory.py           # R1D 场景模型工厂（load_robot_model→RobotModelBundle，模板生成+参数化加载+jnt_range 回填，阶段 2）
+│   │   ├── model_factory.py           # 兼容 facade：load_robot_model/collect_model_dependencies/write_r1d_model_template（实现已拆到 model_assets/model_building）
 │   │   ├── model_kinematics.py        # ModelKinematics 名称映射运动学探针（TCP 位姿/雅可比，无动力学 step，阶段 2）
 │   │   ├── rm65_model.xml             # MuJoCo XML 模型（双臂12DOF + 球拍 + 球）
 │   │   ├── r1d_arm_left.xml / r1d_arm_right.xml / r1d_env.xml / r1d_assets.xml  # R1D 官方 URDF 导出片段（build_r1d_model.py 生成，勿手改，阶段 2）
@@ -155,6 +157,9 @@ mujoco_sim/
 │   │   └── backward_pass.cpp          # 后向传递（纯代数 Riccati，栈上小矩阵高斯消元）
 │   ├── sim/                           # MuJoCo 仿真封装 + 回放 + 击打检测
 │   │   ├── __init__.py
+│   │   ├── configuration/             # V12 配置解析（types/validation/selection/defaults/overrides/resolution）
+│   │   ├── episode/                   # V12 回合阶段函数（types/preparation/assembly/hooks/post_hit/results/execution）
+│   │   ├── artifacts/                 # v2 产物/快照/回放（types/serialization/dependencies/snapshot/validation/materialization/replay）
 │   │   ├── env.py                     # MujocoEnv 基类
 │   │   ├── rm65_env.py                # RM65Env 双臂环境封装
 │   │   ├── viewer.py                  # 可视化工具
@@ -167,10 +172,10 @@ mujoco_sim/
 │   │   ├── env_factory.py             # build_r1d_environments 执行/规划双环境组装（阶段 3）
 │   │   ├── collision_checks.py        # has_forbidden_contact / ForbiddenContactChecker（禁止机身接触，阶段 3）
 │   │   ├── r1d_runner.py              # run_r1d_episode 旧 R1D 闭环入口（JSON/NPZ 产物，阶段 3；T5 后保留兼容）
-│   │   ├── v12_config.py              # resolve_v12_config：V12 统一配置解析/R1D 注册表/稀疏覆盖（T3）
+│   │   ├── v12_config.py              # 兼容 facade：resolve_v12_config/R1D_V12_REGISTRY
 │   │   ├── v12_robot_adapter.py       # build_v12_robot / V12RobotBundle / SimulationEnv：RM65/R1D 双环境适配（T4）
-│   │   ├── v12_episode.py             # run_v12_episode / V12EpisodeResult：V12 共享 Episode 管线（T5）
-│   │   └── episode_artifacts.py       # v12_episode_v2 产物、ContactEvent、快照/回放、资源哈希（T6）
+│   │   ├── v12_episode.py             # 兼容 facade：run_v12_episode / V12EpisodeResult
+│   │   └── episode_artifacts.py       # 兼容 facade：产物/snapshot/replay 入口
 │   ├── perception/                    # 感知模块（噪声+滤波）
 │   │   ├── __init__.py
 │   │   ├── ball_estimator.py          # 6D 卡尔曼滤波器（位置+速度，匀速+重力过程模型）
@@ -242,14 +247,14 @@ mujoco_sim/
 │   ├── run_real_robot.py                         # 真机入口
 │   ├── replay_trajectory.py                      # 轨迹回放脚本（含 --speed 安全检查）
 │   ├── sim/            # 独立仿真（fast/ilqt/train 等工具）
-│   ├── exp/            # 实验设施（活跃: exp9-15 包装·批量·运行器；含 run_r1d_paper_smoke.py）
-│   ├── extract/        # 结果提取（日志/产物→CSV/JSON；含 extract_r1d_smoke_stats.py）
-│   ├── plot/           # 论文图表（含 plot_r1d_smoke_stats.py per-case smoke 图）
+│   ├── exp/            # 实验设施（exp9-15 包装/批量/运行器；含 paper_smoke/ 子包与 run_r1d_paper_smoke.py facade）
+│   ├── extract/        # 结果提取（日志/产物→CSV/JSON；含 paired_analysis/ 子包与 paired_stats.py facade）
+│   ├── plot/           # 论文图表（含 paper/ 子包与 paper_figs.py facade；plot_r1d_smoke_stats.py）
 │   ├── tools/          # 独立工具 22 个（查看器·扫描·诊断·可视化·R1D 模型构建/预览/R1D 只读低速诊断/R1D 传输发布基准）
 │   ├── test/           # 快速验证 10 个
 │   ├── archive/        # ★ 已归档脚本（V6-V10 + tube + 旧实验，详见 archive/README.md）
 │   └── README.md       # 完整清单与说明
-├── tests/                             # 单元测试（全量结果以合并后实跑为准；2 个 C++ 测试文件因扩展 ABI 不匹配需 --ignore 排除，见 docs/experiments/reports/）
+├── tests/                             # 单元测试（全量 2600+；已知基线 14F+3E+7S，见 P0/F0 证据）
 │   ├── test_kinematics.py
 │   ├── test_linearize.py
 │   ├── test_mpc.py
@@ -339,6 +344,25 @@ mujoco_sim/
 ├── results/                          # 输出目录（日志、轨迹、视频）
 └── requirements.txt
 ```
+
+### 可维护性子包（2026-11-21）
+
+仿真/实验链路已拆为深子包，旧模块路径保留兼容 facade（同一对象，不复制实现）：
+
+| 关注点 | 推荐入口 | 兼容路径 |
+|---|---|---|
+| 模型文件依赖闭包 | `src.robot.model_assets` | `src.robot.model_factory` |
+| 模型装配 | `src.robot.model_building` | `src.robot.model_factory` |
+| V12 配置解析 | `src.sim.configuration` | `src.sim.v12_config` |
+| V12 回合编排 | `src.sim.episode` | `src.sim.v12_episode` |
+| 产物/快照/回放 | `src.sim.artifacts` | `src.sim.episode_artifacts` |
+| 论文 smoke | `scripts.exp.paper_smoke` | `scripts.exp.run_r1d_paper_smoke` |
+| 配对统计 | `scripts.extract.paired_analysis` | `scripts.extract.paired_stats` |
+| 论文图表 | `scripts.plot.paper` | `scripts.plot.paper_figs` |
+
+- 新代码优先 import 新包；改兼容路径时必须转发到同一对象，禁止第二份实现。
+- 依赖方向：`types ← 实现模块 ← facade`；`src/` 不得 import `scripts/`；`artifacts` 不反向依赖 `episode`；import 期不得加载模型/启动仿真/写文件。
+- 设计/验收记录见 `docs/architecture/2026-11-20-sim-experiment-decomposition-result.md`。
 
 ## Skills 参考
 

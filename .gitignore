@@ -31,8 +31,8 @@ MJDATA.TXT
 MUJOCO_LOG.TXT
 .mj_cache
 
-# 文档/参考资料（不入库）
-paper/
+# 文档/参考资料（不入库）；仅忽略仓库根目录，避免误伤 scripts/plot/paper/ 代码包
+/paper/
 /reference/
 plans/
 docs/superpowers/

@@ -90,7 +90,7 @@ python scripts/tools/test_real_robot/04_send_zero_pose.py        # 回零位
 ### 测试
 
 ```bash
-# 运行全部测试（1271 tests）
+# 运行全部测试（2600+ tests）
 pytest tests/
 
 # 代码检查
@@ -380,14 +380,20 @@ mujoco_sim/
 │   │   │   ├── _connect.py               # 公共连接/预检模块
 │   │   │   └── 01~08_*.py                # 逐个 API 测试脚本
 │   │   └── ...
-│   ├── exp/                              # 批量实验设施
-│   ├── extract/                          # 结果提取
-│   └── plot/                             # 论文图表
+│   ├── exp/                              # 批量实验设施 + paper_smoke/ 子包
+│   ├── extract/                          # 结果提取 + paired_analysis/ 子包
+│   └── plot/                             # 论文图表 + paper/ 子包
 │
 ├── src/
 │   ├── robot/
+│   │   ├── model_assets/                 # 模型文件依赖闭包（references/dependencies）
+│   │   ├── model_building/               # 模型装配（types/template/racket/scene/loading）
+│   │   ├── model_factory.py              # 兼容 facade
 │   │   └── rm65_model.xml                # MuJoCo 模型（双臂12DOF + 球拍 + 球）
 │   ├── sim/                               # MuJoCo 仿真 + 回放 + 击打检测
+│   │   ├── configuration/                # V12 配置解析（types/validation/selection/resolution）
+│   │   ├── episode/                      # V12 回合阶段函数 + V12EpisodeResult
+│   │   ├── artifacts/                    # v2 产物/快照/回放
 │   │   ├── rm65_env.py                   # RM65Env 仿真环境（力矩/位置双模式）
 │   │   ├── replay.py                     # 轨迹回放共享模块（碰撞窗口 + 弹性反弹）
 │   │   └── hit_detection.py              # 击打检测共享模块
@@ -418,13 +424,30 @@ mujoco_sim/
 │   ├── cpp/                              # C++ 加速（pybind11）
 │   └── utils/                            # 工具（模型加载/噪声注入/数学）
 │
-├── tests/                                # 单元测试（1271 tests）
+├── tests/                                # 单元测试（2600+ tests）
 ├── experiment_data/                      # 逐 episode 结果/日志/图表资产（跟踪子集）
 ├── docs/                                 # 技术文档
 └── paper/                                # 论文 LaTeX 工程（本地，不入库）
 ```
 
 > 详细模块说明见 [`src/README.md`](src/README.md)，脚本清单见 [`scripts/README.md`](scripts/README.md)
+
+### 可维护性子包（2026-11-21）
+
+仿真/实验链路已拆为深子包，旧模块路径保留兼容 facade（同一对象，不复制实现）：
+
+| 关注点 | 推荐入口 | 兼容路径 |
+|---|---|---|
+| 模型文件依赖闭包 | `src.robot.model_assets` | `src.robot.model_factory` |
+| 模型装配 | `src.robot.model_building` | `src.robot.model_factory` |
+| V12 配置解析 | `src.sim.configuration` | `src.sim.v12_config` |
+| V12 回合编排 | `src.sim.episode` | `src.sim.v12_episode` |
+| 产物/快照/回放 | `src.sim.artifacts` | `src.sim.episode_artifacts` |
+| 论文 smoke | `scripts.exp.paper_smoke` | `scripts.exp.run_r1d_paper_smoke` |
+| 配对统计 | `scripts.extract.paired_analysis` | `scripts.extract.paired_stats` |
+| 论文图表 | `scripts.plot.paper` | `scripts.plot.paper_figs` |
+
+完整设计/验收记录见 [`docs/architecture/2026-11-20-sim-experiment-decomposition-result.md`](docs/architecture/2026-11-20-sim-experiment-decomposition-result.md)。
 
 ---
 

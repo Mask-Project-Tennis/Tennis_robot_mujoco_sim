@@ -99,7 +99,7 @@ python scripts/tools/test_real_robot/04_send_zero_pose.py        # move to zero 
 ### Tests
 
 ```bash
-# Run the full test suite (1271 tests)
+# Run the full test suite (2600+ tests; 2586 passed / 7 skipped / 14 known failures: 3 Linux-only loader + 11 historical)
 pytest tests/
 
 # Linting
@@ -410,14 +410,23 @@ consumption.
 │   │   ├── rm65_joint_viewer.py          # joint-slider viewer
 │   │   ├── test_real_robot/              # interface test tools (01-08)
 │   │   └── ...
-│   ├── exp/                              # batch-experiment infrastructure
-│   ├── extract/                          # result extraction (paired_stats, aux_stats, ...)
-│   └── plot/                             # paper figures and tables (paper_figs.py)
+│   ├── exp/                              # batch experiments + paper_smoke/ subpackage
+│   ├── extract/                          # result extraction + paired_analysis/ subpackage
+│   └── plot/                             # paper figures/tables + paper/ subpackage
 │
 ├── src/
 │   ├── robot/
+│   │   ├── model_assets/                 # model-file dependency scanner (references/closure/missing)
+│   │   ├── model_building/               # model assembly (template/racket/scene/loading)
+│   │   ├── model_factory.py              # compatibility facade
 │   │   └── rm65_model.xml                # MuJoCo model (dual arm 12 DOF + racket + ball)
 │   ├── sim/                              # MuJoCo simulation + replay + hit detection
+│   │   ├── configuration/                # V12 config: types/validation/selection/resolution
+│   │   ├── episode/                      # V12 episode stage functions + result type
+│   │   ├── artifacts/                    # v2 artifact schema/snapshot/replay
+│   │   ├── v12_config.py                 # compatibility facade
+│   │   ├── v12_episode.py                # compatibility facade
+│   │   └── episode_artifacts.py          # compatibility facade
 │   ├── ilqt/                             # iLQR + MPC + pipeline + strategies + components
 │   │   ├── solver.py                     # iLQR backward-forward iteration
 │   │   ├── cost.py                       # cost terms (corridor + softmin)
@@ -433,13 +442,31 @@ consumption.
 │   ├── cpp/                              # C++ acceleration (pybind11)
 │   └── utils/                            # shared utilities (model loading / noise / math)
 │
-├── tests/                                # unit tests (1271)
+├── tests/                                # unit tests (2600+)
 ├── experiment_data/                      # per-episode results, logs, figure assets (tracked subset)
 ├── docs/                                 # technical documentation (Chinese)
 └── paper/                                # manuscript LaTeX project (local only, not tracked)
 ```
 
 > Module details: [`src/README.md`](src/README.md); script index: [`scripts/README.md`](scripts/README.md) (both Chinese).
+
+### Maintainability layout (2026-11-21)
+
+The simulation/experiment chain is split into deep subpackages while keeping the old
+module paths as compatibility facades (same objects, no second implementation):
+
+| Concern | Recommended import | Facade kept for compatibility |
+|---|---|---|
+| Model file dependency closure | `src.robot.model_assets` | `src.robot.model_factory` |
+| Model assembly | `src.robot.model_building` | `src.robot.model_factory` |
+| V12 config resolution | `src.sim.configuration` | `src.sim.v12_config` |
+| V12 episode orchestration | `src.sim.episode` | `src.sim.v12_episode` |
+| Episode artifacts / replay | `src.sim.artifacts` | `src.sim.episode_artifacts` |
+| Paper smoke batch | `scripts.exp.paper_smoke` | `scripts.exp.run_r1d_paper_smoke` |
+| Paired statistics | `scripts.extract.paired_analysis` | `scripts.extract.paired_stats` |
+| Paper figures/tables | `scripts.plot.paper` | `scripts.plot.paper_figs` |
+
+Design/acceptance record: [`docs/architecture/2026-11-20-sim-experiment-decomposition-result.md`](docs/architecture/2026-11-20-sim-experiment-decomposition-result.md).
 
 ---
 

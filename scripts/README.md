@@ -12,12 +12,24 @@
 |------|------|------|---------|
  | `scripts/` (根) | 7 | 活跃核心脚本 | `python scripts/xxx.py --args` |
 | `sim/` | 5 | 独立仿真（MPC/iLQR/Training/工具） | `python scripts/sim/xxx.py --args` |
-| `exp/` | ~21 | 活跃实验基础设施（exp9-15 + R1D 论文 smoke） | `python scripts/exp/xxx.py --args` |
-| `extract/` | 10 | 结果提取：日志/产物 → CSV/JSON | `python scripts/extract/xxx.py` |
-| `plot/` | 15 | 论文图表生成 + R1D per-case smoke 图 | `python scripts/plot/xxx.py` |
+| `exp/` | ~21 + 子包 | 活跃实验基础设施（exp9-15 + R1D 论文 smoke `paper_smoke/`） | `python scripts/exp/xxx.py --args` |
+| `extract/` | 10 + 子包 | 结果提取：日志/产物 → CSV/JSON（含 `paired_analysis/`） | `python scripts/extract/xxx.py` |
+| `plot/` | 15 + 子包 | 论文图表生成 + R1D per-case smoke 图（含 `paper/`） | `python scripts/plot/xxx.py` |
 | `tools/` | 22 | 独立工具（查看器·扫描·诊断·可视化·轨迹残影渲染·R1D 模型构建与预览·R1D 只读/低速诊断·R1D 传输发布基准） | `python scripts/tools/xxx.py` |
 | `test/` | 10 | 快速验证脚本 | `python scripts/test/xxx.py` |
 | `archive/` | 59 | 已归档（V6-V10 + tube + 旧实验 + 旧 sim 脚本） | 详见 `archive/README.md` |
+
+## 可维护性子包与兼容入口
+
+| 关注点 | 新入口 | 兼容入口 |
+|---|---|---|
+| 论文 smoke manifest/任务/续跑 | `scripts.exp.paper_smoke` | `scripts/exp/run_r1d_paper_smoke.py` |
+| 配对统计 | `scripts.extract.paired_analysis` | `scripts/extract/paired_stats.py` |
+| 论文图表 | `scripts.plot.paper` | `scripts/plot/paper_figs.py` |
+
+- 新代码优先 import 新包；兼容入口必须转发同一对象，禁止第二份实现。
+- `scripts/` 不得被 `src/` 反向 import；`batch_runner.py`/`run_catalog.py` 属主代理独占。
+- 详细说明见各子包 `README.md`。
 
 ## 根目录（7 个）
 
@@ -60,7 +72,7 @@ python scripts/rm65_mpc_v12.py \
 ## R1D × V12 Parity（阶段 4，2026-11-19）
 
 同一 `scripts/rm65_mpc_v12.py` 在 `--robot-config configs/robots/r1d_right.yaml` 时走
-`src/sim/v12_config.py` → `v12_robot_adapter.py` → `v12_episode.py` → `episode_artifacts.py`
+`src/sim/configuration` → `v12_robot_adapter.py` → `src/sim/episode` → `src/sim/artifacts`
 共享管线；无需再传旧三件套（注册表自动指向 `r1d_v12_runtime_right.yaml`/`r1d_v12.yaml`/
 `blade100_v9_reference.yaml`）。`--serve-box/--ball-speed/--position-mode/--seed/--no-plot/
 --async-replan/--racket-config/--task-overrides` 均可用于 R1D；旧 `--runtime-config/--sim-task-config`
